@@ -64,6 +64,7 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
             cd ${{ secrets.VM_PROJECT_PATH }}
+            git pull origin main
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker compose -f compose.prod.yml pull
             docker compose -f compose.prod.yml up -d

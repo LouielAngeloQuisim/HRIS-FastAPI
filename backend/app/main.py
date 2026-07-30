@@ -3,8 +3,8 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from starlette.middleware.cors import CORSMiddleware
 
-from app.api.main import api_router
-from app.core.config import settings
+from app.config.settings import settings
+from app.api import api_router
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:
@@ -13,7 +13,7 @@ def custom_generate_unique_id(route: APIRoute) -> str:
 
 if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
     sentry_sdk.init(
-        dsn=settings.SENTRY_DSN,
+        dsn=str(settings.SENTRY_DSN),
         environment=settings.ENVIRONMENT,
         send_default_pii=settings.ENVIRONMENT != "production",
         enable_logs=True,
@@ -21,7 +21,7 @@ if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
         profile_session_sample_rate=1.0 if settings.ENVIRONMENT != "production" else 0.1,
         profile_lifecycle="trace",
     )
-    
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",

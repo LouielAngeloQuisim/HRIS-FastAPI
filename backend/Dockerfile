@@ -20,6 +20,9 @@ WORKDIR /app/
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#using-the-environment
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Copy the backend workspace member FIRST so uv can resolve the "app" package
+COPY ./backend /app/backend
+
 # Install dependencies
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -27,12 +30,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-workspace --package app
 
+# Copy non-package runtime files
 COPY ./backend/scripts /app/scripts
-
 COPY ./backend/alembic.ini /app/
 COPY ./backend/alembic /app/alembic
 
-COPY ./backend/app /app/app
+
 
 # Sync the project
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
@@ -40,6 +43,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --package app
+
+COPY ./backend/app /app/app
 
 WORKDIR /app
 

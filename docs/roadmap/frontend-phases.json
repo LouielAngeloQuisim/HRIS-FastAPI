@@ -1,0 +1,347 @@
+{
+  "phases": [
+    {
+      "id": "f0",
+      "title": "Phase 0 — Scaffold & Design Tokens",
+      "estimate": "1 wk",
+      "riskLevel": "normal",
+      "dependsOn": null,
+      "items": [
+        {
+          "text": "Confirm frontendv3 Shadcn Admin Dashboard base",
+          "done": true
+        },
+        {
+          "text": "Tailwind config tokens: custom (blue) + zink ramp",
+          "done": false
+        },
+        {
+          "text": "Public Sans font + named spacings (header, vertical-menu)",
+          "done": false
+        },
+        {
+          "text": "Theme toggle (light/dark)",
+          "done": true
+        },
+        {
+          "text": "Sidebar shell + topbar + notification drawer wired to UI store",
+          "done": false
+        }
+      ],
+      "testsRequired": [
+        "Theme toggle persists across reload",
+        "Layout renders without console errors",
+        "Responsive breakpoints don't break the shell"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f1",
+      "title": "Phase 1 — Auth & Shell",
+      "estimate": "1 wk",
+      "riskLevel": "normal",
+      "dependsOn": "f0",
+      "items": [
+        {
+          "text": "Login / forgot / reset password pages",
+          "done": false
+        },
+        {
+          "text": "Auth context + token storage (no plaintext token exposed)",
+          "done": true
+        },
+        {
+          "text": "API client interceptor, /auth/me call",
+          "done": true
+        },
+        {
+          "text": "useCan() + <Can> permission hook/component",
+          "done": false
+        },
+        {
+          "text": "Permission-driven sidebar rendering",
+          "done": true
+        },
+        {
+          "text": "Logout flow",
+          "done": true
+        }
+      ],
+      "testsRequired": [
+        "Login success/failure states",
+        "Token refresh on 401",
+        "useCan() hides/shows a gated nav item for a mocked low-privilege role",
+        "Logout clears session state"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f2",
+      "title": "Phase 2 — CRUD Foundation",
+      "estimate": "2 wks",
+      "riskLevel": "normal",
+      "dependsOn": "f1",
+      "items": [
+        {
+          "text": "<DataTable>, <Modal>, form primitives, toast/confirm wrappers",
+          "done": true
+        },
+        {
+          "text": "First CRUD pages: Division, Department, Shifts, Employee Settings",
+          "done": false
+        },
+        {
+          "text": "Employee masterlist + profile + CSV import",
+          "done": false
+        }
+      ],
+      "testsRequired": [
+        "DataTable sorting/pagination tests",
+        "Modal open/close/focus-trap tests",
+        "One full CRUD flow test: create, appears in table, edit, delete"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f3",
+      "title": "Phase 3 — Org / Projects / RBAC",
+      "estimate": "1–2 wks",
+      "riskLevel": "normal",
+      "dependsOn": "f2",
+      "items": [
+        {
+          "text": "Subdivisions, Phase, Owner, Models, Model Types",
+          "done": false
+        },
+        {
+          "text": "Employee Projects, Manpower, Subdivision Wizard",
+          "done": false
+        },
+        {
+          "text": "Roles & Access editor (RBAC UI)",
+          "done": false
+        }
+      ],
+      "testsRequired": [
+        "RBAC editor: assigning a permission reflects in a mocked useCan() check",
+        "Subdivision Wizard multi-step state test: data isn't lost between steps"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f4a",
+      "title": "Phase 4A — Attendance/Leave read views",
+      "estimate": "part of 2 wks",
+      "riskLevel": "high",
+      "dependsOn": "f3",
+      "items": [
+        {
+          "text": "Daily Time Records table",
+          "done": false
+        },
+        {
+          "text": "Leave Calendar",
+          "done": false
+        },
+        {
+          "text": "Employee Leave ledger display",
+          "done": false
+        },
+        {
+          "text": "Holiday Configuration display",
+          "done": false
+        },
+        {
+          "text": "Confirm no client-side recomputation of rendered/late/undertime/OT anywhere",
+          "done": false
+        }
+      ],
+      "testsRequired": [
+        "Test asserting DTR table renders backend-supplied numbers unmodified",
+        "Empty/loading/error states for each view"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f4b",
+      "title": "Phase 4B — Attendance/Leave approval actions",
+      "estimate": "part of 2 wks",
+      "riskLevel": "high",
+      "dependsOn": "f4a",
+      "items": [
+        {
+          "text": "Overtime Request create/approve",
+          "done": false
+        },
+        {
+          "text": "Leave Request create/approve",
+          "done": false
+        },
+        {
+          "text": "DTR adjustment submission",
+          "done": false
+        }
+      ],
+      "testsRequired": [
+        "Approval action sends correct payload and reflects server's resulting state (not optimistic guess)",
+        "Permission guard test on approve/reject buttons for a low-privilege mocked user"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f5a",
+      "title": "Phase 5A — Payroll & gov-contribution config editors",
+      "estimate": "part of 2 wks",
+      "riskLevel": "high",
+      "dependsOn": "f4b",
+      "items": [
+        {
+          "text": "SSS config editor",
+          "done": false
+        },
+        {
+          "text": "Pag-IBIG config editor",
+          "done": false
+        },
+        {
+          "text": "BIR config editor",
+          "done": false
+        },
+        {
+          "text": "PhilHealth config editor",
+          "done": false
+        },
+        {
+          "text": "ALPMC Sync page (super-admin only)",
+          "done": false
+        }
+      ],
+      "testsRequired": [
+        "Config editor form validation tests",
+        "Super-admin-only route guard test on the Sync page"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f5b",
+      "title": "Phase 5B — Payroll generation UI",
+      "estimate": "part of 2 wks",
+      "riskLevel": "high",
+      "dependsOn": "f5a",
+      "items": [
+        {
+          "text": "Payroll generation trigger",
+          "done": false
+        },
+        {
+          "text": "Payslip view",
+          "done": false
+        },
+        {
+          "text": "YTD view",
+          "done": false
+        },
+        {
+          "text": "Payroll Reports",
+          "done": false
+        },
+        {
+          "text": "Confirm preview shown in UI is the same API response used for generation",
+          "done": false
+        }
+      ],
+      "note": "Cross-project dependency: the f5b chain implicitly assumes the backend payroll phases (b4a / b4b / b4c) are complete first. The tracker does not enforce this automatically — it is a manual coordination point between the two rewrites.",
+      "testsRequired": [
+        "Payslip renders all backend fields without client-side rounding/recalculation",
+        "Generation-trigger disabled state while request is in flight (prevents duplicate submission)"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f5c",
+      "title": "Phase 5C — Verification gate",
+      "estimate": "part of 2 wks",
+      "riskLevel": "high",
+      "dependsOn": "f5b",
+      "items": [
+        {
+          "text": "Audit every payroll/config UI value traces to a single backend field",
+          "done": false
+        },
+        {
+          "text": "Confirm no derived/recalculated money math exists in the frontend",
+          "done": false
+        }
+      ],
+      "testsRequired": [
+        "Automated check (lint rule or grep-based test) for arithmetic operators near currency-typed props/fields — hard gate before Phase 6"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f6",
+      "title": "Phase 6 — Dashboard & Polish",
+      "estimate": "1 wk",
+      "riskLevel": "normal",
+      "dependsOn": "f5c",
+      "items": [
+        {
+          "text": "Dashboard KPI tiles (ApexCharts/Recharts) + animated counters",
+          "done": false
+        },
+        {
+          "text": "Breadcrumbs",
+          "done": false
+        },
+        {
+          "text": "Empty / loading / error states sweep",
+          "done": false
+        },
+        {
+          "text": "Responsive pass",
+          "done": false
+        },
+        {
+          "text": "Accessibility pass",
+          "done": false
+        }
+      ],
+      "testsRequired": [
+        "KPI tiles render backend-supplied numbers unmodified",
+        "Keyboard navigation / focus-visible test",
+        "Automated a11y scan (e.g. axe) passes on core pages"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "f7",
+      "title": "Phase 7 — Cutover",
+      "estimate": "—",
+      "riskLevel": "normal",
+      "dependsOn": "f6",
+      "items": [
+        {
+          "text": "Point API client at new FastAPI backend",
+          "done": false
+        },
+        {
+          "text": "Parity check key flows: login, generate payroll, file leave",
+          "done": false
+        },
+        {
+          "text": "Remove dead boilerplate",
+          "done": false
+        },
+        {
+          "text": "Retire the Symfony frontend",
+          "done": false
+        }
+      ],
+      "testsRequired": [
+        "End-to-end smoke test for login/generate-payroll/file-leave against the real new backend",
+        "Confirm no leftover calls to the old API base URL remain in the codebase"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    }
+  ]
+}

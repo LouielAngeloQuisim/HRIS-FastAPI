@@ -1,0 +1,13 @@
+{
+  "name": "hris-roadmap-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Live-reload dev server for docs/roadmap-tracker.html (isolated from the main project).",
+  "scripts": {
+    "start": "live-server --port=7788 --host=0.0.0.0 --open=roadmap-tracker.html --watch=roadmap-tracker.html,roadmap/backend-phases.json,roadmap/frontend-phases.json",
+    "roadmap": "live-server --port=7788 --host=0.0.0.0 --open=roadmap-tracker.html --watch=roadmap-tracker.html,roadmap/backend-phases.json,roadmap/frontend-phases.json"
+  },
+  "devDependencies": {
+    "live-server": "^1.2.2"
+  }
+}

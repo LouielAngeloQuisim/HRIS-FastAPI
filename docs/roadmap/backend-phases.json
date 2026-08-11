@@ -1,0 +1,207 @@
+{
+  "phases": [
+    {
+      "id": "b0",
+      "title": "Phase 0 — Foundation",
+      "estimate": "1–2 wks",
+      "riskLevel": "normal",
+      "dependsOn": null,
+      "items": [
+        { "text": "Extend hris-python/backend scaffold (settings, Postgres engine, Alembic)", "done": true },
+        { "text": "PyJWT + pwdlib auth: access + refresh tokens, real logout/revocation", "done": true },
+        { "text": "Rate limiting on login/reset endpoints", "done": true },
+        { "text": "require_permission(module, action) RBAC dependency, enforced on every route", "done": true },
+        { "text": "Seed modules/submodules/role codes", "done": true },
+        { "text": "Base response model, pagination, error format, audit middleware", "done": true }
+      ],
+      "testsRequired": [
+        "Auth flow: login / refresh / logout / expired-token rejection",
+        "RBAC dependency: low-privilege token blocked from gated route",
+        "Rate-limit trigger test"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b1",
+      "title": "Phase 1 — Employee core + Org structure",
+      "estimate": "2 wks",
+      "riskLevel": "normal",
+      "dependsOn": "b0",
+      "items": [
+        { "text": "EmployeeRecords + additional records + attachments", "done": true },
+        { "text": "Department, Division, Subdivision, Position CRUD", "done": true },
+        { "text": "Construction/manpower domain: Project, Phase, Blocks, Lots, Model, ModelTypes, Owner, Category", "done": true },
+        { "text": "EmployeeProjects, EmpTask", "done": true },
+        { "text": "Users/UserType CRUD gated by enforced RBAC", "done": true },
+        { "text": "Dashboard KPI endpoints", "done": true }
+      ],
+      "testsRequired": [
+        "CRUD tests per resource (create/read/update/soft-delete)",
+        "Test confirming a user cannot escalate their own role"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b2a",
+      "title": "Phase 2A — Attendance/DTR time math core",
+      "estimate": "part of 2–3 wks",
+      "riskLevel": "high",
+      "dependsOn": "b1",
+      "items": [
+        { "text": "Shared calculation module: rendered minutes, late, undertime, absence, OT", "done": false },
+        { "text": "Documented decision on lunch deduction (fixed vs configurable)", "done": false }
+      ],
+      "testsRequired": [
+        "Unit tests against hand-defined expected values for each scenario class: on-time, late, undertime, absent, with/without OT, with lunch deduction",
+        "Boundary tests: exact-boundary late minutes, zero-render days"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b2b",
+      "title": "Phase 2B — Sync + endpoints + approval flow",
+      "estimate": "part of 2–3 wks",
+      "riskLevel": "high",
+      "dependsOn": "b2a",
+      "items": [
+        { "text": "Biometric sync reader (parameterized queries)", "done": false },
+        { "text": "DTR adjustment approval flow", "done": false },
+        { "text": "Overtime approval with role gate", "done": false }
+      ],
+      "testsRequired": [
+        "Sync reader tested against a mock device DB",
+        "Approval-flow state transition tests",
+        "Permission gate test on approval endpoints"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b3",
+      "title": "Phase 3 — Leave & Holidays",
+      "estimate": "1–2 wks",
+      "riskLevel": "normal",
+      "dependsOn": "b2b",
+      "items": [
+        { "text": "LeavePolicy, YearlyEmployeeLeave, SelectedEmployeeLeaves ledger", "done": false },
+        { "text": "Leave request lifecycle + approval, server-authoritative actor", "done": false },
+        { "text": "Idempotent approval (no double-debit on re-approval)", "done": false },
+        { "text": "Holiday configuration + date-check, explicit holiday pay decision", "done": false },
+        { "text": "Decide: keep no-accrual/no-carryover, or modernize the ledger", "done": false }
+      ],
+      "testsRequired": [
+        "Ledger math tests (accrual/deduction per defined policy)",
+        "Idempotency test: approve same request twice results in single debit",
+        "Actor-spoofing test: client-supplied updated_by is ignored/overridden"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b4a",
+      "title": "Phase 4A — Government contribution calculators",
+      "estimate": "part of 3–4 wks",
+      "riskLevel": "high",
+      "dependsOn": "b3",
+      "items": [
+        { "text": "SSS calculator as standalone function", "done": false },
+        { "text": "PhilHealth calculator as standalone function", "done": false },
+        { "text": "Pag-IBIG calculator as standalone function", "done": false },
+        { "text": "BIR withholding tax calculator as standalone function", "done": false },
+        { "text": "Verify all four against current official published bracket tables", "done": false }
+      ],
+      "testsRequired": [
+        "One test per bracket boundary (just under / at / just over each threshold) for all four calculators",
+        "At least one official worked example per calculator where published"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b4b",
+      "title": "Phase 4B — Payroll generation",
+      "estimate": "part of 3–4 wks",
+      "riskLevel": "high",
+      "dependsOn": "b4a",
+      "items": [
+        { "text": "Shared function for both preview and generation (no divergence)", "done": false },
+        { "text": "Explicit semi-monthly dues halving policy, implemented once", "done": false },
+        { "text": "Loan amortization logic", "done": false },
+        { "text": "13th-month calculation", "done": false },
+        { "text": "Payroll groups (cutoff windows), payslip, YTD", "done": false }
+      ],
+      "testsRequired": [
+        "Preview and generation return identical output for the same input",
+        "Loan amortization correctness tests",
+        "13th-month formula tests"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b4c",
+      "title": "Phase 4C — Verification gate",
+      "estimate": "part of 3–4 wks",
+      "riskLevel": "high",
+      "dependsOn": "b4b",
+      "items": [
+        { "text": "Define payroll test scenarios: salary bands × loans × OT × cutoff type", "done": false },
+        { "text": "Manually verify expected net pay per scenario", "done": false },
+        { "text": "Check scenario suite into the codebase as the permanent regression suite", "done": false }
+      ],
+      "testsRequired": [
+        "100% of defined payroll scenarios pass — this is a hard gate, Phase 6 cannot start until this is complete"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b5",
+      "title": "Phase 5 — Notifications, Audit, Reports, Polish",
+      "estimate": "1–2 wks",
+      "riskLevel": "normal",
+      "dependsOn": "b4c",
+      "items": [
+        { "text": "In-app + email notifications, no hardcoded recipients", "done": false },
+        { "text": "Audit trail redacts sensitive fields, is queryable", "done": false },
+        { "text": "Any additional reports", "done": false }
+      ],
+      "testsRequired": [
+        "Audit log redaction test: confirm no plaintext password is ever written",
+        "Notification trigger tests"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b6",
+      "title": "Phase 6 — Data Migration & Cutover",
+      "estimate": "1–2 wks",
+      "riskLevel": "normal",
+      "dependsOn": "b4c",
+      "items": [
+        { "text": "Clean new schema (sensible snake_case names, no legacy artifacts)", "done": false },
+        { "text": "ETL script with documented column mapping, legacy MySQL (read-only) → new Postgres", "done": false },
+        { "text": "Historical payroll records migrate as read-only, not recalculated under new rules", "done": false }
+      ],
+      "testsRequired": [
+        "ETL row-count/checksum validation per table",
+        "Spot-check test that migrated historical payroll records are untouched by new calculation logic"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    },
+    {
+      "id": "b7",
+      "title": "Phase 7 — Hardening",
+      "estimate": "—",
+      "riskLevel": "normal",
+      "dependsOn": "b6",
+      "items": [
+        { "text": "Pen-test the Phase 0 auth/RBAC fixes", "done": false },
+        { "text": "Load test payroll generation", "done": false },
+        { "text": "Backup/restore drill", "done": false },
+        { "text": "Remove legacy system", "done": false }
+      ],
+      "testsRequired": [
+        "Automated authorization test suite: every gated route tested with a low-privilege token",
+        "Load test with defined pass/fail thresholds",
+        "Backup/restore drill documented as a repeatable test"
+      ],
+      "definitionOfDone": "All tests above pass before phase is marked complete"
+    }
+  ]
+}

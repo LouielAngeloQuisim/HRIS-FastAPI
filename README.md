@@ -210,11 +210,43 @@ The input variables, with their default values (some auto generated) are:
 
 Backend docs: [backend/README.md](./backend/README.md).
 
+
 ## Frontend Development
 
 Frontend docs: [frontend/README.md](./frontend/README.md).
 
+### Frontend v3 (frontendv3)
+
+The new React frontend lives in [`frontendv3/`](./frontendv3/). Run the dev server from that directory:
+
+```bash
+cd frontendv3 && pnpm run dev   # http://localhost:5173
+```
+
+Its browser (vitest + Playwright) tests need a few Chromium runtime libraries
+(`libnspr4`, `libnss3`, `libasound2`) that some dev/CI images lack. There is no
+devcontainer, and `/tmp` does not persist between sessions, so this is set up
+explicitly instead of as a manual one-off:
+
+```bash
+cd frontendv3 && bash scripts/setup-playwright-libs.sh
+LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH" pnpm test
+```
+
+Run `scripts/setup-playwright-libs.sh` once after a fresh environment. It
+downloads and extracts the `.deb` files (no sudo needed).
+
+## Local Setup Gotchas
+
+- **DB password:** `POSTGRES_PASSWORD` in `.env` is read by both Docker
+  Compose (which unescapes `$$` → `$`) and pydantic-settings (which pytest /
+  host processes read literally). A password containing a literal `$` cannot be
+  represented in a way both consumers agree on. Use a **`$`-free**
+  `POSTGRES_PASSWORD` value in local `.env` to avoid the conflict entirely (no
+  escaping needed).
+
 ## Deployment
+
 
 Deployment docs: [deployment.md](./deployment.md).
 

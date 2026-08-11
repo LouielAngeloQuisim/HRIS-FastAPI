@@ -49,6 +49,11 @@ class UpdatePassword(SQLModel):
 class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     hashed_password: str
+    # Links the user to their RBAC role (the legacy `user_type` FK). Nullable
+    # so the bootstrap superuser can exist before any role is seeded.
+    role_id: uuid.UUID | None = Field(
+        default=None, foreign_key="role.id", index=True, ondelete="SET NULL"
+    )
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
@@ -59,6 +64,7 @@ class User(UserBase, table=True):
 # Properties to return via API, id is always required
 class UserPublic(UserBase):
     id: uuid.UUID
+    role_id: uuid.UUID | None = None
     created_at: datetime | None = None
 
 

@@ -259,7 +259,10 @@ def test_get_non_existing_user_as_superuser(
         headers=superuser_token_headers,
     )
     assert r.status_code == 404
-    assert r.json() == {"detail": "User not found"}
+    body = r.json()
+    assert body["success"] is False
+    assert body["detail"] == "User not found"
+    assert body["error"]["type"] == "http_error"
 
 
 def test_get_existing_user_current_user(client: TestClient, db: Session) -> None:
@@ -301,7 +304,10 @@ def test_get_existing_user_permissions_error(
         headers=normal_user_token_headers,
     )
     assert r.status_code == 403
-    assert r.json() == {"detail": "The user doesn't have enough privileges"}
+    body = r.json()
+    assert body["success"] is False
+    assert body["detail"] == "The user doesn't have enough privileges"
+    assert body["error"]["type"] == "http_error"
 
 
 def test_get_non_existing_user_permissions_error(
@@ -315,7 +321,10 @@ def test_get_non_existing_user_permissions_error(
         headers=normal_user_token_headers,
     )
     assert r.status_code == 403
-    assert r.json() == {"detail": "The user doesn't have enough privileges"}
+    body = r.json()
+    assert body["success"] is False
+    assert body["detail"] == "The user doesn't have enough privileges"
+    assert body["error"]["type"] == "http_error"
 
 
 def test_create_user_existing_username(
@@ -489,14 +498,22 @@ def test_update_password_me_same_password_error(
     )
 
 
-def test_register_user(client: TestClient, db: Session) -> None:
+def test_register_user_requires_admin(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    """Q12: /users/signup is admin-gated, not public."""
     username = random_email()
     password = random_lower_string()
     full_name = random_lower_string()
     data = {"email": username, "password": password, "full_name": full_name}
+
+    # Unauthenticated -> 401.
+    r = client.post(f"{settings.API_V1_STR}/users/signup", json=data)
+    assert r.status_code == 401
+
+    # Admin/superuser -> creates the user.
     r = client.post(
-        f"{settings.API_V1_STR}/users/signup",
-        json=data,
+        f"{settings.API_V1_STR}/users/signup", json=data, headers=superuser_token_headers
     )
     assert r.status_code == 200
     created_user = r.json()
@@ -512,7 +529,9 @@ def test_register_user(client: TestClient, db: Session) -> None:
     assert verified
 
 
-def test_register_user_already_exists_error(client: TestClient) -> None:
+def test_register_user_already_exists_error(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
     password = random_lower_string()
     full_name = random_lower_string()
     data = {
@@ -523,6 +542,7 @@ def test_register_user_already_exists_error(client: TestClient) -> None:
     r = client.post(
         f"{settings.API_V1_STR}/users/signup",
         json=data,
+        headers=superuser_token_headers,
     )
     assert r.status_code == 400
     assert r.json()["detail"] == "The user with this email already exists in the system"

@@ -12,6 +12,8 @@ class Token(SQLModel):
 
 class TokenPayload(SQLModel):
     sub: str | None = None
+    jti: str | None = None
+    type: str | None = None
 
 
 class NewPassword(SQLModel):

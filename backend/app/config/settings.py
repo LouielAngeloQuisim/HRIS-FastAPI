@@ -1,7 +1,6 @@
-from pathlib import Path
-
 import secrets
 import warnings
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -36,8 +35,14 @@ class Settings(BaseSettings):
     )
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = secrets.token_urlsafe(32)
-    # 60 minutes * 24 hours * 8 days = 8 days
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
+    # Short-lived access token. Phase 0 decision: 30 minutes (roadmap §2.2 allows
+    # 15-60 min). Access tokens are validated by signature alone and cannot be
+    # revoked individually, so the window is deliberately small; continuity comes
+    # from the refresh token below.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # Refresh tokens are stored server-side (hashed) and rotated on every use,
+    # which is what makes real logout/revocation possible.
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     FRONTEND_HOST: str = "http://localhost:5173"
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
 
@@ -60,6 +65,16 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = ""
     POSTGRES_DB: str = ""
 
+    # --- Engine tuning -----------------------------------------------------
+    # pool_pre_ping avoids handing out connections that the server has already
+    # dropped; connect_timeout stops a dead DB from hanging requests (and test
+    # runs) for the OS-default TCP timeout.
+    POSTGRES_POOL_SIZE: int = 5
+    POSTGRES_MAX_OVERFLOW: int = 10
+    POSTGRES_POOL_RECYCLE_SECONDS: int = 1800
+    POSTGRES_CONNECT_TIMEOUT_SECONDS: int = 10
+    SQLALCHEMY_ECHO: bool = False
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> PostgresDsn:
@@ -71,6 +86,53 @@ class Settings(BaseSettings):
             port=self.POSTGRES_PORT,
             path=self.POSTGRES_DB,
         )
+
+    # --- Auth / rate limiting ----------------------------------------------
+    # Phase 0 decision: 5 attempts per 15 minutes, keyed on client IP *and* the
+    # submitted identifier, so an attacker cannot lock a legitimate user out of
+    # their own account by hammering it from a different address.
+    LOGIN_RATE_LIMIT_ATTEMPTS: int = 5
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 15 * 60
+    RATE_LIMIT_ENABLED: bool = True
+
+    # Request bodies are audited; these keys are redacted before anything is
+    # written. The legacy system logged raw request bodies including plaintext
+    # passwords (roadmap §5) - that must never happen here.
+    AUDIT_REDACTED_FIELDS: Annotated[list[str] | str, BeforeValidator(parse_cors)] = [
+        "password",
+        "new_password",
+        "current_password",
+        "hashed_password",
+        "token",
+        "access_token",
+        "refresh_token",
+        "secret",
+        "authorization",
+        "api_key",
+        # Phase 1: 201-file (EmployeeAdditionalRecords) government IDs / PII are
+        # sensitive; the legacy system logged these in clear text (roadmap §5).
+        "sss_number",
+        "tin_number",
+        "philhealth_number",
+        "pagibig_number",
+        "cash_card_number",
+        "hmo_account",
+        "violations",
+        "medical_drug_tests",
+        "dependents",
+    ]
+
+    # Audit middleware: logs method/path/status/user/duration with redacted
+    # bodies. The DB sink (a queryable trail) lands in Phase 5; for Phase 0 the
+    # logging sink is authoritative and the DB sink is off by default so no
+    # migration is required to boot.
+    AUDIT_ENABLED: bool = True
+    AUDIT_DB_SINK: bool = False
+    AUDIT_BODY_MAX_BYTES: int = 4096
+
+    # Uploaded 201-file documents are stored here (never in the public web root
+    # or as DB blobs); only the resulting path is persisted on the record.
+    FILE_UPLOAD_DIR: str = "/tmp/hris-uploads"
 
     SMTP_TLS: bool = True
     SMTP_SSL: bool = False

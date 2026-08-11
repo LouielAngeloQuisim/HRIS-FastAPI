@@ -7,11 +7,13 @@ from sqlalchemy import engine_from_config, pool
 config = context.config
 fileConfig(config.config_file_name)
 
-from app.user.models import User  # noqa
-from app.item.models import Item  # noqa
+# Importing the registry registers every table on SQLModel.metadata. Add new
+# models to app/models.py, not here, so create_all and autogenerate agree.
+import app.models  # noqa
 from app.config.settings import settings  # noqa
+from sqlmodel import SQLModel  # noqa
 
-target_metadata = User.metadata
+target_metadata = SQLModel.metadata
 
 
 def get_url():

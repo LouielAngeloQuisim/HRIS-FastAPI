@@ -2,25 +2,33 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import col, delete, func, select
+from pydantic import Field
+from sqlmodel import SQLModel, col
 
-from app.common.dependencies import CurrentUser, SessionDep, get_current_active_superuser
+from app.common.dependencies import (
+    CurrentUser,
+    SessionDep,
+    get_current_active_superuser,
+)
 from app.common.security import get_password_hash, verify_password
 from app.config.settings import settings
 from app.item.models import Item
+from app.rbac.dependencies import require_permission
+from app.rbac.selectors import get_role_by_code
 from app.user.models import User
 from app.user.schemas import (
+    Message,
+    UpdatePassword,
     UserCreate,
     UserPublic,
-    UsersPublic,
     UserRegister,
+    UsersPublic,
     UserUpdate,
     UserUpdateMe,
-    UpdatePassword,
-    Message,
 )
 from app.user.selectors import get_user_by_email, get_users
-from app.user.services import create_user, update_user as update_user_service, delete_user
+from app.user.services import create_user
+from app.user.services import update_user as update_user_service
 from app.utils import generate_new_account_email, send_email
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -112,8 +120,13 @@ def delete_user_me(session: SessionDep, current_user: CurrentUser) -> Any:
     return Message(message="User deleted successfully")
 
 
-@router.post("/signup", response_model=UserPublic)
+@router.post(
+    "/signup",
+    response_model=UserPublic,
+    dependencies=[Depends(require_permission("administration", "add"))],
+)
 def register_user(session: SessionDep, user_in: UserRegister) -> Any:
+    """Q12: admin-gated. Not publicly reachable; removed from PUBLIC_ROUTES."""
     user = get_user_by_email(session=session, email=user_in.email)
     if user:
         raise HTTPException(
@@ -123,6 +136,40 @@ def register_user(session: SessionDep, user_in: UserRegister) -> Any:
     user_create = UserCreate.model_validate(user_in)
     user = create_user(session=session, user_create=user_create)
     return user
+
+
+class RoleAssignIn(SQLModel):
+    role_code: str = Field(min_length=1, max_length=32)
+
+
+@router.post(
+    "/{user_id}/role",
+    response_model=UserPublic,
+    dependencies=[Depends(require_permission("administration", "edit"))],
+)
+def assign_user_role(
+    *, session: SessionDep, user_id: uuid.UUID, body: RoleAssignIn, current_user: CurrentUser
+) -> Any:
+    """Role assignment is admin-only and the ONLY path that sets a role.
+
+    No user-update schema carries role_id, so this dedicated endpoint closes the
+    legacy UsersController::updateUser escalation vector (design §3).
+    """
+    db_user = session.get(User, user_id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    role = get_role_by_code(session=session, code=body.role_code)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Role not found")
+    if role.is_system and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=403, detail="Cannot assign a system role without superuser rights"
+        )
+    db_user.role_id = role.id
+    session.add(db_user)
+    session.commit()
+    session.refresh(db_user)
+    return db_user
 
 
 @router.get("/{user_id}", response_model=UserPublic)
@@ -181,8 +228,7 @@ def delete_user_route(
         raise HTTPException(
             status_code=403, detail="Super users are not allowed to delete themselves"
         )
-    from app.item.models import Item
-    from sqlmodel import delete as sql_delete, col
+    from sqlmodel import delete as sql_delete
     statement = sql_delete(Item).where(col(Item.owner_id) == user_id)
     session.exec(statement)  # type: ignore
     session.delete(user)

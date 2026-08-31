@@ -1,265 +1,146 @@
-# Full Stack FastAPI Template
+# HRIS — Human Resource Information System
 
-<a href="https://github.com/fastapi/full-stack-fastapi-template/actions?query=workflow%3A%22Test+Docker+Compose%22" target="_blank"><img src="https://github.com/fastapi/full-stack-fastapi-template/workflows/Test%20Docker%20Compose/badge.svg" alt="Test Docker Compose"></a>
-<a href="https://github.com/fastapi/full-stack-fastapi-template/actions?query=workflow%3A%22Test+Backend%22" target="_blank"><img src="https://github.com/fastapi/full-stack-fastapi-template/workflows/Test%20Backend/badge.svg" alt="Test Backend"></a>
-<a href="https://coverage-badge.samuelcolvin.workers.dev/redirect/fastapi/full-stack-fastapi-template" target="_blank"><img src="https://coverage-badge.samuelcolvin.workers.dev/fastapi/full-stack-fastapi-template.svg" alt="Coverage"></a>
+A full-stack HRIS application built with FastAPI + React, covering core HR workflows: employee records, attendance, payroll, leave management, and organizational structure.
 
-## Technology Stack and Features
+## Technology Stack
 
-- ⚡ [**FastAPI**](https://fastapi.tiangolo.com) for the Python backend API.
-  - 🧰 [SQLModel](https://sqlmodel.tiangolo.com) for the Python SQL database interactions (ORM).
-  - 🔍 [Pydantic](https://docs.pydantic.dev), used by FastAPI, for the data validation and settings management.
-  - 💾 [PostgreSQL](https://www.postgresql.org) as the SQL database.
-- 🚀 [React](https://react.dev) for the frontend.
-  - 💃 Using TypeScript, hooks, [Vite](https://vitejs.dev), and other parts of a modern frontend stack.
-  - 🎨 [Tailwind CSS](https://tailwindcss.com) and [shadcn/ui](https://ui.shadcn.com) for the frontend components.
-  - 🤖 An automatically generated frontend client.
-  - 🧪 [Playwright](https://playwright.dev) for End-to-End testing.
-  - 🦇 Dark mode support.
-- 🐋 [Docker Compose](https://www.docker.com) for development and production.
-- 🔒 Secure password hashing by default.
-- 🔑 JWT (JSON Web Token) authentication.
-- 📫 Email based password recovery.
-- 📬 [Mailcatcher](https://mailcatcher.me) for local email testing during development.
-- ✅ Tests with [Pytest](https://pytest.org).
-- 📞 [Traefik](https://traefik.io) as a reverse proxy / load balancer.
-- 🚢 Deployment instructions using Docker Compose, including how to set up a frontend Traefik proxy to handle automatic HTTPS certificates.
-- 🏭 CI (continuous integration) and CD (continuous deployment) based on GitHub Actions.
+### Backend (`backend/`)
+- [**FastAPI**](https://fastapi.tiangolo.com) — Python web API
+- [**SQLModel**](https://sqlmodel.tiangolo.com) — ORM (SQLAlchemy + Pydantic)
+- [**Alembic**](https://alembic.sqlalchemy.org) — database migrations
+- **PostgreSQL 18** — database
+- **Custom JWT auth** — access + rotating refresh tokens, Argon2 password hashing
+- **RBAC** — permission-based access control with role/seat assignment
+- **pytest** — 275 tests (backend)
 
-### Dashboard Login
+### Frontend (`frontendv3/`)
+- [**React 19**](https://react.dev) + [**TypeScript**](https://www.typescriptlang.org)
+- [**Vite**](https://vite.dev) — build tool
+- [**TanStack Router**](https://tanstack.com/router) — file-based routing
+- [**TanStack Query**](https://tanstack.com/query) — server state
+- [**Tailwind CSS v4**](https://tailwindcss.com) + [**shadcn/ui**](https://ui.shadcn.com) — UI components
+- [**Zustand**](https://zustand-demo.pmnd.rs) — client state
+- **Axios** — HTTP client
+- **Vitest + Playwright** — 187 browser-mode tests
 
-[![API docs](img/login.png)](https://github.com/fastapi/full-stack-fastapi-template)
+### Infrastructure
+- **Docker Compose** — development + production
+- **Traefik 3** — reverse proxy / load balancer
+- **GitHub Actions** — CI/CD with automatic deploy to staging
 
-### Dashboard - Admin
+## Features
 
-[![API docs](img/dashboard.png)](https://github.com/fastapi/full-stack-fastapi-template)
+### Completed Modules
 
-### Dashboard - Items
+| Module | Status |
+|--------|--------|
+| **Employees** | Read-only list + profile + CSV import (backend: full CRUD) |
+| **Divisions / Departments / Subdivisions** | Full CRUD with create wizard |
+| **Positions / Project Types / Projects / Phases** | Full CRUD |
+| **Blocks / Lots / Categories / Models / Model Types** | Full CRUD |
+| **Owners** | Full CRUD |
+| **Employee Projects / Emp Tasks** | Full CRUD |
+| **Shifts** | Full CRUD (backend + frontend) |
+| **Daily Time Records (DTR)** | Full CRUD with row-level security; HR sees all, employees see own |
+| **DTR Adjustments** | HR-approved attendance corrections |
+| **Roles + Permissions** | Admin UI with permission matrix |
+| **Dashboard** | KPI cards |
+| **Auth** | Login, JWT tokens, RBAC-gated sidebar |
 
-[![API docs](img/dashboard-items.png)](https://github.com/fastapi/full-stack-fastapi-template)
+### Deferred (per design §7)
+- Employee create/edit/delete UI (backend exists, frontend read-only)
+- Employee attachments/annex UI
+- Leave management module
+- Payroll module
 
-### Dashboard - Dark Mode
+## Project Phases
 
-[![API docs](img/dashboard-dark.png)](https://github.com/fastapi/full-stack-fastapi-template)
+See [`docs/roadmap/frontend-phase2-3-design.md`](./docs/roadmap/frontend-phase2-3-design.md) for the full phase plan and [`AGENTS.md`](./AGENTS.md) for current status.
 
-### Interactive API Documentation
+Current: **Phase 2A/2B (backend) + Phase 3 (frontend) complete.**
 
-[![API docs](img/docs.png)](https://github.com/fastapi/full-stack-fastapi-template)
+## Local Setup
 
-## How To Use It
+### Prerequisites
+- Python 3.12+ (with `uv`)
+- Node.js 20+ (with `pnpm`)
+- Docker 28+ (with `docker compose`)
 
-You can **just fork or clone** this repository and use it as is.
-
-✨ It just works. ✨
-
-### How to Use a Private Repository
-
-If you want to have a private repository, GitHub won't allow you to simply fork it as it doesn't allow changing the visibility of forks.
-
-But you can do the following:
-
-- Create a new GitHub repo, for example `my-full-stack`.
-- Clone this repository manually, set the name with the name of the project you want to use, for example `my-full-stack`:
-
-```bash
-git clone git@github.com:fastapi/full-stack-fastapi-template.git my-full-stack
-```
-
-- Enter into the new directory:
-
-```bash
-cd my-full-stack
-```
-
-- Set the new origin to your new repository, copy it from the GitHub interface, for example:
+### 1. Clone and configure
 
 ```bash
-git remote set-url origin git@github.com:octocat/my-full-stack.git
+git clone https://github.com/LouielAngeloQuisim/HRIS-FastAPI.git
+cd HRIS-FastAPI
+cp .env.example .env  # edit as needed
 ```
 
-- Add this repo as another "remote" to allow you to get updates later:
+### 2. Start infrastructure
 
 ```bash
-git remote add upstream git@github.com:fastapi/full-stack-fastapi-template.git
+docker compose up -d postgres traefik
 ```
 
-- Push the code to your new repository:
+### 3. Backend
 
 ```bash
-git push -u origin master
+cd backend
+uv sync
+uv run alembic upgrade head
+uv run python -m pytest tests/ -q          # 275 tests
+uv run uvicorn app.main:app --reload       # http://localhost:8000
 ```
 
-### Update From the Original Template
-
-After cloning the repository, and after doing changes, you might want to get the latest changes from this original template.
-
-- Make sure you added the original repository as a remote, you can check it with:
+### 4. Frontend
 
 ```bash
-git remote -v
-
-origin    git@github.com:octocat/my-full-stack.git (fetch)
-origin    git@github.com:octocat/my-full-stack.git (push)
-upstream    git@github.com:fastapi/full-stack-fastapi-template.git (fetch)
-upstream    git@github.com:fastapi/full-stack-fastapi-template.git (push)
+cd frontendv3
+pnpm install
+pnpm run dev                               # http://localhost:5173
 ```
 
-- Pull the latest changes without merging:
+To run frontend tests (first-time setup required):
 
 ```bash
-git pull --no-commit upstream master
+cd frontendv3
+bash scripts/setup-playwright-libs.sh       # one-time: download Chromium libs
+LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH" \
+  pnpm test                                # 187 tests
 ```
 
-This will download the latest changes from this template without committing them, that way you can check everything is right before committing.
+## Environment Variables
 
-- If there are conflicts, solve them in your editor.
+Key variables in `.env`:
 
-- Once you are done, commit the changes:
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SECRET_KEY` | JWT signing key | `changethis` (change!) |
+| `POSTGRES_PASSWORD` | Database password | `changethis` (change!) |
+| `FIRST_SUPERUSER_PASSWORD` | Initial admin password | `changethis` |
+| `POSTGRES_HOST` | DB host | `localhost` |
+| `POSTGRES_PORT` | DB port | `5432` (container) / `5433` (host debugger) |
+
+> **Note:** Do not use a `$` character in `POSTGRES_PASSWORD` — Docker Compose and pydantic-settings interpret `$$` differently and there is no compatible escaping scheme. Use a `$`-free password.
+
+## Database Migrations
+
+Migrations live in `backend/alembic/versions/`. After pulling changes:
 
 ```bash
-git merge --continue
+cd backend
+uv run alembic upgrade head
 ```
 
-### Configure
+## API Documentation
 
-You can then update configs in the `.env` files to customize your configurations.
-
-Before deploying it, make sure you change at least the values for:
-
-- `SECRET_KEY`
-- `FIRST_SUPERUSER_PASSWORD`
-- `POSTGRES_PASSWORD`
-
-You can (and should) pass these as environment variables from secrets.
-
-Read the [deployment.md](./deployment.md) docs for more details.
-
-### Generate Secret Keys
-
-Some environment variables in the `.env` file have a default value of `changethis`.
-
-You have to change them with a secret key, to generate secret keys you can run the following command:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-Copy the content and use that as password / secret key. And run that again to generate another secure key.
-
-## How To Use It - Alternative With Copier
-
-This repository also supports generating a new project using [Copier](https://copier.readthedocs.io).
-
-It will copy all the files, ask you configuration questions, and update the `.env` files with your answers.
-
-### Install Copier
-
-You can install Copier with:
-
-```bash
-pip install copier
-```
-
-Or better, if you have [`pipx`](https://pipx.pypa.io/), you can run it with:
-
-```bash
-pipx install copier
-```
-
-**Note**: If you have `pipx`, installing copier is optional, you could run it directly.
-
-### Generate a Project With Copier
-
-Decide a name for your new project's directory, you will use it below. For example, `my-awesome-project`.
-
-Go to the directory that will be the parent of your project, and run the command with your project's name:
-
-```bash
-copier copy https://github.com/fastapi/full-stack-fastapi-template my-awesome-project --trust
-```
-
-If you have `pipx` and you didn't install `copier`, you can run it directly:
-
-```bash
-pipx run copier copy https://github.com/fastapi/full-stack-fastapi-template my-awesome-project --trust
-```
-
-**Note** the `--trust` option is necessary to be able to execute a [post-creation script](https://github.com/fastapi/full-stack-fastapi-template/blob/master/.copier/update_dotenv.py) that updates your `.env` files.
-
-### Input Variables
-
-Copier will ask you for some data, you might want to have at hand before generating the project.
-
-But don't worry, you can just update any of that in the `.env` files afterwards.
-
-The input variables, with their default values (some auto generated) are:
-
-- `project_name`: (default: `"FastAPI Project"`) The name of the project, shown to API users (in .env).
-- `stack_name`: (default: `"fastapi-project"`) The name of the stack used for Docker Compose labels and project name (no spaces, no periods) (in .env).
-- `secret_key`: (default: `"changethis"`) The secret key for the project, used for security, stored in .env, you can generate one with the method above.
-- `first_superuser`: (default: `"admin@example.com"`) The email of the first superuser (in .env).
-- `first_superuser_password`: (default: `"changethis"`) The password of the first superuser (in .env).
-- `smtp_host`: (default: "") The SMTP server host to send emails, you can set it later in .env.
-- `smtp_user`: (default: "") The SMTP server user to send emails, you can set it later in .env.
-- `smtp_password`: (default: "") The SMTP server password to send emails, you can set it later in .env.
-- `emails_from_email`: (default: `"info@example.com"`) The email account to send emails from, you can set it later in .env.
-- `postgres_password`: (default: `"changethis"`) The password for the PostgreSQL database, stored in .env, you can generate one with the method above.
-- `sentry_dsn`: (default: "") The DSN for Sentry, if you are using it, you can set it later in .env.
-
-## Backend Development
-
-Backend docs: [backend/README.md](./backend/README.md).
-
-
-## Frontend Development
-
-Frontend docs: [frontend/README.md](./frontend/README.md).
-
-### Frontend v3 (frontendv3)
-
-The new React frontend lives in [`frontendv3/`](./frontendv3/). Run the dev server from that directory:
-
-```bash
-cd frontendv3 && pnpm run dev   # http://localhost:5173
-```
-
-Its browser (vitest + Playwright) tests need a few Chromium runtime libraries
-(`libnspr4`, `libnss3`, `libasound2`) that some dev/CI images lack. There is no
-devcontainer, and `/tmp` does not persist between sessions, so this is set up
-explicitly instead of as a manual one-off:
-
-```bash
-cd frontendv3 && bash scripts/setup-playwright-libs.sh
-LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH" pnpm test
-```
-
-Run `scripts/setup-playwright-libs.sh` once after a fresh environment. It
-downloads and extracts the `.deb` files (no sudo needed).
-
-## Local Setup Gotchas
-
-- **DB password:** `POSTGRES_PASSWORD` in `.env` is read by both Docker
-  Compose (which unescapes `$$` → `$`) and pydantic-settings (which pytest /
-  host processes read literally). A password containing a literal `$` cannot be
-  represented in a way both consumers agree on. Use a **`$`-free**
-  `POSTGRES_PASSWORD` value in local `.env` to avoid the conflict entirely (no
-  escaping needed).
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
 
 ## Deployment
 
+Staging deploy is automatic on push to `main` via GitHub Actions (`deploy.yml`).
 
-Deployment docs: [deployment.md](./deployment.md).
-
-## Development
-
-General development docs: [development.md](./development.md).
-
-This includes using Docker Compose, custom local domains, `.env` configurations, etc.
-
-## Release Notes
-
-Check the file [release-notes.md](./release-notes.md).
+See [`deployment.md`](./deployment.md) for production deployment instructions.
 
 ## License
 
-The Full Stack FastAPI Template is licensed under the terms of the MIT license.
+MIT

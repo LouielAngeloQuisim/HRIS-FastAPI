@@ -6,6 +6,10 @@ import { ProfileDropdown } from '@/components/profile-dropdown'
 import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { useCan } from '@/context/permissions-provider'
+import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Upload } from 'lucide-react'
+import { CsvImportWizard } from './components/csv-import/csv-import-wizard'
 import { useEmployees } from '@/lib/api/employees'
 import { EmployeesTable } from './components/employees-table'
 
@@ -25,6 +29,7 @@ export function Employees() {
     birthdate: e.birthdate ?? '',
   }))
   const count = data?.count ?? 0
+  const [csvImportOpen, setCsvImportOpen] = useState(false)
 
   return (
     <EmployeesAuthGate canView={canView}>
@@ -36,15 +41,21 @@ export function Employees() {
       </Header>
 
       <Main className='flex flex-1 flex-col gap-4 sm:gap-6'>
-        <div>
-          <h2 className='text-2xl font-bold tracking-tight'>Employee List</h2>
-          <p className='text-muted-foreground'>
-            {count} employee{count === 1 ? '' : 's'} total
-          </p>
-        </div>
-        {isPending ? (
+        <div className='flex items-center justify-between'>
+            <div>
+              <h2 className='text-2xl font-bold tracking-tight'>Employee List</h2>
+              <p className='text-muted-foreground'>
+                {count} employee{count === 1 ? '' : 's'} total
+              </p>
+            </div>
+            <Button variant='outline' onClick={() => setCsvImportOpen(true)}>
+              <Upload className='mr-2 h-4 w-4' /> Import CSV
+            </Button>
+          </div>
+        {isPending && (
           <div className='text-sm text-muted-foreground'>Loading employees…</div>
-        ) : isError ? (
+        )}
+        {isError && !isPending && (
           <div className='flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-12 text-center'>
             <p className='text-sm text-muted-foreground'>
               Failed to load employees.
@@ -57,7 +68,8 @@ export function Employees() {
               Try again
             </button>
           </div>
-        ) : (
+        )}
+        {!isPending && !isError && (
           <EmployeesTable
             data={employees}
             count={count}
@@ -66,6 +78,7 @@ export function Employees() {
           />
         )}
       </Main>
+      <CsvImportWizard open={csvImportOpen} onOpenChange={setCsvImportOpen} />
     </EmployeesAuthGate>
   )
 }

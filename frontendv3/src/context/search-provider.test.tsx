@@ -123,9 +123,9 @@ describe('SearchProvider and CommandMenu', () => {
 
     await openCommandPalette(screen)
 
-    await userEvent.click(getByRole('option', { name: 'Department' }))
+    await userEvent.click(getByRole('option', { name: 'Departments' }))
 
-    expect(mocks.navigate).toHaveBeenCalledWith({ to: '/department' })
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: '/departments' })
     await expect
       .element(getByPlaceholder(COMMAND_MENU_PLACEHOLDER))
       .not.toBeInTheDocument()

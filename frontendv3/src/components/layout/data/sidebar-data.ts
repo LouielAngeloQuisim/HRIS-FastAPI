@@ -7,9 +7,15 @@ import {
   LandPlot,
   UserCog,
   Clock,
-  BookUser,
-  CalendarDays,
-  Send,
+  FolderKanban,
+  ListTree,
+  Blocks,
+  Home,
+  Tags,
+  GitBranch,
+  UserRound,
+  ClipboardList,
+  ShieldCheck,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
@@ -41,31 +47,31 @@ export const sidebarData: SidebarData = {
       title: 'Human Resource',
       items: [
         {
-          title: 'Daily Time Records',
-          url: '/daily-time-records',
-          icon: CalendarClock,
-          permission: { module: 'daily_time_record' },
-        },
-        {
           title: 'Employees',
           url: '/employees',
           icon: Users,
           permission: { module: 'emp_list' },
         },
+        {
+          title: 'Daily Time Records',
+          url: '/daily-time-records',
+          icon: CalendarClock,
+          permission: { module: 'daily_time_record' },
+        },
       ],
     },
     {
-      title: 'Administration',
+      title: 'Organization',
       items: [
         {
-          title: 'Division',
-          url: '/division',
+          title: 'Divisions',
+          url: '/divisions',
           icon: Building2,
           permission: { module: 'division' },
         },
         {
-          title: 'Department',
-          url: '/department',
+          title: 'Departments',
+          url: '/departments',
           icon: Network,
           permission: { module: 'department' },
         },
@@ -76,39 +82,97 @@ export const sidebarData: SidebarData = {
           permission: { module: 'subdivision' },
         },
         {
-          title: 'Employee Settings',
-          url: '/employee-settings',
+          title: 'Positions',
+          url: '/positions',
           icon: UserCog,
-          permission: { module: 'emp_settings' },
+          permission: { module: 'position' },
+        },
+      ],
+    },
+    {
+      title: 'Projects',
+      items: [
+        {
+          title: 'Projects',
+          url: '/projects',
+          icon: FolderKanban,
+          permission: { module: 'projects' },
+        },
+        {
+          title: 'Phases',
+          url: '/phases',
+          icon: ListTree,
+          permission: { module: 'phase' },
+        },
+        {
+          title: 'Blocks',
+          url: '/blocks',
+          icon: Blocks,
+          permission: { module: 'blocks' },
+        },
+        {
+          title: 'Lots',
+          url: '/lots',
+          icon: Home,
+          permission: { module: 'lots' },
+        },
+        {
+          title: 'Categories',
+          url: '/categories',
+          icon: Tags,
+          permission: { module: 'category' },
+        },
+        {
+          title: 'Models',
+          url: '/models',
+          icon: GitBranch,
+          permission: { module: 'models' },
+        },
+        {
+          title: 'Model Types',
+          url: '/model-types',
+          icon: ClipboardList,
+          permission: { module: 'model_types' },
+        },
+        {
+          title: 'Owners',
+          url: '/owners',
+          icon: UserRound,
+          permission: { module: 'owner' },
+        },
+      ],
+    },
+    {
+      title: 'Employee Management',
+      items: [
+        {
+          title: 'Employee Projects',
+          url: '/employee-projects',
+          icon: FolderKanban,
+          permission: { module: 'emp_project' },
+        },
+        {
+          title: 'Emp Tasks',
+          url: '/emp-tasks',
+          icon: ClipboardList,
+          permission: { module: 'emp_task' },
+        },
+      ],
+    },
+    {
+      title: 'Administration',
+      items: [
+        {
+          title: 'Roles',
+          url: '/roles',
+          icon: ShieldCheck,
+          permission: { module: 'administration' },
         },
         {
           title: 'Shifts',
           url: '/shifts',
           icon: Clock,
           permission: { module: 'shifts' },
-        },
-      ],
-    },
-    {
-      title: 'Leave Administration',
-      items: [
-        {
-          title: 'Employee Leaves',
-          url: '/employee-leaves',
-          icon: BookUser,
-          permission: { module: 'employee_leaves' },
-        },
-        {
-          title: 'Leave Request',
-          url: '/leave-request',
-          icon: Send,
-          permission: { module: 'leave_request' },
-        },
-        {
-          title: 'Leave Calendar',
-          url: '/leave-calendar',
-          icon: CalendarDays,
-          permission: { module: 'leave_calendar' },
         },
       ],
     },

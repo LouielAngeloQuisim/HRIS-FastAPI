@@ -12,11 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.common.dependencies import CurrentUser, SessionDep
 from app.rbac.dependencies import require_permission
-from app.rbac.models import RoleCreate, RoleUpdate
-from app.rbac.schemas import ModulePublic, MyPermissions, RolePublic
+from app.rbac.models import ACTION_COLUMN, RoleCreate, RoleUpdate
+from app.rbac.schemas import ModulePublic, MyPermissions, RolePublic, RolesPublic
 from app.rbac.selectors import (
     get_all_modules,
     get_all_roles,
+    get_permissions_for_role,
     get_role_by_code,
     get_role_by_id,
 )
@@ -41,11 +42,12 @@ def read_modules(session: SessionDep) -> Any:
 
 @router.get(
     "/roles",
-    response_model=list[RolePublic],
+    response_model=RolesPublic,
     dependencies=[Depends(require_permission("administration", "view"))],
 )
 def read_roles(session: SessionDep) -> Any:
-    return get_all_roles(session=session)
+    roles = get_all_roles(session=session)
+    return RolesPublic(data=roles, count=len(roles))
 
 
 @router.post(
@@ -74,6 +76,23 @@ def update_role_route(*, session: SessionDep, role_id: uuid.UUID, role_in: RoleU
     if db_role.is_system:
         raise HTTPException(status_code=403, detail="System roles cannot be edited")
     return RolePublic.model_validate(update_role(session=session, db_role=db_role, role_in=role_in))
+
+
+@router.get(
+    "/roles/{role_id}/permissions",
+    response_model=dict[str, list[str]],
+    dependencies=[Depends(require_permission("administration", "view"))],
+)
+def read_role_permissions(session: SessionDep, role_id: uuid.UUID) -> Any:
+    db_role = get_role_by_id(session=session, role_id=role_id)
+    if db_role is None:
+        raise HTTPException(status_code=404, detail="Role not found")
+    result: list[str] = []
+    for module, perm in get_permissions_for_role(session=session, role_id=db_role.id):
+        for action, col in ACTION_COLUMN.items():
+            if getattr(perm, col, False):
+                result.append(f"{module.code}.{action.value}")
+    return {"permissions": result}
 
 
 @router.delete(

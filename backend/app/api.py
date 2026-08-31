@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.attendance import routes as attendance_routes
 from app.config.settings import settings
 from app.dashboard import routes as dashboard_routes
 from app.employee import routes as employee_routes
@@ -15,6 +16,8 @@ api_router.include_router(utils.router)
 api_router.include_router(rbac_routes.router)
 for employee_router in employee_routes.routers:
     api_router.include_router(employee_router)
+for attendance_router in attendance_routes.routers:
+    api_router.include_router(attendance_router)
 api_router.include_router(dashboard_routes.router)
 
 # `/private` creates users with no authentication whatsoever. It exists purely

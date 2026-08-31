@@ -36,6 +36,9 @@ PHASE1_TABLES = [
     "subdivision",
     "department",
     "division",
+    "daily_time_record",
+    "shift",
+    "dtr_adjustment",
 ]
 
 

@@ -87,6 +87,7 @@ class RoleCreate(SQLModel):
 class RoleUpdate(SQLModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     description: str | None = Field(default=None, max_length=512)
+    permissions: list[str] | None = Field(default=None)
 
 
 class RolePermission(SQLModel, table=True):

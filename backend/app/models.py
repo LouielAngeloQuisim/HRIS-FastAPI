@@ -11,6 +11,8 @@ Import this module for its side effects only.
 from sqlmodel import SQLModel
 
 from app.auth.models import RefreshToken
+from app.attendance.adjustment_models import DtrAdjustment
+from app.attendance.models import DailyTimeRecord, Shift
 from app.employee.models import (
     Blocks,
     Category,
@@ -61,4 +63,7 @@ __all__ = [
     "Project",
     "ProjectType",
     "Subdivision",
+    "Shift",
+    "DailyTimeRecord",
+    "DtrAdjustment",
 ]

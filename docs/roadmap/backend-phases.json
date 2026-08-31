@@ -48,8 +48,8 @@
       "riskLevel": "high",
       "dependsOn": "b1",
       "items": [
-        { "text": "Shared calculation module: rendered minutes, late, undertime, absence, OT", "done": false },
-        { "text": "Documented decision on lunch deduction (fixed vs configurable)", "done": false }
+        { "text": "Shared calculation module: rendered minutes, late, undertime, absence, OT", "done": true },
+        { "text": "Documented decision on lunch deduction (fixed vs configurable)", "done": true }
       ],
       "testsRequired": [
         "Unit tests against hand-defined expected values for each scenario class: on-time, late, undertime, absent, with/without OT, with lunch deduction",
@@ -59,17 +59,15 @@
     },
     {
       "id": "b2b",
-      "title": "Phase 2B — Sync + endpoints + approval flow",
+      "title": "Phase 2B — Approval flow",
       "estimate": "part of 2–3 wks",
       "riskLevel": "high",
       "dependsOn": "b2a",
       "items": [
-        { "text": "Biometric sync reader (parameterized queries)", "done": false },
-        { "text": "DTR adjustment approval flow", "done": false },
-        { "text": "Overtime approval with role gate", "done": false }
+        { "text": "DTR adjustment approval flow", "done": true },
+        { "text": "Overtime approval with role gate", "done": true }
       ],
       "testsRequired": [
-        "Sync reader tested against a mock device DB",
         "Approval-flow state transition tests",
         "Permission gate test on approval endpoints"
       ],

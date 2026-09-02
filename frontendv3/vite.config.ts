@@ -24,6 +24,7 @@ export default defineConfig({
   test: {
     silent: 'passed-only',
     unstubEnvs: true,
+    exclude: ['**/e2e/**', '**/node_modules/**'],
     browser: {
       enabled: true,
       provider: playwright(),

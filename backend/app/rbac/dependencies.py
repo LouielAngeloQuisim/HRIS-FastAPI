@@ -4,10 +4,11 @@ Roadmap §2.2: "A require_permission(module, action) dependency. Enforced on
 every route (the original did not)."
 """
 
-from collections.abc import Callable
+from typing import Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 
+from app.common.audit.sink import SecurityEventType, log_security_event
 from app.common.dependencies import CurrentUser, SessionDep
 from app.rbac.models import PermissionAction
 from app.rbac.services import user_has_permission
@@ -26,13 +27,31 @@ class PermissionChecker:
         self.module = module
         self.action = action
 
-    def __call__(self, session: SessionDep, current_user: CurrentUser) -> User:
+    def __call__(
+        self, request: Request, session: SessionDep, current_user: CurrentUser
+    ) -> User:
         if not user_has_permission(
             session=session,
             user=current_user,
             module_code=self.module,
             action=self.action,
         ):
+            # Log permission denied
+            client_ip = request.client.host if request.client else None
+            user_agent = request.headers.get("user-agent")
+            request_id = getattr(request.state, "request_id", None)
+
+            log_security_event(
+                security_event=SecurityEventType.PERMISSION_DENIED,
+                user_id=str(current_user.id),
+                user_email=current_user.email,
+                ip_address=client_ip,
+                user_agent=user_agent,
+                request_id=request_id,
+                module=self.module,
+                action=self.action.value,
+            )
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(
@@ -60,6 +79,6 @@ def require_permission(
 
 def permission_dependency(
     module: str, action: PermissionAction | str
-) -> Callable[..., User]:
+) -> Any:
     """Convenience wrapper for use in `dependencies=[...]`."""
     return Depends(require_permission(module, action))

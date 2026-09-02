@@ -1,8 +1,8 @@
 import uuid
-from typing import Any
-from sqlmodel import Session, select, func
 
-from app.user.models import User, UserCreate, UserUpdate
+from sqlmodel import Session, col, func, select
+
+from app.user.models import User
 
 
 def get_user_by_email(*, session: Session, email: str) -> User | None:
@@ -19,7 +19,7 @@ def get_users(*, session: Session, skip: int = 0, limit: int = 100) -> tuple[lis
     count_statement = select(func.count()).select_from(User)
     count = session.exec(count_statement).one()
 
-    statement = select(User).order_by(User.created_at.desc()).offset(skip).limit(limit)
+    statement = select(User).order_by(col(User.created_at).desc()).offset(skip).limit(limit)
     users = session.exec(statement).all()
 
-    return users, count
+    return list(users), count

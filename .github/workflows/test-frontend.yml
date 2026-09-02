@@ -1,0 +1,82 @@
+name: Test Frontend (Vitest)
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.filter.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            changed:
+              - frontendv3/**
+              - .env
+              - compose*.yml
+              - .github/workflows/test-frontend.yml
+
+  test-frontend:
+    needs:
+      - changes
+    if: ${{ needs.changes.outputs.changed == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      
+      - uses: oven-sh/setup-bun@v2
+      
+      - name: Install dependencies
+        run: bun ci
+        working-directory: frontendv3
+      
+      - name: Setup Playwright libraries
+        run: |
+          mkdir -p .playwright-libs
+          bunx playwright install-deps chromium
+        working-directory: frontendv3
+      
+      - name: Run Vitest tests
+        run: |
+          export LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+          bunx vitest run --browser.headless
+        working-directory: frontendv3
+      
+      - name: Type check
+        run: bunx tsc --noEmit
+        working-directory: frontendv3
+      
+      - name: Lint
+        run: bunx eslint .
+        working-directory: frontendv3
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: vitest-report
+          path: frontendv3/test-results
+          retention-days: 7
+
+  alls-green:
+    if: always()
+    needs:
+      - test-frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
+          allowed-skips: test-frontend

@@ -1,7 +1,6 @@
 import {
   LayoutDashboard,
   Users,
-  CalendarClock,
   Building2,
   Network,
   LandPlot,
@@ -51,12 +50,6 @@ export const sidebarData: SidebarData = {
           url: '/employees',
           icon: Users,
           permission: { module: 'emp_list' },
-        },
-        {
-          title: 'Daily Time Records',
-          url: '/daily-time-records',
-          icon: CalendarClock,
-          permission: { module: 'daily_time_record' },
         },
       ],
     },

@@ -64,13 +64,13 @@ times).
 
 ## 2. Current Status
 
-### Backend — Phase 0-1 + Phase 2A/2B: 275 tests passing, 0 failed
+### Backend — Phase 0-1 + Phase 2A/2B: 284 tests passing, 0 failed
 - **Phase 0-1:** 21 test files in `backend/tests/`: `employee/` (crud, crud_relations, dashboard, owner/category/lots, blocks/lots delete-guard, attachments, additional_records, indexes_constraints), `auth/` (flow, rate-limit), `rbac/` (require_permission, route_protection, role_escalation, seed), `foundation/` (scaffold, responses), `item/`, `user/` (crud, private, routes), `scripts/` (pre-start waits).
 - **Phase 2A/2B — Attendance module** (`backend/app/attendance/`): full CRUD for `Shift` + `DailyTimeRecord`, plus `DTRAdjustment`. Routers under `/shifts`, `/daily-time-records`, `/dtr-adjustments`. Row-level filter on DTR list: non-superusers see only their own records; users with no linked EmployeeRecords see `[]`.
 - **12 Alembic migrations** (`backend/alembic/versions/`).
 - All 17 HRIS domain resources are implemented in the `employee` module and served as sub-routers: **employees, divisions, departments, subdivisions, positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks** — plus `/dashboard`, `/rbac`, `/items`, `/users`, `/auth`, `/shifts`, `/daily-time-records`, `/dtr-adjustments`, and local-only `/private`.
 
-### Frontend — Phase 0-3: 187 tests, 43 files passing
+### Frontend — Phase 0-3: 196 tests, 46 files passing
 - `vitest run --browser.headless` → **43 test files / 187 tests** green (57 test files exist on disk; the remainder are `__screenshots__` duplicates, excluded).
 - CRUD-complete feature pages with tests: divisions, departments, subdivisions (create wizard with failure-resume), positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks, shifts (**UI only**), roles (admin + permission matrix), dashboard, employees (**read-only list + profile + CSV import**).
 - §8.1–§8.13 coverage: permission gating, 409 delete-error flows, CSV import success/retry, subdivision wizard state + resume.
@@ -119,7 +119,7 @@ times).
 - **Vitest browser mode** (`vitest run --browser.headless`, Playwright-backed). On this host, run once: `scripts/setup-playwright-libs.sh`, then export `LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"` before running tests.
 - Commands (from `frontendv3/`): full suite `npx vitest run --browser.headless`; single file `npx vitest run --browser.headless <path>`; lint `npx eslint .`; format `npx prettier --write .`; typecheck `npx tsc --noEmit`.
 - Test conventions: `renderWithClient` from `@/test-utils/providers`, `userEvent` from `vitest/browser`, hoisted `vi.mock` blocks (per-action `useCan` policy mock, `use*` hook mocks, axios `api.delete` mocks, sonner toast spies).
-- Baseline: **187 frontend tests / 43 files, 275 backend tests, tsc 0 errors, eslint 0 errors** (a few pre-existing warnings).
+- Baseline: **196 frontend tests / 46 files, 284 backend tests, 12 Alembic migrations, tsc 0 errors, eslint 1 pre-existing error / 5 pre-existing warnings** (RolePublic unused import, see §3).
 
 ## 7. Lessons Learned (verified, no current regressions)
 

@@ -1,4 +1,25 @@
 {
+  "_meta": {
+    "lastUpdated": "2026-09-02",
+    "verifiedAtCommit": "56ac451",
+    "verification": {
+      "tests": "284 passed, 0 failed, 0 errors",
+      "testFiles": 28,
+      "migrations": 12,
+      "activeModules": [
+        "app.attendance",
+        "app.auth",
+        "app.common",
+        "app.dashboard",
+        "app.employee",
+        "app.item",
+        "app.rbac",
+        "app.user"
+      ],
+      "ruffOnChangedFiles": "clean",
+      "mypyOnChangedFiles": "no new errors (pre-existing 114 errors in 18 files unchanged)"
+    }
+  },
   "phases": [
     {
       "id": "b0",
@@ -43,7 +64,7 @@
     },
     {
       "id": "b2a",
-      "title": "Phase 2A — Attendance/DTR time math core",
+      "title": "Phase 2A — Attendance/DTR time math core (DONE)",
       "estimate": "part of 2–3 wks",
       "riskLevel": "high",
       "dependsOn": "b1",
@@ -59,7 +80,7 @@
     },
     {
       "id": "b2b",
-      "title": "Phase 2B — Approval flow",
+      "title": "Phase 2B — Approval flow (DONE)",
       "estimate": "part of 2–3 wks",
       "riskLevel": "high",
       "dependsOn": "b2a",
@@ -75,7 +96,7 @@
     },
     {
       "id": "b3",
-      "title": "Phase 3 — Leave & Holidays",
+      "title": "Phase 3 — Leave & Holidays (NEXT)",
       "estimate": "1–2 wks",
       "riskLevel": "normal",
       "dependsOn": "b2b",

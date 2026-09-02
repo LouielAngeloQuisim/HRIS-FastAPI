@@ -1,8 +1,30 @@
 {
+  "_meta": {
+    "lastUpdated": "2026-09-02",
+    "verifiedAtCommit": "56ac451",
+    "verification": {
+      "tests": "196 passed, 0 failed",
+      "testFiles": 46,
+      "activeFeatures": [
+        "auth (sign-in, forgot, sign-up, otp)",
+        "dashboard",
+        "divisions, departments, subdivisions, positions",
+        "project-types, projects, phases",
+        "blocks, lots, categories, models, model-types, owners",
+        "employee-projects, emp-tasks, roles",
+        "employees (list + profile + CSV import)",
+        "shifts (UI only)",
+        "attendance (CSV import wizard — DTR list view pending f4a)"
+      ],
+      "eslintErrors": 1,
+      "eslintPreExisting": true,
+      "tsc": "0 errors"
+    }
+  },
   "phases": [
     {
       "id": "f0",
-      "title": "Phase 0 — Scaffold & Design Tokens",
+      "title": "Phase 0 — Scaffold & Design Tokens (DONE — pivoted to shadcn defaults)",
       "estimate": "1 wk",
       "riskLevel": "normal",
       "dependsOn": null,
@@ -12,11 +34,11 @@
           "done": true
         },
         {
-          "text": "Tailwind config tokens: custom (blue) + zink ramp",
+          "text": "Tailwind config tokens: custom (blue) + zink ramp — DEFERRED (active frontend uses shadcn defaults; see analysis/07-frontend-design.md)",
           "done": false
         },
         {
-          "text": "Public Sans font + named spacings (header, vertical-menu)",
+          "text": "Public Sans font + named spacings (header, vertical-menu) — DEFERRED (default system font stack)",
           "done": false
         },
         {
@@ -25,7 +47,7 @@
         },
         {
           "text": "Sidebar shell + topbar + notification drawer wired to UI store",
-          "done": false
+          "done": true
         }
       ],
       "testsRequired": [
@@ -37,13 +59,21 @@
     },
     {
       "id": "f1",
-      "title": "Phase 1 — Auth & Shell",
+      "title": "Phase 1 — Auth & Shell (DONE — reset-password page pending)",
       "estimate": "1 wk",
       "riskLevel": "normal",
       "dependsOn": "f0",
       "items": [
         {
-          "text": "Login / forgot / reset password pages",
+          "text": "Login page",
+          "done": true
+        },
+        {
+          "text": "Forgot password page",
+          "done": true
+        },
+        {
+          "text": "Reset password page (form, calls /reset-password/) — NOT BUILT, backend route exists",
           "done": false
         },
         {
@@ -55,8 +85,8 @@
           "done": true
         },
         {
-          "text": "useCan() + <Can> permission hook/component",
-          "done": false
+          "text": "useCan() + usePermissions() permission hook",
+          "done": true
         },
         {
           "text": "Permission-driven sidebar rendering",
@@ -77,7 +107,7 @@
     },
     {
       "id": "f2",
-      "title": "Phase 2 — CRUD Foundation",
+      "title": "Phase 2 — CRUD Foundation (DONE — 'Employee Settings' page deferred)",
       "estimate": "2 wks",
       "riskLevel": "normal",
       "dependsOn": "f1",
@@ -87,12 +117,24 @@
           "done": true
         },
         {
-          "text": "First CRUD pages: Division, Department, Shifts, Employee Settings",
+          "text": "Division CRUD",
+          "done": true
+        },
+        {
+          "text": "Department CRUD",
+          "done": true
+        },
+        {
+          "text": "Shifts CRUD UI (backend support landed in b2a)",
+          "done": true
+        },
+        {
+          "text": "Employee Settings CRUD page — DEFERRED per design §7",
           "done": false
         },
         {
           "text": "Employee masterlist + profile + CSV import",
-          "done": false
+          "done": true
         }
       ],
       "testsRequired": [
@@ -104,22 +146,42 @@
     },
     {
       "id": "f3",
-      "title": "Phase 3 — Org / Projects / RBAC",
+      "title": "Phase 3 — Org / Projects / RBAC (DONE)",
       "estimate": "1–2 wks",
       "riskLevel": "normal",
       "dependsOn": "f2",
       "items": [
         {
-          "text": "Subdivisions, Phase, Owner, Models, Model Types",
-          "done": false
+          "text": "Subdivisions CRUD + multi-step wizard with state + resume",
+          "done": true
         },
         {
-          "text": "Employee Projects, Manpower, Subdivision Wizard",
-          "done": false
+          "text": "Phase CRUD",
+          "done": true
         },
         {
-          "text": "Roles & Access editor (RBAC UI)",
-          "done": false
+          "text": "Owner CRUD",
+          "done": true
+        },
+        {
+          "text": "Models CRUD",
+          "done": true
+        },
+        {
+          "text": "Model Types CRUD",
+          "done": true
+        },
+        {
+          "text": "Employee Projects CRUD",
+          "done": true
+        },
+        {
+          "text": "Emp Tasks (manpower) CRUD",
+          "done": true
+        },
+        {
+          "text": "Roles & Access editor (RBAC UI) with permission matrix",
+          "done": true
         }
       ],
       "testsRequired": [

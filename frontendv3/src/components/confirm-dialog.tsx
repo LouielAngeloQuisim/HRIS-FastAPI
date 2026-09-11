@@ -53,7 +53,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         </AlertDialogHeader>
         {children}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={isLoading}>
+          <AlertDialogCancel disabled={isLoading} data-testid="cancel-delete-button">
             {cancelBtnText ?? 'Cancel'}
           </AlertDialogCancel>
           <Button
@@ -62,6 +62,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
             onClick={handleConfirm}
             variant={destructive ? 'destructive' : 'default'}
             disabled={disabled || isLoading}
+            data-testid="confirm-delete-button"
           >
             {confirmText ?? 'Continue'}
           </Button>

@@ -40,6 +40,7 @@ export default function DivisionPage() {
         </div>
         {canCreate && (
           <Button
+            data-testid="add-division-button"
             onClick={() => {
               setEditing(null)
               setOpen(true)
@@ -55,13 +56,14 @@ export default function DivisionPage() {
           <p className='text-sm text-muted-foreground'>
             Failed to load divisions.
           </p>
-          <button
-            type='button'
-            onClick={() => refetch()}
-            className='text-sm font-medium text-primary underline underline-offset-4'
-          >
-            Try again
-          </button>
+            <button
+              data-testid="retry-button"
+              type='button'
+              onClick={() => refetch()}
+              className='text-sm font-medium text-primary underline underline-offset-4'
+            >
+              Try again
+            </button>
         </div>
       )}
       {data && (
@@ -89,6 +91,7 @@ export default function DivisionPage() {
                   <td className='p-2 text-right'>
                     {canEdit && (
                       <Button
+                        data-testid={`edit-division-button-${item.id}`}
                         variant='ghost'
                         size='sm'
                         onClick={() => {
@@ -101,6 +104,7 @@ export default function DivisionPage() {
                     )}
                     {canDelete && (
                       <Button
+                        data-testid={`delete-division-button-${item.id}`}
                         variant='ghost'
                         size='sm'
                         onClick={() => {

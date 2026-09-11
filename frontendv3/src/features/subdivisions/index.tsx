@@ -41,10 +41,10 @@ export default function SubdivisionPage() {
         <div className="flex gap-2">
           {canCreate && (
             <>
-              <Button variant="default" onClick={() => navigate({ to: '/subdivisions/wizard' })}>
-                Launch Wizard
-              </Button>
-              <Button onClick={() => { setEditing(null); setOpen(true) }}>Add Subdivision</Button>
+               <Button variant="default" onClick={() => navigate({ to: '/subdivisions/wizard' })} data-testid="subdivision-wizard-button">
+                 Launch Wizard
+               </Button>
+               <Button onClick={() => { setEditing(null); setOpen(true) }} data-testid="add-subdivision-button">Add Subdivision</Button>
             </>
           )}
         </div>
@@ -76,8 +76,8 @@ export default function SubdivisionPage() {
                   <td className="p-2">{item.description ?? "—"}</td>
                   <td className="p-2">{item.location ?? "—"}</td>
                   <td className="p-2 text-right">
-                    {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }}>Edit</Button>}
-                    {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive">Delete</Button>}
+                     {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }} data-testid={`edit-subdivision-button-${item.id}`}>Edit</Button>}
+                     {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive" data-testid={`delete-subdivision-button-${item.id}`}>Delete</Button>}
                   </td>
                 </tr>
               ))}

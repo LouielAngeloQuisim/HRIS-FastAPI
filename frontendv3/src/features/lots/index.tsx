@@ -36,7 +36,7 @@ export default function LotsPage() {
           <h1 className="text-2xl font-bold">Lots</h1>
           <p className="text-muted-foreground">{data?.count ?? 0} records</p>
         </div>
-        {canCreate && <Button onClick={() => { setEditing(null); setOpen(true) }}>Add Lots</Button>}
+         {canCreate && <Button onClick={() => { setEditing(null); setOpen(true) }} data-testid="add-lots-button">Add Lots</Button>}
       </div>
       {isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
       {isError && (
@@ -65,8 +65,8 @@ export default function LotsPage() {
                   <td className="p-2">{item.blocks_id ?? "—"}</td>
                   <td className="p-2">{item.category_id ?? "—"}</td>
                   <td className="p-2 text-right">
-                    {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }}>Edit</Button>}
-                    {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive">Delete</Button>}
+                     {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }} data-testid={`edit-lots-button-${item.id}`}>Edit</Button>}
+                     {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive" data-testid={`delete-lots-button-${item.id}`}>Delete</Button>}
                   </td>
                 </tr>
               ))}

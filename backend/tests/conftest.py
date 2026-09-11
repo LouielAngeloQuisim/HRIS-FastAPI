@@ -39,6 +39,14 @@ PHASE1_TABLES = [
     "daily_time_record",
     "shift",
     "dtr_adjustment",
+    # Phase b3 — Leave & Holidays (FK order: leaf tables first)
+    "leave_request_event",
+    "leave_ledger_entry",
+    "leave_request",
+    "employee_leave_enrollment",
+    "holiday_instance",
+    "holiday_config",
+    "leave_policy",
 ]
 
 

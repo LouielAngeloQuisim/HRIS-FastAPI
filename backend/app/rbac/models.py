@@ -19,12 +19,19 @@ from sqlmodel import Field, SQLModel, UniqueConstraint
 
 
 class PermissionAction(str, Enum):
-    """The four actions the legacy system tracked, kept 1:1."""
+    """The actions supported by the RBAC system.
+
+    VIEW, ADD, EDIT, DELETE are the four legacy actions kept 1:1.
+    APPROVE is a distinct action for leave request approval (not EDIT).
+    ADMIN is for leave-policy admin operations (accrual/carryover/adjustment).
+    """
 
     VIEW = "view"
     ADD = "add"
     EDIT = "edit"
     DELETE = "delete"
+    APPROVE = "approve"
+    ADMIN = "admin"
 
 
 # Maps an action onto its column on RolePermission.
@@ -33,6 +40,8 @@ ACTION_COLUMN: dict[PermissionAction, str] = {
     PermissionAction.ADD: "can_add",
     PermissionAction.EDIT: "can_edit",
     PermissionAction.DELETE: "can_delete",
+    PermissionAction.APPROVE: "can_approve",
+    PermissionAction.ADMIN: "can_admin",
 }
 
 
@@ -109,6 +118,11 @@ class RolePermission(SQLModel, table=True):
     can_add: bool = Field(default=False)
     can_edit: bool = Field(default=False)
     can_delete: bool = Field(default=False)
+    can_approve: bool = Field(default=False)
+    can_admin: bool = Field(default=False)
 
     def allows(self, action: PermissionAction) -> bool:
-        return bool(getattr(self, ACTION_COLUMN[action], False))
+        col = ACTION_COLUMN.get(action)
+        if col is None:
+            return False
+        return bool(getattr(self, col, False))

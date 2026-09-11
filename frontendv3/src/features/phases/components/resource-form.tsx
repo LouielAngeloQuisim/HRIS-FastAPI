@@ -22,9 +22,11 @@ import {
 } from '@/components/ui/sheet'
 import { SelectDropdown } from '@/components/select-dropdown'
 import { useCreatePhase, useUpdatePhase } from '@/lib/api/phases'
+import { useSubdivisions } from '@/lib/api/subdivisions'
 import type { PhasePublic, PhaseCreate, PhaseUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
+  code: z.string().optional(),
   name: z.string().optional(),
   description: z.string().optional(),
 })
@@ -41,10 +43,17 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const isEdit = Boolean(item?.id)
   const createMutation = useCreatePhase()
   const updateMutation = useUpdatePhase()
+  const { data: subdivisionData, isPending: subdivisionsPending } = useSubdivisions(1, 100)
+
+  const subdivisionItems = subdivisionData?.data.map((sub) => ({
+    label: sub.name,
+    value: sub.id,
+  }))
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      code: item?.code ?? '',
       name: item?.name ?? '',
       description: '',
       subdivision_id: item?.subdivision_id ?? '',
@@ -78,17 +87,24 @@ export function ResourceForm({ item, onClose, open }: Props) {
         <Form {...form}>
           <form id="phases-form" onSubmit={form.handleSubmit(onSubmit)} className="flex-1 space-y-6 overflow-y-auto px-4">
             <>
+              <FormField control={form.control} name="code" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Code</FormLabel>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="phase-code-input" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Name</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="phase-name-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="description" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Description</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="phase-description-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -96,13 +112,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Subdivision</FormLabel>
                   <FormControl>
-                    <SelectDropdown
-                      defaultValue={field.value}
-                      onValueChange={field.onChange}
-                      placeholder="Select subdivision"
-                      items={[]}
-                      isPending={false}
-                    />
+                     <SelectDropdown
+                       defaultValue={field.value}
+                       onValueChange={field.onChange}
+                       placeholder="Select subdivision"
+                       items={subdivisionItems ?? []}
+                       isPending={subdivisionsPending}
+                       data-testid="phase-subdivision-select"
+                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -114,7 +131,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
           <SheetClose asChild>
             <Button type="button" variant="outline">Cancel</Button>
           </SheetClose>
-          <Button type="submit" form="phases-form" disabled={loading}>
+          <Button type="submit" form="phases-form" disabled={loading} data-testid="phase-submit-button">
             {loading ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>

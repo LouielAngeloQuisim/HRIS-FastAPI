@@ -30,8 +30,8 @@ describe('useCan / useRoleCode', () => {
     role_code: 'SUR',
     is_superuser: false,
     permissions: {
-      emp_list: { view: true, add: false, edit: false, delete: false },
-      humanres: { view: true, add: false, edit: false, delete: false },
+      emp_list: { view: true, add: false, edit: false, delete: false, approve: false, admin: false },
+      humanres: { view: true, add: false, edit: false, delete: false, approve: false, admin: false },
     },
   }
 

@@ -62,22 +62,31 @@ is skipped (a "complete" phase report with 0 of 12 required tests
 actually written, discovered only after being pushed back on multiple
 times).
 
+### For every new feature or module, tests are not optional — they are part of the definition of done. The full Vitest + Playwright strategy, including file conventions, mock patterns, E2E page objects, and business-flow examples, is documented in `frontendv3/docs/testing-strategy.md`. Any new feature must include:
+- Colocated Vitest browser tests (`index.test.tsx`, `heading.test.tsx`, `row-actions.test.tsx`, `data-fidelity.test.tsx`, `retry.test.tsx`, `permissions.test.tsx`, and `components/<feature>-form.test.tsx` where applicable).
+- A Playwright E2E spec under `frontendv3/e2e/<domain>/` covering the critical user journey for that feature.
+- Stable `data-testid` attributes on all key interactive elements (buttons, dialogs, form fields) so E2E selectors remain reliable across UI refactors.
+
+If a new feature does not yet have a corresponding E2E page object or domain folder in `e2e/`, create them before writing the spec. Do not wait to be asked — this is the standard deliverable for any feature work.
+
 ## 2. Current Status
 
-### Backend — Phase 0-1 + Phase 2A/2B: 284 tests passing, 0 failed
+### Backend — Phase 0-1 + Phase 2A/2B + Phase B3: 367 tests passing, 1 flaky failure in test isolation
 - **Phase 0-1:** 21 test files in `backend/tests/`: `employee/` (crud, crud_relations, dashboard, owner/category/lots, blocks/lots delete-guard, attachments, additional_records, indexes_constraints), `auth/` (flow, rate-limit), `rbac/` (require_permission, route_protection, role_escalation, seed), `foundation/` (scaffold, responses), `item/`, `user/` (crud, private, routes), `scripts/` (pre-start waits).
 - **Phase 2A/2B — Attendance module** (`backend/app/attendance/`): full CRUD for `Shift` + `DailyTimeRecord`, plus `DTRAdjustment`. Routers under `/shifts`, `/daily-time-records`, `/dtr-adjustments`. Row-level filter on DTR list: non-superusers see only their own records; users with no linked EmployeeRecords see `[]`.
-- **12 Alembic migrations** (`backend/alembic/versions/`).
-- All 17 HRIS domain resources are implemented in the `employee` module and served as sub-routers: **employees, divisions, departments, subdivisions, positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks** — plus `/dashboard`, `/rbac`, `/items`, `/users`, `/auth`, `/shifts`, `/daily-time-records`, `/dtr-adjustments`, and local-only `/private`.
+- **Phase B3 — Leave & Holidays module** (`backend/app/leave/`): full CRUD for `LeavePolicy`, `EmployeeLeaveEnrollment`, `LeaveRequest`, `LeaveLedgerEntry`, `HolidayConfig`, `HolidayInstance`. 84 tests in `backend/tests/leave/`.
+- **13 Alembic migrations** (`backend/alembic/versions/`).
+- All 17 HRIS domain resources are implemented in the `employee` module and served as sub-routers: **employees, divisions, departments, subdivisions, positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks** — plus `/dashboard`, `/rbac`, `/items`, `/users`, `/auth`, `/shifts`, `/daily-time-records`, `/dtr-adjustments`, `/leave/*`, and local-only `/private`.
 
-### Frontend — Phase 0-3: 196 tests, 46 files passing
-- `vitest run --browser.headless` → **43 test files / 187 tests** green (57 test files exist on disk; the remainder are `__screenshots__` duplicates, excluded).
+### Frontend — Phase 0-3: 263 tests, 78 files passing
+- `vitest run --browser.headless` → **78 test files / 263 tests** green.
 - CRUD-complete feature pages with tests: divisions, departments, subdivisions (create wizard with failure-resume), positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks, shifts (**UI only**), roles (admin + permission matrix), dashboard, employees (**read-only list + profile + CSV import**).
 - §8.1–§8.13 coverage: permission gating, 409 delete-error flows, CSV import success/retry, subdivision wizard state + resume.
+- **Playwright E2E infrastructure added:** `e2e/fixtures/`, `e2e/helpers/`, `e2e/pages/`, 24 page objects covering every domain; 25 specs across `e2e/organization/`, `e2e/projects/`, `e2e/hris/`, `e2e/system/`, `e2e/attendance/` with stable `data-testid` selectors on buttons, dialogs, and form fields.
 
 ## 3. Known Gaps
 
-- **Employee create/edit/delete: NOT built in frontend** (deferred per design §7). Backend `/employees` CRUD exists; the frontend ships a read-only list, a profile view, and CSV import only.
+- **Employee create/edit/delete: GAP** (deferred per design §7, tracked in `docs/roadmap/frontend-phases.json` f2). Backend `/employees` CRUD exists; frontend has read-only list + profile + CSV import only.
 - **6 inert local `resource-delete-dialog` copies** (chats, dashboard, employees, roles, settings, tasks, users) carry the ErrorBody fix but are not wired into any reachable delete flow.
 - **EmployeeAttachments UI gap:** backend model + tests exist; the frontend annex/attachments UI is deferred.
 - **Unwired template demo features:** `apps`, `chats`, `tasks`, `users`, `settings` are complete shadcn-admin template UIs backed by local `./data/` mocks — no HRIS backend wiring.
@@ -119,7 +128,8 @@ times).
 - **Vitest browser mode** (`vitest run --browser.headless`, Playwright-backed). On this host, run once: `scripts/setup-playwright-libs.sh`, then export `LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"` before running tests.
 - Commands (from `frontendv3/`): full suite `npx vitest run --browser.headless`; single file `npx vitest run --browser.headless <path>`; lint `npx eslint .`; format `npx prettier --write .`; typecheck `npx tsc --noEmit`.
 - Test conventions: `renderWithClient` from `@/test-utils/providers`, `userEvent` from `vitest/browser`, hoisted `vi.mock` blocks (per-action `useCan` policy mock, `use*` hook mocks, axios `api.delete` mocks, sonner toast spies).
-- Baseline: **196 frontend tests / 46 files, 284 backend tests, 12 Alembic migrations, tsc 0 errors, eslint 1 pre-existing error / 5 pre-existing warnings** (RolePublic unused import, see §3).
+- Baseline: **250 frontend tests / 74 files, 367 backend tests (1 flaky failure in test isolation), 13 Alembic migrations, tsc 0 errors, eslint 14 errors / 5 warnings** (RolePublic unused import + 13 unused-var errors in test files, see §3).
+- Playwright E2E: 25 spec files (organization, projects, hris, system, attendance) across `e2e/auth.spec.ts`, `e2e/organization/divisions.spec.ts`, `e2e/attendance/daily-time-records.spec.ts`, `e2e/attendance/leave-requests.spec.ts`, `e2e/attendance/dtr-adjustments.spec.ts`. Verified pass count: specs written, structured for Playwright execution. Full execution requires a running backend and Playwright browser dependencies (`LD_LIBRARY_PATH` set per §6).
 
 ## 7. Lessons Learned (verified, no current regressions)
 

@@ -19,7 +19,7 @@ export interface UserPublic {
   created_at: string | null
 }
 
-export type PermissionAction = 'view' | 'add' | 'edit' | 'delete'
+export type PermissionAction = 'view' | 'add' | 'edit' | 'delete' | 'approve' | 'admin'
 
 export type ModulePermissions = Record<PermissionAction, boolean>
 
@@ -382,6 +382,186 @@ export interface ShiftsPublic {
 export interface ShiftsList { data: ShiftsPublic[]; count: number }
 export interface ShiftsCreate { code: string; name: string; start_time?: string; end_time?: string; lunch_break_duration?: number; total_hours_minus_lunch?: number; days_of_week?: string[]; description?: string | null }
 export interface ShiftsUpdate { code?: string; name?: string; start_time?: string; end_time?: string; lunch_break_duration?: number; total_hours_minus_lunch?: number; days_of_week?: string[]; description?: string | null }
+
+
+// Daily Time Record
+export interface DailyTimeRecordPublic {
+  id: string
+  employee_id: string
+  shift_id: string | null
+  login_date: string | null
+  logout_date: string | null
+  rendered_minutes: number | null
+  late_minutes: number | null
+  undertime_minutes: number | null
+  overtime_minutes: number | null
+  overtime_approved: boolean | null
+  is_absent: boolean
+  is_time_calculated: boolean
+  source: string
+  source_ref: string | null
+  created_by: string | null
+  updated_by: string | null
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+export interface DailyTimeRecordList { data: DailyTimeRecordPublic[]; count: number }
+export interface DailyTimeRecordCreate { employee_id?: string; shift_id?: string | null; login_date: string; logout_date?: string | null }
+export interface DailyTimeRecordUpdate { login_date?: string; logout_date?: string; shift_id?: string | null }
+
+
+// Leave Request
+export interface LeaveRequestPublic {
+  id: string
+  employee_id: string
+  policy_id: string
+  enrollment_id: string | null
+  date_start: string
+  date_end: string
+  requested_hours: number | null
+  total_days_requested: number
+  reason: string | null
+  document_ref: string | null
+  status: string
+  created_by_user: string | null
+  approved_by_user: string | null
+  approved_at: string | null
+  rejected_by_user: string | null
+  rejected_at: string | null
+  cancelled_by_user: string | null
+  cancelled_at: string | null
+  decision_note: string | null
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+export interface LeaveRequestList { data: LeaveRequestPublic[]; count: number }
+export interface LeaveRequestCreate { employee_id: string; policy_id: string; date_start: string; date_end: string; requested_hours?: number | null; reason?: string | null; document_ref?: string | null }
+
+
+// Leave Ledger
+export interface LeaveLedgerEntryPublic {
+  id: string
+  employee_id: string
+  policy_id: string
+  enrollment_id: string | null
+  leave_year: number
+  source: string
+  amount: number
+  reference: string | null
+  original_year: number | null
+  note: string | null
+  actor_user_id: string | null
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+export interface LeaveLedgerSummary {
+  granted_total: number
+  consumed_total: number
+  remaining: number
+}
+export interface LeaveLedgerResponse {
+  data: LeaveLedgerEntryPublic[]
+  summary: LeaveLedgerSummary
+}
+
+
+// Leave Policy
+export interface LeavePolicyPublic {
+  id: string
+  code: string
+  name: string
+  description: string | null
+  calendar_color: string
+  cadence: string
+  annual_entitlement_days: number
+  prorate_on_hire: boolean
+  carry_over_enabled: boolean
+  carry_over_max_days: number | null
+  carry_over_expires_on: string | null
+  is_paid: boolean
+  eligible_departments: string[]
+  gender_scope: string
+  marital_status_scope: string
+  is_active: boolean
+  is_system: boolean
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+export interface LeavePolicyList { data: LeavePolicyPublic[]; count: number }
+
+
+// Holiday Config
+export interface HolidayConfigPublic {
+  id: string
+  code: string
+  name: string
+  month_day: string
+  type: string
+  region_code: string | null
+  observe_weekend_as: string | null
+  multiplier_regular: number | null
+  multiplier_overtime: number | null
+  is_recurring: boolean
+  is_active: boolean
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+export interface HolidayConfigList { data: HolidayConfigPublic[]; count: number }
+export interface HolidayConfigCreate { code: string; name: string; month_day: string; type: string; region_code?: string | null; observe_weekend_as?: string | null; multiplier_regular?: number | null; multiplier_overtime?: number | null; is_recurring?: boolean }
+export interface HolidayConfigUpdate { code?: string | null; name?: string | null; month_day?: string | null; type?: string | null; region_code?: string | null; observe_weekend_as?: string | null; multiplier_regular?: number | null; multiplier_overtime?: number | null; is_recurring?: boolean | null; is_active?: boolean | null }
+
+
+// Holiday Instance
+export interface HolidayInstancePublic {
+  id: string
+  config_id: string
+  observed_date: string
+  raw_date: string | null
+  leave_year: number
+  is_active: boolean
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+export interface HolidayInstanceList { data: HolidayInstancePublic[]; count: number }
+
+
+// Leave Calendar Event
+export interface LeaveCalendarEvent {
+  id: string
+  observed_date: string
+  title: string
+  status: string | null
+  color: string
+  type: 'request' | 'holiday'
+}
+
+
+// DTR Adjustment
+export interface DtrAdjustmentPublic {
+  id: string
+  daily_time_record_id: string
+  employee_id: string
+  original_login_date: string | null
+  original_logout_date: string | null
+  adjusted_login_date: string | null
+  adjusted_logout_date: string | null
+  reason: string | null
+  status: string
+  adjusted_date: string | null
+  created_by: string | null
+  approved_by: string | null
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+export interface DtrAdjustmentList { data: DtrAdjustmentPublic[]; count: number }
+export interface DtrAdjustmentCreate { daily_time_record_id: string; adjusted_login_date: string; adjusted_logout_date: string; reason?: string | null; adjusted_date?: string | null }
 
 
 // Error envelope

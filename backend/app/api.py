@@ -5,6 +5,7 @@ from app.config.settings import settings
 from app.dashboard import routes as dashboard_routes
 from app.employee import routes as employee_routes
 from app.item.routes import items
+from app.leave import routes as leave_routes
 from app.rbac import routes as rbac_routes
 from app.user.routes import auth, private, users, utils
 
@@ -18,6 +19,8 @@ for employee_router in employee_routes.routers:
     api_router.include_router(employee_router)
 for attendance_router in attendance_routes.routers:
     api_router.include_router(attendance_router)
+for leave_router in leave_routes.routers:
+    api_router.include_router(leave_router)
 api_router.include_router(dashboard_routes.router)
 
 # `/private` creates users with no authentication whatsoever. It exists purely

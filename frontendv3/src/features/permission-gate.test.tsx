@@ -17,7 +17,7 @@ const { perms } = vi.hoisted(() => ({
 }))
 vi.mock('@/context/permissions-provider', () => ({
   useCan: (module: string, action: string) =>
-    perms.is_superuser ? true : perms[module]?.[action] === true,
+    perms.is_superuser ? true : (perms as unknown as Record<string, Record<string, boolean>>)[module]?.[action] === true,
 }))
 vi.mock('@/lib/api/divisions', () => ({
   useDivisions: () => ({

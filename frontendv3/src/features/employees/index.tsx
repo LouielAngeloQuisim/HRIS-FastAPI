@@ -48,7 +48,7 @@ export function Employees() {
                 {count} employee{count === 1 ? '' : 's'} total
               </p>
             </div>
-            <Button variant='outline' onClick={() => setCsvImportOpen(true)}>
+            <Button variant='outline' onClick={() => setCsvImportOpen(true)} data-testid="employee-csv-import-button">
               <Upload className='mr-2 h-4 w-4' /> Import CSV
             </Button>
           </div>

@@ -85,35 +85,35 @@ export function ResourceForm({ item, onClose, open }: Props) {
               <FormField control={form.control} name="code" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Code</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="shift-code-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Name</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="shift-name-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="start_time" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Start Time</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="shift-start-time-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="end_time" render={({ field }) => (
                 <FormItem>
                   <FormLabel>End Time</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="shift-end-time-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="description" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Description</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="shift-description-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -124,7 +124,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
           <SheetClose asChild>
             <Button type="button" variant="outline">Cancel</Button>
           </SheetClose>
-          <Button type="submit" form="shifts-form" disabled={loading}>
+          <Button type="submit" form="shifts-form" disabled={loading} data-testid="shift-submit-button">
             {loading ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>

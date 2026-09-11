@@ -60,7 +60,7 @@ describe('cookies', () => {
       const setSpy = vi.spyOn(document, 'cookie', 'set')
       const name = uniqueName()
       setCookie(name, 'v')
-      const last = setSpy.mock.calls.at(-1)?.[0] as string
+      const last = setSpy.mock.calls[setSpy.mock.calls.length - 1]?.[0] as string
       expect(last).toContain(`${name}=v`)
       expect(last).toContain(COOKIE_FLAGS_DEV)
       expect(last).not.toContain('Secure')
@@ -70,7 +70,7 @@ describe('cookies', () => {
     it('hris_at uses SameSite=Lax and no Secure', () => {
       const setSpy = vi.spyOn(document, 'cookie', 'set')
       setCookie('hris_at', 'token-value')
-      const last = setSpy.mock.calls.at(-1)?.[0] as string
+      const last = setSpy.mock.calls[setSpy.mock.calls.length - 1]?.[0] as string
       expect(last).toMatch(/^hris_at=token-value/)
       expect(last).toContain(COOKIE_FLAGS_DEV)
       expect(last).not.toContain('Secure')
@@ -80,7 +80,7 @@ describe('cookies', () => {
     it('removeCookie uses SameSite=Lax without Secure', () => {
       const setSpy = vi.spyOn(document, 'cookie', 'set')
       removeCookie('foo')
-      const last = setSpy.mock.calls.at(-1)?.[0] as string
+      const last = setSpy.mock.calls[setSpy.mock.calls.length - 1]?.[0] as string
       expect(last).toContain('foo=;')
       expect(last).toContain(COOKIE_FLAGS_DEV)
       expect(last).not.toContain('Secure')

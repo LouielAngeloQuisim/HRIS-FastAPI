@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/sheet'
 import { SelectDropdown } from '@/components/select-dropdown'
 import { useCreateModel, useUpdateModel } from '@/lib/api/models'
+import { useModelTypes } from '@/lib/api/model-types'
 import type { ModelPublic, ModelCreate, ModelUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
@@ -41,6 +42,12 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const isEdit = Boolean(item?.id)
   const createMutation = useCreateModel()
   const updateMutation = useUpdateModel()
+  const { data: modelTypeData, isPending: modelTypesPending } = useModelTypes(1, 100)
+
+  const modelTypeItems = modelTypeData?.data.map((mt) => ({
+    label: mt.name,
+    value: mt.id,
+  }))
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -81,14 +88,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Name</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="model-name-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="description" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Description</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="model-description-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -96,13 +103,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Model Type</FormLabel>
                   <FormControl>
-                    <SelectDropdown
-                      defaultValue={field.value}
-                      onValueChange={field.onChange}
-                      placeholder="Select model type"
-                      items={[]}
-                      isPending={false}
-                    />
+                     <SelectDropdown
+                       defaultValue={field.value}
+                       onValueChange={field.onChange}
+                       placeholder="Select model type"
+                       items={modelTypeItems ?? []}
+                       isPending={modelTypesPending}
+                       data-testid="model-model-type-select"
+                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -114,7 +122,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
           <SheetClose asChild>
             <Button type="button" variant="outline">Cancel</Button>
           </SheetClose>
-          <Button type="submit" form="models-form" disabled={loading}>
+          <Button type="submit" form="models-form" disabled={loading} data-testid="model-submit-button">
             {loading ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>

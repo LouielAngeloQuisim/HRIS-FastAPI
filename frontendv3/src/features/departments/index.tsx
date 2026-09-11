@@ -36,7 +36,7 @@ export default function DepartmentPage() {
           <h1 className="text-2xl font-bold">Departments</h1>
           <p className="text-muted-foreground">{data?.count ?? 0} records</p>
         </div>
-        {canCreate && <Button onClick={() => { setEditing(null); setOpen(true) }}>Add Department</Button>}
+         {canCreate && <Button onClick={() => { setEditing(null); setOpen(true) }} data-testid="add-department-button">Add Department</Button>}
       </div>
       {isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
       {isError && (
@@ -67,8 +67,8 @@ export default function DepartmentPage() {
                   <td className="p-2">{item.division_id ?? "—"}</td>
                   <td className="p-2">{item.manager_id ?? "—"}</td>
                   <td className="p-2 text-right">
-                    {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }}>Edit</Button>}
-                    {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive">Delete</Button>}
+                     {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }} data-testid={`edit-department-button-${item.id}`}>Edit</Button>}
+                     {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive" data-testid={`delete-department-button-${item.id}`}>Delete</Button>}
                   </td>
                 </tr>
               ))}

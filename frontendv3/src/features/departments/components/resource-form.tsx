@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/sheet'
 import { SelectDropdown } from '@/components/select-dropdown'
 import { useCreateDepartment, useUpdateDepartment } from '@/lib/api/departments'
+import { useDivisions } from '@/lib/api/divisions'
 import type { DepartmentPublic, DepartmentCreate, DepartmentUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
@@ -42,6 +43,12 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const isEdit = Boolean(item?.id)
   const createMutation = useCreateDepartment()
   const updateMutation = useUpdateDepartment()
+  const { data: divisionData, isPending: divisionsPending } = useDivisions(1, 100)
+
+  const divisionItems = divisionData?.data.map((div) => ({
+    label: div.name,
+    value: div.id,
+  }))
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -83,21 +90,21 @@ export function ResourceForm({ item, onClose, open }: Props) {
               <FormField control={form.control} name="code" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Code</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="department-code-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Name</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="department-name-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="description" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Description</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="department-description-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -105,13 +112,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Division</FormLabel>
                   <FormControl>
-                    <SelectDropdown
-                      defaultValue={field.value}
-                      onValueChange={field.onChange}
-                      placeholder="Select division"
-                      items={[]}
-                      isPending={false}
-                    />
+                     <SelectDropdown
+                       defaultValue={field.value}
+                       onValueChange={field.onChange}
+                       placeholder="Select division"
+                       items={divisionItems ?? []}
+                       isPending={divisionsPending}
+                       data-testid="department-division-select"
+                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -123,7 +131,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
           <SheetClose asChild>
             <Button type="button" variant="outline">Cancel</Button>
           </SheetClose>
-          <Button type="submit" form="departments-form" disabled={loading}>
+          <Button type="submit" form="departments-form" disabled={loading} data-testid="department-submit-button">
             {loading ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>

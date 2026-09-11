@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
-import type { RolePublic, RoleList, RoleCreate, RoleUpdate } from './types'
+import type { RoleList, RoleCreate, RoleUpdate } from './types'
 
 export const rolesKey = (page: number, pageSize: number) => ['roles', page, pageSize]
 

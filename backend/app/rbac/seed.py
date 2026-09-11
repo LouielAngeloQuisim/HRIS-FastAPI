@@ -175,6 +175,12 @@ DEFAULT_ROLES: list[RoleSeed] = [
             # HR maintains the shift definitions attendance is measured against.
             "shifts": FULL,
             "emp_settings": CONTRIBUTE,
+            # HR approves leave requests and runs accrual/carryover.
+            "leave_request": ("view", "add", "approve"),
+            "leave_policy": ("view", "add", "edit", "delete", "admin"),
+            "employee_leaves": FULL,
+            "holiday_config": FULL,
+            "leave_calendar": VIEW_ONLY,
         },
     ),
     RoleSeed(

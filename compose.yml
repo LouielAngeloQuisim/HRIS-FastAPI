@@ -144,7 +144,7 @@ services:
       - default
     build:
       context: .
-      dockerfile: frontend/Dockerfile
+      dockerfile: frontendv3/Dockerfile
       args:
         - VITE_API_URL=https://api.${DOMAIN?Variable not set}
         - NODE_ENV=production

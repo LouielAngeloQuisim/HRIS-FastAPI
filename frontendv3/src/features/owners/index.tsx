@@ -36,7 +36,7 @@ export default function OwnerPage() {
           <h1 className="text-2xl font-bold">Owners</h1>
           <p className="text-muted-foreground">{data?.count ?? 0} records</p>
         </div>
-        {canCreate && <Button onClick={() => { setEditing(null); setOpen(true) }}>Add Owner</Button>}
+         {canCreate && <Button onClick={() => { setEditing(null); setOpen(true) }} data-testid="add-owner-button">Add Owner</Button>}
       </div>
       {isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
       {isError && (
@@ -69,8 +69,8 @@ export default function OwnerPage() {
                   <td className="p-2">{item.email ?? "—"}</td>
                   <td className="p-2">{item.contact_no ?? "—"}</td>
                   <td className="p-2 text-right">
-                    {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }}>Edit</Button>}
-                    {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive">Delete</Button>}
+                     {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }} data-testid={`edit-owner-button-${item.id}`}>Edit</Button>}
+                     {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive" data-testid={`delete-owner-button-${item.id}`}>Delete</Button>}
                   </td>
                 </tr>
               ))}

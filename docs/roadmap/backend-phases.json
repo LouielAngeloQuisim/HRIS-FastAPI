@@ -1,11 +1,11 @@
 {
   "_meta": {
-    "lastUpdated": "2026-09-02",
-    "verifiedAtCommit": "56ac451",
+    "lastUpdated": "2026-09-10",
+    "verifiedAtCommit": "ad58fa6",
     "verification": {
-      "tests": "284 passed, 0 failed, 0 errors",
-      "testFiles": 28,
-      "migrations": 12,
+      "tests": "368 passed, 0 failed, 0 errors",
+      "testFiles": 48,
+      "migrations": 13,
       "activeModules": [
         "app.attendance",
         "app.auth",
@@ -13,6 +13,7 @@
         "app.dashboard",
         "app.employee",
         "app.item",
+        "app.leave",
         "app.rbac",
         "app.user"
       ],
@@ -96,16 +97,16 @@
     },
     {
       "id": "b3",
-      "title": "Phase 3 — Leave & Holidays (NEXT)",
+      "title": "Phase 3 — Leave & Holidays (DONE)",
       "estimate": "1–2 wks",
       "riskLevel": "normal",
       "dependsOn": "b2b",
       "items": [
-        { "text": "LeavePolicy, YearlyEmployeeLeave, SelectedEmployeeLeaves ledger", "done": false },
-        { "text": "Leave request lifecycle + approval, server-authoritative actor", "done": false },
-        { "text": "Idempotent approval (no double-debit on re-approval)", "done": false },
-        { "text": "Holiday configuration + date-check, explicit holiday pay decision", "done": false },
-        { "text": "Decide: keep no-accrual/no-carryover, or modernize the ledger", "done": false }
+        { "text": "LeavePolicy, YearlyEmployeeLeave, SelectedEmployeeLeaves ledger", "done": true },
+        { "text": "Leave request lifecycle + approval, server-authoritative actor", "done": true },
+        { "text": "Idempotent approval (no double-debit on re-approval)", "done": true },
+        { "text": "Holiday configuration + date-check, explicit holiday pay decision", "done": true },
+        { "text": "Decide: keep no-accrual/no-carryover, or modernize the ledger", "done": true }
       ],
       "testsRequired": [
         "Ledger math tests (accrual/deduction per defined policy)",
@@ -131,7 +132,8 @@
         "One test per bracket boundary (just under / at / just over each threshold) for all four calculators",
         "At least one official worked example per calculator where published"
       ],
-      "definitionOfDone": "All tests above pass before phase is marked complete"
+      "definitionOfDone": "All tests above pass before phase is marked complete",
+      "implementationNotes": "Scaffold and formulas implemented for SSS, PhilHealth, Pag-IBIG, and BIR in `app/payroll/calc/`; UI wiring and full verification gate deferred to Phase 4C."
     },
     {
       "id": "b4b",
@@ -151,7 +153,8 @@
         "Loan amortization correctness tests",
         "13th-month formula tests"
       ],
-      "definitionOfDone": "All tests above pass before phase is marked complete"
+      "definitionOfDone": "All tests above pass before phase is marked complete",
+      "implementationNotes": "Core payroll engine scaffolding in `app/payroll/` with model, schemas, selectors, services, and routes; preview/generate endpoints return 501 Not Implemented as placeholder. Full business logic deferred to later in Phase 4B."
     },
     {
       "id": "b4c",

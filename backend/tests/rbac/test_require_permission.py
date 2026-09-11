@@ -288,7 +288,7 @@ class TestEffectivePermissions:
             rbac_fixture["module"].code
         ]
 
-        assert flags == {"view": True, "add": False, "edit": True, "delete": False}
+        assert flags == {"view": True, "add": False, "edit": True, "delete": False, "approve": False, "admin": False}
 
     def test_user_without_role_has_no_permissions(self, db: Session) -> None:
         user, _ = _make_user(db, role_id=None)

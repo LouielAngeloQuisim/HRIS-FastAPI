@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/sheet'
 import { SelectDropdown } from '@/components/select-dropdown'
 import { useCreateLot, useUpdateLot } from '@/lib/api/lots'
+import { useBlocks } from '@/lib/api/blocks'
 import type { LotsPublic, LotsCreate, LotsUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
@@ -41,6 +42,12 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const isEdit = Boolean(item?.id)
   const createMutation = useCreateLot()
   const updateMutation = useUpdateLot()
+  const { data: blockData, isPending: blocksPending } = useBlocks(1, 100)
+
+  const blockItems = blockData?.data.map((block) => ({
+    label: block.block_name,
+    value: block.id,
+  }))
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -81,14 +88,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
               <FormField control={form.control} name="lot_number" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Lot Number</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="lots-lot-number-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="description" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Description</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="lots-description-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -96,13 +103,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Block</FormLabel>
                   <FormControl>
-                    <SelectDropdown
-                      defaultValue={field.value}
-                      onValueChange={field.onChange}
-                      placeholder="Select block"
-                      items={[]}
-                      isPending={false}
-                    />
+                     <SelectDropdown
+                       defaultValue={field.value}
+                       onValueChange={field.onChange}
+                       placeholder="Select block"
+                       items={blockItems ?? []}
+                       isPending={blocksPending}
+                       data-testid="lots-block-select"
+                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -114,7 +122,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
           <SheetClose asChild>
             <Button type="button" variant="outline">Cancel</Button>
           </SheetClose>
-          <Button type="submit" form="lots-form" disabled={loading}>
+          <Button type="submit" form="lots-form" disabled={loading} data-testid="lots-submit-button">
             {loading ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>

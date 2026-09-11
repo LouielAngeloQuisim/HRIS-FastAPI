@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/sheet'
 import { SelectDropdown } from '@/components/select-dropdown'
 import { useCreateBlock, useUpdateBlock } from '@/lib/api/blocks'
+import { usePhases } from '@/lib/api/phases'
 import type { BlocksPublic, BlocksCreate, BlocksUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
@@ -41,6 +42,12 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const isEdit = Boolean(item?.id)
   const createMutation = useCreateBlock()
   const updateMutation = useUpdateBlock()
+  const { data: phaseData, isPending: phasesPending } = usePhases(1, 100)
+
+  const phaseItems = phaseData?.data.map((phase) => ({
+    label: phase.name,
+    value: phase.id,
+  }))
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -81,14 +88,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Name</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="blocks-name-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="description" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Description</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="blocks-description-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -96,13 +103,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Phase</FormLabel>
                   <FormControl>
-                    <SelectDropdown
-                      defaultValue={field.value}
-                      onValueChange={field.onChange}
-                      placeholder="Select phase"
-                      items={[]}
-                      isPending={false}
-                    />
+                     <SelectDropdown
+                       defaultValue={field.value}
+                       onValueChange={field.onChange}
+                       placeholder="Select phase"
+                       items={phaseItems ?? []}
+                       isPending={phasesPending}
+                       data-testid="blocks-phase-select"
+                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -114,7 +122,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
           <SheetClose asChild>
             <Button type="button" variant="outline">Cancel</Button>
           </SheetClose>
-          <Button type="submit" form="blocks-form" disabled={loading}>
+          <Button type="submit" form="blocks-form" disabled={loading} data-testid="blocks-submit-button">
             {loading ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>

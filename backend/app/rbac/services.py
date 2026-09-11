@@ -65,6 +65,8 @@ def get_effective_permissions(
             PermissionAction.ADD.value: permission.can_add,
             PermissionAction.EDIT.value: permission.can_edit,
             PermissionAction.DELETE.value: permission.can_delete,
+            PermissionAction.APPROVE.value: permission.can_approve,
+            PermissionAction.ADMIN.value: permission.can_admin,
         }
     return result
 
@@ -109,7 +111,7 @@ def _apply_role_permissions(
         if "." not in entry:
             continue
         module_code, action = entry.rsplit(".", 1)
-        if module_code not in all_modules or action not in ("view", "add", "edit", "delete"):
+        if module_code not in all_modules or action not in ("view", "add", "edit", "delete", "approve", "admin"):
             continue
         granted.setdefault(module_code, set()).add(action)
 
@@ -118,6 +120,8 @@ def _apply_role_permissions(
         "add": "can_add",
         "edit": "can_edit",
         "delete": "can_delete",
+        "approve": "can_approve",
+        "admin": "can_admin",
     }
 
     # Upsert rows for modules that have at least one grant

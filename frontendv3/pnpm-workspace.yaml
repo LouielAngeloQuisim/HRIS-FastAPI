@@ -1,3 +1,4 @@
 allowBuilds:
-  '@clerk/shared': true
-  esbuild: true
+  '0': esbuild
+  '1': '@clerk/shared'
+  esbuild: false

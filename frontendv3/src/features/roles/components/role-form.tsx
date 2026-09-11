@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/sheet'
 import { useCreateRole, useUpdateRole } from '@/lib/api/roles'
 import type { RolePublic, RoleCreate, RoleUpdate } from '@/lib/api/types'
+import { toast } from 'sonner'
 
 const formSchema = z.object({
   name: z.string().min(1, 'Role name is required'),
@@ -60,8 +61,10 @@ export function RoleForm({ open, role, onClose }: Props) {
         await createMutation.mutateAsync(data as unknown as RoleCreate)
       }
       onClose()
-    } catch {
-      // mutation handles toast
+    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const detail = (err as any)?.response?.data?.detail ?? 'Failed to save role'
+      toast.error(detail)
     }
   }
 
@@ -78,20 +81,20 @@ export function RoleForm({ open, role, onClose }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form id="roles-form" onSubmit={form.handleSubmit(onSubmit)} className="flex-1 space-y-6 overflow-y-auto px-4">
-            <FormField control={form.control} name="name" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Name</FormLabel>
-                <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
+             <FormField control={form.control} name="name" render={({ field }) => (
+               <FormItem>
+                 <FormLabel>Name</FormLabel>
+                 <FormControl><Input {...field} value={field.value ?? ''} data-testid="role-name-input" /></FormControl>
+                 <FormMessage />
+               </FormItem>
+             )} />
           </form>
         </Form>
         <SheetFooter>
           <SheetClose asChild>
             <Button type="button" variant="outline">Cancel</Button>
           </SheetClose>
-          <Button type="submit" form="roles-form" disabled={loading}>
+          <Button type="submit" form="roles-form" disabled={loading} data-testid="role-submit-button">
             {loading ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>

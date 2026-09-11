@@ -22,6 +22,8 @@ import {
 } from '@/components/ui/sheet'
 import { SelectDropdown } from '@/components/select-dropdown'
 import { useCreateEmployeeProject, useUpdateEmployeeProject } from '@/lib/api/employee-projects'
+import { useEmployees } from '@/lib/api/employees'
+import { useProjects } from '@/lib/api/projects'
 import type { EmployeeProjectsPublic, EmployeeProjectsCreate, EmployeeProjectsUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
@@ -45,6 +47,18 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const isEdit = Boolean(item?.id)
   const createMutation = useCreateEmployeeProject()
   const updateMutation = useUpdateEmployeeProject()
+  const { data: employeeData, isPending: employeesPending } = useEmployees(1, 100)
+  const { data: projectData, isPending: projectsPending } = useProjects(1, 100)
+
+  const employeeItems = employeeData?.data.map((emp) => ({
+    label: `${emp.first_name} ${emp.last_name}`.trim() || emp.id,
+    value: emp.id,
+  }))
+
+  const projectItems = projectData?.data.map((proj) => ({
+    label: proj.name,
+    value: proj.id,
+  }))
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -89,13 +103,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Employee</FormLabel>
                   <FormControl>
-                    <SelectDropdown
-                      defaultValue={field.value}
-                      onValueChange={field.onChange}
-                      placeholder="Select employee"
-                      items={[]}
-                      isPending={false}
-                    />
+                      <SelectDropdown
+                        defaultValue={field.value}
+                        onValueChange={field.onChange}
+                        placeholder="Select employee"
+                        items={employeeItems ?? []}
+                        isPending={employeesPending}
+                        data-testid="employee-project-employee-select"
+                      />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -104,13 +119,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Project</FormLabel>
                   <FormControl>
-                    <SelectDropdown
-                      defaultValue={field.value}
-                      onValueChange={field.onChange}
-                      placeholder="Select project"
-                      items={[]}
-                      isPending={false}
-                    />
+                      <SelectDropdown
+                        defaultValue={field.value}
+                        onValueChange={field.onChange}
+                        placeholder="Select project"
+                        items={projectItems ?? []}
+                        isPending={projectsPending}
+                        data-testid="employee-project-project-select"
+                      />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -118,28 +134,28 @@ export function ResourceForm({ item, onClose, open }: Props) {
               <FormField control={form.control} name="date" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Date</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="employee-project-date-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="rendered_hours" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Rendered Hours</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="employee-project-rendered-hours-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="task" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Task</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="employee-project-task-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="is_assigned" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Assigned</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="employee-project-assigned-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -150,7 +166,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
           <SheetClose asChild>
             <Button type="button" variant="outline">Cancel</Button>
           </SheetClose>
-          <Button type="submit" form="employee-projects-form" disabled={loading}>
+          <Button type="submit" form="employee-projects-form" disabled={loading} data-testid="employee-project-submit-button">
             {loading ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>

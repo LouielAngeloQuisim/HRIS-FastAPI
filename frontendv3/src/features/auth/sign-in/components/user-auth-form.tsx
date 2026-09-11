@@ -96,7 +96,7 @@ export function UserAuthForm({
             <FormItem>
               <FormLabel>UserName / Email ID</FormLabel>
               <FormControl>
-                <Input placeholder='name@example.com' {...field} />
+                <Input placeholder='name@example.com' {...field} data-testid="login-email-input" />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -109,7 +109,7 @@ export function UserAuthForm({
             <FormItem className='relative'>
               <FormLabel>Password</FormLabel>
               <FormControl>
-                <PasswordInput placeholder='********' {...field} />
+                <PasswordInput placeholder='********' {...field} data-testid="login-password-input" />
               </FormControl>
               <FormMessage />
               <a
@@ -121,7 +121,7 @@ export function UserAuthForm({
             </FormItem>
           )}
         />
-        <Button className='mt-2' disabled={isLoading} type='submit'>
+        <Button className='mt-2' disabled={isLoading} type='submit' data-testid="login-submit-button">
           {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
           Sign In
         </Button>

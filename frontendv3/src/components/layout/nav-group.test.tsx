@@ -81,9 +81,9 @@ describe('NavGroup permission filtering (render-level)', () => {
     const perms: MyPermissions = {
       role_code: 'SUR',
       is_superuser: false,
-      permissions: {
-        emp_list: { view: true, add: false, edit: false, delete: false },
-      },
+        permissions: {
+          emp_list: { view: true, add: false, edit: false, delete: false, approve: false, admin: false },
+        },
     }
 
     const screen = await renderGroup(perms)

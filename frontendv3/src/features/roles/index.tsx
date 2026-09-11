@@ -6,13 +6,14 @@ import { RoleForm } from './components/role-form'
 import { PermissionMatrix } from './components/permission-matrix'
 
 export default function RolesPage() {
-  const [page] = useState(1)
+  const [page, setPage] = useState(1)
   const pageSize = 20
   const canView = useCan('administration', 'view')
   const canCreate = useCan('administration', 'add')
   const canUpdate = useCan('administration', 'edit')
 
   const { data, isPending, isError, refetch } = useRoles(page, pageSize)
+  const totalPages = data ? Math.max(1, Math.ceil(data.count / pageSize)) : 1
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [matrixRoleId, setMatrixRoleId] = useState<string | null>(null)
@@ -35,9 +36,9 @@ export default function RolesPage() {
           <h1 className="text-2xl font-bold">Roles</h1>
           <p className="text-muted-foreground">{data?.count ?? 0} roles</p>
         </div>
-        {canCreate && (
-          <Button onClick={() => { setEditingId(null); setFormOpen(true) }}>Add Role</Button>
-        )}
+         {canCreate && (
+           <Button onClick={() => { setEditingId(null); setFormOpen(true) }} data-testid="add-role-button">Add Role</Button>
+         )}
       </div>
       {isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
       {isError && (
@@ -60,19 +61,48 @@ export default function RolesPage() {
             <tbody>
               {data.data.map((role) => (
                 <tr key={role.id} className="border-b last:border-0 hover:bg-muted/50">
-                  <td className="p-2">{role.name}</td>
+                  <td className="p-2">
+                    {role.name}
+                    {role.is_system && <span className="ml-2 text-xs text-muted-foreground">(system)</span>}
+                  </td>
                   <td className="p-2">{role.code ?? '—'}</td>
                   <td className="p-2">{0} permissions</td>
                   <td className="p-2 text-right">
-                    <Button variant="ghost" size="sm" onClick={() => { setMatrixRoleId(role.id); setMatrixRoleName(role.name) }}>Permissions</Button>
-                    {canUpdate && (
-                      <Button variant="ghost" size="sm" onClick={() => { setEditingId(role.id); setFormOpen(true) }}>Edit</Button>
+                     {canUpdate && !role.is_system && (
+                       <Button variant="ghost" size="sm" onClick={() => { setMatrixRoleId(role.id); setMatrixRoleName(role.name) }} data-testid={`role-permission-matrix-button-${role.id}`}>Permissions</Button>
+                     )}
+                     {canUpdate && !role.is_system && (
+                       <Button variant="ghost" size="sm" onClick={() => { setEditingId(role.id); setFormOpen(true) }} data-testid={`edit-role-button-${role.id}`}>Edit</Button>
+                     )}
+                    {role.is_system && canUpdate && (
+                      <Button variant="ghost" size="sm" disabled title="System roles cannot be edited">Edit (system)</Button>
                     )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1 || isPending}
+            onClick={() => setPage(p => p - 1)}
+          >
+            Previous
+          </Button>
+          <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= totalPages || isPending}
+            onClick={() => setPage(p => p + 1)}
+          >
+            Next
+          </Button>
         </div>
       )}
       <RoleForm

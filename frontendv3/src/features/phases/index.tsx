@@ -10,10 +10,10 @@ import { ResourceDeleteDialog } from './components/resource-delete-dialog'
 export default function PhasePage() {
   const [page] = useState(1)
   const pageSize = 20
-  const canView = useCan('phases', 'view')
-  const canCreate = useCan('phases', 'add')
-  const canEdit = useCan('phases', 'edit')
-  const canDelete = useCan('phases', 'delete')
+  const canView = useCan('phase', 'view')
+  const canCreate = useCan('phase', 'add')
+  const canEdit = useCan('phase', 'edit')
+  const canDelete = useCan('phase', 'delete')
 
   const { data, isPending, isError, refetch } = usePhases(page, pageSize)
   const [open, setOpen] = useState(false)
@@ -36,7 +36,7 @@ export default function PhasePage() {
           <h1 className="text-2xl font-bold">Phases</h1>
           <p className="text-muted-foreground">{data?.count ?? 0} records</p>
         </div>
-        {canCreate && <Button onClick={() => { setEditing(null); setOpen(true) }}>Add Phase</Button>}
+         {canCreate && <Button onClick={() => { setEditing(null); setOpen(true) }} data-testid="add-phase-button">Add Phase</Button>}
       </div>
       {isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
       {isError && (
@@ -63,8 +63,8 @@ export default function PhasePage() {
                   <td className="p-2">{item.name ?? "—"}</td>
                   <td className="p-2">{item.subdivision_id ?? "—"}</td>
                   <td className="p-2 text-right">
-                    {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }}>Edit</Button>}
-                    {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive">Delete</Button>}
+                     {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }} data-testid={`edit-phase-button-${item.id}`}>Edit</Button>}
+                     {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive" data-testid={`delete-phase-button-${item.id}`}>Delete</Button>}
                   </td>
                 </tr>
               ))}

@@ -15,6 +15,11 @@ import {
   UserRound,
   ClipboardList,
   ShieldCheck,
+  CalendarDays,
+  FileText,
+  Table2,
+  BookOpen,
+  FileEdit,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
@@ -166,6 +171,42 @@ export const sidebarData: SidebarData = {
           url: '/shifts',
           icon: Clock,
           permission: { module: 'shifts' },
+        },
+        {
+          title: 'Daily Time Records',
+          url: '/daily-time-records',
+          icon: Table2,
+          permission: { module: 'daily_time_record' },
+        },
+        {
+          title: 'DTR Adjustments',
+          url: '/dtr-adjustments',
+          icon: FileEdit,
+          permission: { module: 'daily_time_record' },
+        },
+        {
+          title: 'Leave Requests',
+          url: '/leave-requests',
+          icon: CalendarDays,
+          permission: { module: 'leave_request' },
+        },
+        {
+          title: 'Leave Calendar',
+          url: '/leave-calendar',
+          icon: CalendarDays,
+          permission: { module: 'emp_leaves' },
+        },
+        {
+          title: 'Leave Ledger',
+          url: '/leave-ledger',
+          icon: BookOpen,
+          permission: { module: 'emp_leaves' },
+        },
+        {
+          title: 'Holidays',
+          url: '/holidays',
+          icon: FileText,
+          permission: { module: 'holiday_config' },
         },
       ],
     },

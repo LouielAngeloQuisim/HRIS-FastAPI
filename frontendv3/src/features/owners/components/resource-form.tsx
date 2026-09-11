@@ -53,10 +53,15 @@ export function ResourceForm({ item, onClose, open }: Props) {
 
   const onSubmit = async (data: FormData) => {
     try {
+      const payload = {
+        first_name: data.name,
+        email: data.email,
+        contact_no: data.phone,
+      }
       if (isEdit && item?.id) {
-        await updateMutation.mutateAsync({ id: item.id, data: data as unknown as OwnerUpdate })
+        await updateMutation.mutateAsync({ id: item.id, data: payload as unknown as OwnerUpdate })
       } else {
-        await createMutation.mutateAsync(data as unknown as OwnerCreate)
+        await createMutation.mutateAsync(payload as unknown as OwnerCreate)
       }
       onClose()
     } catch (_e) {
@@ -81,21 +86,21 @@ export function ResourceForm({ item, onClose, open }: Props) {
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Name</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="owner-name-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="email" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Email</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="owner-email-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="phone" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Phone</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="owner-phone-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -106,7 +111,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
           <SheetClose asChild>
             <Button type="button" variant="outline">Cancel</Button>
           </SheetClose>
-          <Button type="submit" form="owners-form" disabled={loading}>
+          <Button type="submit" form="owners-form" disabled={loading} data-testid="owner-submit-button">
             {loading ? 'Saving...' : isEdit ? 'Update' : 'Create'}
           </Button>
         </SheetFooter>

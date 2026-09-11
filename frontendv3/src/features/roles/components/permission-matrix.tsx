@@ -22,20 +22,18 @@ const PERMISSION_MODULES = [
   'division',
   'department',
   'subdivision',
-  'position',
-  'project_type',
-  'projects',
   'phase',
-  'blocks',
-  'lots',
-  'category',
+  'owner',
   'models',
   'model_types',
-  'owner',
+  'emp_settings',
+  'shifts',
+  'project_type',
+  'category',
+  'projects',
   'emp_project',
   'emp_task',
   'emp_list',
-  'emp_settings',
   'administration',
 ]
 
@@ -68,8 +66,10 @@ export function PermissionMatrix({ open, roleId, roleName, onClose }: Permission
       toast.success(`Permissions updated for ${roleName}`)
       onClose()
     },
-    onError: () => {
-      toast.error('Failed to update permissions')
+    onError: (err: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const detail = (err as any)?.response?.data?.detail ?? 'Failed to update permissions'
+      toast.error(detail)
     },
   })
 

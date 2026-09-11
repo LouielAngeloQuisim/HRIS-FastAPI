@@ -1,10 +1,10 @@
 {
   "_meta": {
-    "lastUpdated": "2026-09-02",
+    "lastUpdated": "2026-09-11",
     "verifiedAtCommit": "56ac451",
     "verification": {
-      "tests": "196 passed, 0 failed",
-      "testFiles": 46,
+      "tests": "263 passed, 0 failed",
+      "testFiles": 78,
       "activeFeatures": [
         "auth (sign-in, forgot, sign-up, otp)",
         "dashboard",
@@ -14,9 +14,11 @@
         "employee-projects, emp-tasks, roles",
         "employees (list + profile + CSV import)",
         "shifts (UI only)",
-        "attendance (CSV import wizard — DTR list view pending f4a)"
+        "attendance (DTR list with overtime approve/reject, leave calendar, leave ledger, holiday config \u2014 f4a complete)",
+        "leave-requests (list + approve/reject \u2014 f4b partial)",
+        "dtr-adjustments (list + approve/reject \u2014 f4b partial)"
       ],
-      "eslintErrors": 1,
+      "eslintErrors": 14,
       "eslintPreExisting": true,
       "tsc": "0 errors"
     }
@@ -24,7 +26,7 @@
   "phases": [
     {
       "id": "f0",
-      "title": "Phase 0 — Scaffold & Design Tokens (DONE — pivoted to shadcn defaults)",
+      "title": "Phase 0 \u2014 Scaffold & Design Tokens (DONE \u2014 pivoted to shadcn defaults)",
       "estimate": "1 wk",
       "riskLevel": "normal",
       "dependsOn": null,
@@ -34,11 +36,11 @@
           "done": true
         },
         {
-          "text": "Tailwind config tokens: custom (blue) + zink ramp — DEFERRED (active frontend uses shadcn defaults; see analysis/07-frontend-design.md)",
+          "text": "Tailwind config tokens: custom (blue) + zink ramp \u2014 DEFERRED (active frontend uses shadcn defaults; see analysis/07-frontend-design.md)",
           "done": false
         },
         {
-          "text": "Public Sans font + named spacings (header, vertical-menu) — DEFERRED (default system font stack)",
+          "text": "Public Sans font + named spacings (header, vertical-menu) \u2014 DEFERRED (default system font stack)",
           "done": false
         },
         {
@@ -59,7 +61,7 @@
     },
     {
       "id": "f1",
-      "title": "Phase 1 — Auth & Shell (DONE — reset-password page pending)",
+      "title": "Phase 1 \u2014 Auth & Shell (DONE \u2014 reset-password page pending)",
       "estimate": "1 wk",
       "riskLevel": "normal",
       "dependsOn": "f0",
@@ -73,7 +75,7 @@
           "done": true
         },
         {
-          "text": "Reset password page (form, calls /reset-password/) — NOT BUILT, backend route exists",
+          "text": "Reset password page (form, calls /reset-password/) \u2014 NOT BUILT, backend route exists",
           "done": false
         },
         {
@@ -107,7 +109,7 @@
     },
     {
       "id": "f2",
-      "title": "Phase 2 — CRUD Foundation (DONE — 'Employee Settings' page deferred)",
+      "title": "Phase 2 \u2014 CRUD Foundation (DONE \u2014 'Employee Settings' page deferred)",
       "estimate": "2 wks",
       "riskLevel": "normal",
       "dependsOn": "f1",
@@ -129,12 +131,17 @@
           "done": true
         },
         {
-          "text": "Employee Settings CRUD page — DEFERRED per design §7",
+          "text": "Employee Settings CRUD page \u2014 DEFERRED per design \u00a77",
           "done": false
         },
         {
           "text": "Employee masterlist + profile + CSV import",
           "done": true
+        },
+        {
+          "text": "Employee manual create/edit/delete UI \u2014 GAP, deferred to next phase (f5/f6 or post-f7). CSV import exists; backend CRUD exists at /employees; frontend only has read-only list + profile",
+          "done": false,
+          "note": "Documented gap from QA session 2026-09-11"
         }
       ],
       "testsRequired": [
@@ -146,8 +153,8 @@
     },
     {
       "id": "f3",
-      "title": "Phase 3 — Org / Projects / RBAC (DONE)",
-      "estimate": "1–2 wks",
+      "title": "Phase 3 \u2014 Org / Projects / RBAC (DONE)",
+      "estimate": "1\u20132 wks",
       "riskLevel": "normal",
       "dependsOn": "f2",
       "items": [
@@ -192,30 +199,30 @@
     },
     {
       "id": "f4a",
-      "title": "Phase 4A — Attendance/Leave read views",
+      "title": "Phase 4A \u2014 Attendance/Leave read views",
       "estimate": "part of 2 wks",
       "riskLevel": "high",
       "dependsOn": "f3",
       "items": [
         {
           "text": "Daily Time Records table",
-          "done": false
+          "done": true
         },
         {
           "text": "Leave Calendar",
-          "done": false
+          "done": true
         },
         {
           "text": "Employee Leave ledger display",
-          "done": false
+          "done": true
         },
         {
           "text": "Holiday Configuration display",
-          "done": false
+          "done": true
         },
         {
           "text": "Confirm no client-side recomputation of rendered/late/undertime/OT anywhere",
-          "done": false
+          "done": true
         }
       ],
       "testsRequired": [
@@ -226,22 +233,22 @@
     },
     {
       "id": "f4b",
-      "title": "Phase 4B — Attendance/Leave approval actions",
+      "title": "Phase 4B \u2014 Attendance/Leave approval actions (DONE)",
       "estimate": "part of 2 wks",
       "riskLevel": "high",
       "dependsOn": "f4a",
       "items": [
         {
-          "text": "Overtime Request create/approve",
-          "done": false
+          "text": "Overtime Request create/approve (overtime approve/reject wired in daily-time-records; overtime is a DTR field, not a separate resource)",
+          "done": true
         },
         {
           "text": "Leave Request create/approve",
-          "done": false
+          "done": true
         },
         {
           "text": "DTR adjustment submission",
-          "done": false
+          "done": true
         }
       ],
       "testsRequired": [
@@ -252,7 +259,7 @@
     },
     {
       "id": "f5a",
-      "title": "Phase 5A — Payroll & gov-contribution config editors",
+      "title": "Phase 5A \u2014 Payroll & gov-contribution config editors",
       "estimate": "part of 2 wks",
       "riskLevel": "high",
       "dependsOn": "f4b",
@@ -286,7 +293,7 @@
     },
     {
       "id": "f5b",
-      "title": "Phase 5B — Payroll generation UI",
+      "title": "Phase 5B \u2014 Payroll generation UI",
       "estimate": "part of 2 wks",
       "riskLevel": "high",
       "dependsOn": "f5a",
@@ -312,7 +319,7 @@
           "done": false
         }
       ],
-      "note": "Cross-project dependency: the f5b chain implicitly assumes the backend payroll phases (b4a / b4b / b4c) are complete first. The tracker does not enforce this automatically — it is a manual coordination point between the two rewrites.",
+      "note": "Cross-project dependency: the f5b chain implicitly assumes the backend payroll phases (b4a / b4b / b4c) are complete first. The tracker does not enforce this automatically \u2014 it is a manual coordination point between the two rewrites.",
       "testsRequired": [
         "Payslip renders all backend fields without client-side rounding/recalculation",
         "Generation-trigger disabled state while request is in flight (prevents duplicate submission)"
@@ -321,7 +328,7 @@
     },
     {
       "id": "f5c",
-      "title": "Phase 5C — Verification gate",
+      "title": "Phase 5C \u2014 Verification gate",
       "estimate": "part of 2 wks",
       "riskLevel": "high",
       "dependsOn": "f5b",
@@ -336,13 +343,13 @@
         }
       ],
       "testsRequired": [
-        "Automated check (lint rule or grep-based test) for arithmetic operators near currency-typed props/fields — hard gate before Phase 6"
+        "Automated check (lint rule or grep-based test) for arithmetic operators near currency-typed props/fields \u2014 hard gate before Phase 6"
       ],
       "definitionOfDone": "All tests above pass before phase is marked complete"
     },
     {
       "id": "f6",
-      "title": "Phase 6 — Dashboard & Polish",
+      "title": "Phase 6 \u2014 Dashboard & Polish",
       "estimate": "1 wk",
       "riskLevel": "normal",
       "dependsOn": "f5c",
@@ -377,8 +384,8 @@
     },
     {
       "id": "f7",
-      "title": "Phase 7 — Cutover",
-      "estimate": "—",
+      "title": "Phase 7 \u2014 Cutover",
+      "estimate": "\u2014",
       "riskLevel": "normal",
       "dependsOn": "f6",
       "items": [

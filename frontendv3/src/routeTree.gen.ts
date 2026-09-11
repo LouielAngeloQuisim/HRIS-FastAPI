@@ -36,12 +36,18 @@ import { Route as AuthenticatedOwnersIndexRouteImport } from './routes/_authenti
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelTypesIndexRouteImport } from './routes/_authenticated/model-types/index'
 import { Route as AuthenticatedLotsIndexRouteImport } from './routes/_authenticated/lots/index'
+import { Route as AuthenticatedLeaveRequestsIndexRouteImport } from './routes/_authenticated/leave-requests/index'
+import { Route as AuthenticatedLeaveLedgerIndexRouteImport } from './routes/_authenticated/leave-ledger/index'
+import { Route as AuthenticatedLeaveCalendarIndexRouteImport } from './routes/_authenticated/leave-calendar/index'
+import { Route as AuthenticatedHolidaysIndexRouteImport } from './routes/_authenticated/holidays/index'
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
 import { Route as AuthenticatedEmployeesIndexRouteImport } from './routes/_authenticated/employees/index'
 import { Route as AuthenticatedEmployeeProjectsIndexRouteImport } from './routes/_authenticated/employee-projects/index'
 import { Route as AuthenticatedEmpTasksIndexRouteImport } from './routes/_authenticated/emp-tasks/index'
+import { Route as AuthenticatedDtrAdjustmentsIndexRouteImport } from './routes/_authenticated/dtr-adjustments/index'
 import { Route as AuthenticatedDivisionsIndexRouteImport } from './routes/_authenticated/divisions/index'
 import { Route as AuthenticatedDepartmentsIndexRouteImport } from './routes/_authenticated/departments/index'
+import { Route as AuthenticatedDailyTimeRecordsIndexRouteImport } from './routes/_authenticated/daily-time-records/index'
 import { Route as AuthenticatedChatsIndexRouteImport } from './routes/_authenticated/chats/index'
 import { Route as AuthenticatedCategoriesIndexRouteImport } from './routes/_authenticated/categories/index'
 import { Route as AuthenticatedBlocksIndexRouteImport } from './routes/_authenticated/blocks/index'
@@ -199,6 +205,30 @@ const AuthenticatedLotsIndexRoute = AuthenticatedLotsIndexRouteImport.update({
   path: '/lots/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedLeaveRequestsIndexRoute =
+  AuthenticatedLeaveRequestsIndexRouteImport.update({
+    id: '/leave-requests/',
+    path: '/leave-requests/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedLeaveLedgerIndexRoute =
+  AuthenticatedLeaveLedgerIndexRouteImport.update({
+    id: '/leave-ledger/',
+    path: '/leave-ledger/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedLeaveCalendarIndexRoute =
+  AuthenticatedLeaveCalendarIndexRouteImport.update({
+    id: '/leave-calendar/',
+    path: '/leave-calendar/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedHolidaysIndexRoute =
+  AuthenticatedHolidaysIndexRouteImport.update({
+    id: '/holidays/',
+    path: '/holidays/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedHelpCenterIndexRoute =
   AuthenticatedHelpCenterIndexRouteImport.update({
     id: '/help-center/',
@@ -223,6 +253,12 @@ const AuthenticatedEmpTasksIndexRoute =
     path: '/emp-tasks/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedDtrAdjustmentsIndexRoute =
+  AuthenticatedDtrAdjustmentsIndexRouteImport.update({
+    id: '/dtr-adjustments/',
+    path: '/dtr-adjustments/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDivisionsIndexRoute =
   AuthenticatedDivisionsIndexRouteImport.update({
     id: '/divisions/',
@@ -233,6 +269,12 @@ const AuthenticatedDepartmentsIndexRoute =
   AuthenticatedDepartmentsIndexRouteImport.update({
     id: '/departments/',
     path: '/departments/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedDailyTimeRecordsIndexRoute =
+  AuthenticatedDailyTimeRecordsIndexRouteImport.update({
+    id: '/daily-time-records/',
+    path: '/daily-time-records/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedChatsIndexRoute = AuthenticatedChatsIndexRouteImport.update({
@@ -324,12 +366,18 @@ export interface FileRoutesByFullPath {
   '/blocks/': typeof AuthenticatedBlocksIndexRoute
   '/categories/': typeof AuthenticatedCategoriesIndexRoute
   '/chats/': typeof AuthenticatedChatsIndexRoute
+  '/daily-time-records/': typeof AuthenticatedDailyTimeRecordsIndexRoute
   '/departments/': typeof AuthenticatedDepartmentsIndexRoute
   '/divisions/': typeof AuthenticatedDivisionsIndexRoute
+  '/dtr-adjustments/': typeof AuthenticatedDtrAdjustmentsIndexRoute
   '/emp-tasks/': typeof AuthenticatedEmpTasksIndexRoute
   '/employee-projects/': typeof AuthenticatedEmployeeProjectsIndexRoute
   '/employees/': typeof AuthenticatedEmployeesIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
+  '/holidays/': typeof AuthenticatedHolidaysIndexRoute
+  '/leave-calendar/': typeof AuthenticatedLeaveCalendarIndexRoute
+  '/leave-ledger/': typeof AuthenticatedLeaveLedgerIndexRoute
+  '/leave-requests/': typeof AuthenticatedLeaveRequestsIndexRoute
   '/lots/': typeof AuthenticatedLotsIndexRoute
   '/model-types/': typeof AuthenticatedModelTypesIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
@@ -368,12 +416,18 @@ export interface FileRoutesByTo {
   '/blocks': typeof AuthenticatedBlocksIndexRoute
   '/categories': typeof AuthenticatedCategoriesIndexRoute
   '/chats': typeof AuthenticatedChatsIndexRoute
+  '/daily-time-records': typeof AuthenticatedDailyTimeRecordsIndexRoute
   '/departments': typeof AuthenticatedDepartmentsIndexRoute
   '/divisions': typeof AuthenticatedDivisionsIndexRoute
+  '/dtr-adjustments': typeof AuthenticatedDtrAdjustmentsIndexRoute
   '/emp-tasks': typeof AuthenticatedEmpTasksIndexRoute
   '/employee-projects': typeof AuthenticatedEmployeeProjectsIndexRoute
   '/employees': typeof AuthenticatedEmployeesIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
+  '/holidays': typeof AuthenticatedHolidaysIndexRoute
+  '/leave-calendar': typeof AuthenticatedLeaveCalendarIndexRoute
+  '/leave-ledger': typeof AuthenticatedLeaveLedgerIndexRoute
+  '/leave-requests': typeof AuthenticatedLeaveRequestsIndexRoute
   '/lots': typeof AuthenticatedLotsIndexRoute
   '/model-types': typeof AuthenticatedModelTypesIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
@@ -415,12 +469,18 @@ export interface FileRoutesById {
   '/_authenticated/blocks/': typeof AuthenticatedBlocksIndexRoute
   '/_authenticated/categories/': typeof AuthenticatedCategoriesIndexRoute
   '/_authenticated/chats/': typeof AuthenticatedChatsIndexRoute
+  '/_authenticated/daily-time-records/': typeof AuthenticatedDailyTimeRecordsIndexRoute
   '/_authenticated/departments/': typeof AuthenticatedDepartmentsIndexRoute
   '/_authenticated/divisions/': typeof AuthenticatedDivisionsIndexRoute
+  '/_authenticated/dtr-adjustments/': typeof AuthenticatedDtrAdjustmentsIndexRoute
   '/_authenticated/emp-tasks/': typeof AuthenticatedEmpTasksIndexRoute
   '/_authenticated/employee-projects/': typeof AuthenticatedEmployeeProjectsIndexRoute
   '/_authenticated/employees/': typeof AuthenticatedEmployeesIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
+  '/_authenticated/holidays/': typeof AuthenticatedHolidaysIndexRoute
+  '/_authenticated/leave-calendar/': typeof AuthenticatedLeaveCalendarIndexRoute
+  '/_authenticated/leave-ledger/': typeof AuthenticatedLeaveLedgerIndexRoute
+  '/_authenticated/leave-requests/': typeof AuthenticatedLeaveRequestsIndexRoute
   '/_authenticated/lots/': typeof AuthenticatedLotsIndexRoute
   '/_authenticated/model-types/': typeof AuthenticatedModelTypesIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
@@ -462,12 +522,18 @@ export interface FileRouteTypes {
     | '/blocks/'
     | '/categories/'
     | '/chats/'
+    | '/daily-time-records/'
     | '/departments/'
     | '/divisions/'
+    | '/dtr-adjustments/'
     | '/emp-tasks/'
     | '/employee-projects/'
     | '/employees/'
     | '/help-center/'
+    | '/holidays/'
+    | '/leave-calendar/'
+    | '/leave-ledger/'
+    | '/leave-requests/'
     | '/lots/'
     | '/model-types/'
     | '/models/'
@@ -506,12 +572,18 @@ export interface FileRouteTypes {
     | '/blocks'
     | '/categories'
     | '/chats'
+    | '/daily-time-records'
     | '/departments'
     | '/divisions'
+    | '/dtr-adjustments'
     | '/emp-tasks'
     | '/employee-projects'
     | '/employees'
     | '/help-center'
+    | '/holidays'
+    | '/leave-calendar'
+    | '/leave-ledger'
+    | '/leave-requests'
     | '/lots'
     | '/model-types'
     | '/models'
@@ -552,12 +624,18 @@ export interface FileRouteTypes {
     | '/_authenticated/blocks/'
     | '/_authenticated/categories/'
     | '/_authenticated/chats/'
+    | '/_authenticated/daily-time-records/'
     | '/_authenticated/departments/'
     | '/_authenticated/divisions/'
+    | '/_authenticated/dtr-adjustments/'
     | '/_authenticated/emp-tasks/'
     | '/_authenticated/employee-projects/'
     | '/_authenticated/employees/'
     | '/_authenticated/help-center/'
+    | '/_authenticated/holidays/'
+    | '/_authenticated/leave-calendar/'
+    | '/_authenticated/leave-ledger/'
+    | '/_authenticated/leave-requests/'
     | '/_authenticated/lots/'
     | '/_authenticated/model-types/'
     | '/_authenticated/models/'
@@ -779,6 +857,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedLotsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/leave-requests/': {
+      id: '/_authenticated/leave-requests/'
+      path: '/leave-requests'
+      fullPath: '/leave-requests/'
+      preLoaderRoute: typeof AuthenticatedLeaveRequestsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/leave-ledger/': {
+      id: '/_authenticated/leave-ledger/'
+      path: '/leave-ledger'
+      fullPath: '/leave-ledger/'
+      preLoaderRoute: typeof AuthenticatedLeaveLedgerIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/leave-calendar/': {
+      id: '/_authenticated/leave-calendar/'
+      path: '/leave-calendar'
+      fullPath: '/leave-calendar/'
+      preLoaderRoute: typeof AuthenticatedLeaveCalendarIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/holidays/': {
+      id: '/_authenticated/holidays/'
+      path: '/holidays'
+      fullPath: '/holidays/'
+      preLoaderRoute: typeof AuthenticatedHolidaysIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/help-center/': {
       id: '/_authenticated/help-center/'
       path: '/help-center'
@@ -807,6 +913,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedEmpTasksIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/dtr-adjustments/': {
+      id: '/_authenticated/dtr-adjustments/'
+      path: '/dtr-adjustments'
+      fullPath: '/dtr-adjustments/'
+      preLoaderRoute: typeof AuthenticatedDtrAdjustmentsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/divisions/': {
       id: '/_authenticated/divisions/'
       path: '/divisions'
@@ -819,6 +932,13 @@ declare module '@tanstack/react-router' {
       path: '/departments'
       fullPath: '/departments/'
       preLoaderRoute: typeof AuthenticatedDepartmentsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/daily-time-records/': {
+      id: '/_authenticated/daily-time-records/'
+      path: '/daily-time-records'
+      fullPath: '/daily-time-records/'
+      preLoaderRoute: typeof AuthenticatedDailyTimeRecordsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/chats/': {
@@ -934,12 +1054,18 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedBlocksIndexRoute: typeof AuthenticatedBlocksIndexRoute
   AuthenticatedCategoriesIndexRoute: typeof AuthenticatedCategoriesIndexRoute
   AuthenticatedChatsIndexRoute: typeof AuthenticatedChatsIndexRoute
+  AuthenticatedDailyTimeRecordsIndexRoute: typeof AuthenticatedDailyTimeRecordsIndexRoute
   AuthenticatedDepartmentsIndexRoute: typeof AuthenticatedDepartmentsIndexRoute
   AuthenticatedDivisionsIndexRoute: typeof AuthenticatedDivisionsIndexRoute
+  AuthenticatedDtrAdjustmentsIndexRoute: typeof AuthenticatedDtrAdjustmentsIndexRoute
   AuthenticatedEmpTasksIndexRoute: typeof AuthenticatedEmpTasksIndexRoute
   AuthenticatedEmployeeProjectsIndexRoute: typeof AuthenticatedEmployeeProjectsIndexRoute
   AuthenticatedEmployeesIndexRoute: typeof AuthenticatedEmployeesIndexRoute
   AuthenticatedHelpCenterIndexRoute: typeof AuthenticatedHelpCenterIndexRoute
+  AuthenticatedHolidaysIndexRoute: typeof AuthenticatedHolidaysIndexRoute
+  AuthenticatedLeaveCalendarIndexRoute: typeof AuthenticatedLeaveCalendarIndexRoute
+  AuthenticatedLeaveLedgerIndexRoute: typeof AuthenticatedLeaveLedgerIndexRoute
+  AuthenticatedLeaveRequestsIndexRoute: typeof AuthenticatedLeaveRequestsIndexRoute
   AuthenticatedLotsIndexRoute: typeof AuthenticatedLotsIndexRoute
   AuthenticatedModelTypesIndexRoute: typeof AuthenticatedModelTypesIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
@@ -965,13 +1091,20 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedBlocksIndexRoute: AuthenticatedBlocksIndexRoute,
   AuthenticatedCategoriesIndexRoute: AuthenticatedCategoriesIndexRoute,
   AuthenticatedChatsIndexRoute: AuthenticatedChatsIndexRoute,
+  AuthenticatedDailyTimeRecordsIndexRoute:
+    AuthenticatedDailyTimeRecordsIndexRoute,
   AuthenticatedDepartmentsIndexRoute: AuthenticatedDepartmentsIndexRoute,
   AuthenticatedDivisionsIndexRoute: AuthenticatedDivisionsIndexRoute,
+  AuthenticatedDtrAdjustmentsIndexRoute: AuthenticatedDtrAdjustmentsIndexRoute,
   AuthenticatedEmpTasksIndexRoute: AuthenticatedEmpTasksIndexRoute,
   AuthenticatedEmployeeProjectsIndexRoute:
     AuthenticatedEmployeeProjectsIndexRoute,
   AuthenticatedEmployeesIndexRoute: AuthenticatedEmployeesIndexRoute,
   AuthenticatedHelpCenterIndexRoute: AuthenticatedHelpCenterIndexRoute,
+  AuthenticatedHolidaysIndexRoute: AuthenticatedHolidaysIndexRoute,
+  AuthenticatedLeaveCalendarIndexRoute: AuthenticatedLeaveCalendarIndexRoute,
+  AuthenticatedLeaveLedgerIndexRoute: AuthenticatedLeaveLedgerIndexRoute,
+  AuthenticatedLeaveRequestsIndexRoute: AuthenticatedLeaveRequestsIndexRoute,
   AuthenticatedLotsIndexRoute: AuthenticatedLotsIndexRoute,
   AuthenticatedModelTypesIndexRoute: AuthenticatedModelTypesIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,

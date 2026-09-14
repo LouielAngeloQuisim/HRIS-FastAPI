@@ -1,0 +1,9 @@
+frontendv3/node_modules
+frontendv3/dist
+.git
+.gitignore
+README.md
+.env
+.env.*
+*.log
+.DS_Store

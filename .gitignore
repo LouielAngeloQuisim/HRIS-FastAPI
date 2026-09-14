@@ -5,6 +5,9 @@ node_modules/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+frontendv3/test-results/
+frontendv3/playwright-report/
+frontendv3/test-results.json
 .env
 C:/
 .kilo

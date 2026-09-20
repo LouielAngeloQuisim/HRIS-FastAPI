@@ -50,7 +50,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const { data: empProjectData, isPending: empProjectsPending } = useEmployeeProjects(1, 100)
 
   const empProjectItems = empProjectData?.data.map((ep) => ({
-    label: ep.task || ep.emp_project_id,
+    label: ep.task || ep.id,
     value: ep.id,
   }))
 

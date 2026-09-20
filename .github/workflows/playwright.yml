@@ -1,20 +1,8 @@
 name: Playwright Tests
 
+# Manual only until the compose environment variables are provided (see item 39)
 on:
-  push:
-    branches:
-      - master
-      - main
-  pull_request:
-    types:
-      - opened
-      - synchronize
   workflow_dispatch:
-    inputs:
-      debug_enabled:
-        description: 'Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)'
-        required: false
-        default: 'false'
 
 jobs:
   changes:
@@ -53,7 +41,6 @@ jobs:
           python-version: '3.10'
       - name: Setup tmate session
         uses: mxschmitt/action-tmate@v3
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug_enabled == 'true' }}
         with:
           limit-access-to-actor: true
       - name: Install uv

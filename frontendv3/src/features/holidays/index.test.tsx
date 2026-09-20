@@ -11,9 +11,10 @@ vi.mock('./components/resource-delete-dialog', () => ({
 }))
 
 const { useHolidayConfigsMock } = vi.hoisted(() => ({
-  useHolidayConfigsMock: vi.fn(() => ({ data: { data: [], count: 0 }, isPending: false, isError: false, refetch: vi.fn() })) }))
+  useHolidayConfigsMock: vi.fn()
+}))
 vi.mock('@/lib/api/holidays', () => ({
-  useHolidayConfigs: (...args: unknown[]) => useHolidayConfigsMock(...args),
+  useHolidayConfigs: () => useHolidayConfigsMock(),
 }))
 
 vi.mock('@/components/layout/header', () => ({
@@ -38,6 +39,9 @@ const HOLIDAYS = {
       month_day: '01-01',
       type: 'regular',
       region_code: null,
+      observe_weekend_as: null,
+      multiplier_regular: null,
+      multiplier_overtime: null,
       is_recurring: true,
       is_active: true,
       is_deleted: false,

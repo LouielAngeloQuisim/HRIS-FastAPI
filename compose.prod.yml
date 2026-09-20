@@ -39,7 +39,7 @@ services:
       - traefik-public
 
   backend:
-    image: ghcr.io/louielangeloquisim/hris-fastapi/backend:latest
+    image: ghcr.io/louielangeloquisim/hris-fastapi/backend:${IMAGE_TAG:-latest}
     restart: always
     networks:
       - traefik-public
@@ -81,7 +81,7 @@ services:
       - traefik.http.routers.hris-backend-http.middlewares=https-redirect
 
   frontend:
-    image: ghcr.io/louielangeloquisim/hris-fastapi/frontend:latest
+    image: ghcr.io/louielangeloquisim/hris-fastapi/frontend:${IMAGE_TAG:-latest}
     restart: always
     networks:
       - traefik-public

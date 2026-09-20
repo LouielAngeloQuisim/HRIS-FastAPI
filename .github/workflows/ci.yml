@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 11.17.0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -61,6 +61,7 @@ jobs:
       FIRST_SUPERUSER_PASSWORD: changethis
       SECRET_KEY: changethis
       ENVIRONMENT: local
+      EMAILS_FROM_EMAIL: info@example.com
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7

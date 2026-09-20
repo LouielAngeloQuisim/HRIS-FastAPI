@@ -21,7 +21,7 @@ jobs:
           version: 11.17.0
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm exec tsc -b

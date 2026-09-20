@@ -140,9 +140,8 @@ class Settings(BaseSettings):
     # logging sink is authoritative and the DB sink is off by default so no
     # migration is required to boot.
     AUDIT_ENABLED: bool = True
-    # Phase B5: the DB sink is the authoritative, queryable audit trail. The
-    # ``audit_log`` table ships with the B5 migration, so it defaults on.
-    AUDIT_DB_SINK: bool = True
+    # Off by default. Enable only after health-check exclusion and retention exist.
+    AUDIT_DB_SINK: bool = False
     AUDIT_BODY_MAX_BYTES: int = 4096
 
     # Uploaded 201-file documents are stored here (never in the public web root

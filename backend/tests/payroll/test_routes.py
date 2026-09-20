@@ -216,20 +216,22 @@ class TestLoans:
 
 
 class TestGovernmentCalculators:
-    def test_calculations_invalid_inputs(self, client: TestClient) -> None:
+    def test_calculations_invalid_inputs(self, client: TestClient, superuser_token_headers: dict[str, str]) -> None:
         response = client.post(
             f"{API}/sss/calculate",
             params={"msc": 100.0},
+            headers=superuser_token_headers,
         )
-        assert response.status_code in [200, 404, 400, 422]
+        assert response.status_code in [200, 404, 400, 422], response.text
 
         response = client.post(
             f"{API}/philhealth/calculate",
             params={"salary": 0.0},
+            headers=superuser_token_headers,
         )
-        assert response.status_code in [200, 404, 400, 422]
+        assert response.status_code in [200, 404, 400, 422], response.text
 
-    def test_contribution_calculations_endpoint(self, client: TestClient) -> None:
+    def test_contribution_calculations_endpoint(self, client: TestClient, superuser_token_headers: dict[str, str]) -> None:
         response = client.post(
             f"{API}/calculate-contributions/",
             params={
@@ -237,16 +239,18 @@ class TestGovernmentCalculators:
                 "period_type": "monthly",
                 "effective_date": "2024-01-01",
             },
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
         assert "contributions" in data
         assert all(key in data["contributions"] for key in ["sss_employee", "philhealth_employee", "pagibig_employee", "bir"])
 
-    def test_multiple_calculation_types(self, client: TestClient) -> None:
+    def test_multiple_calculation_types(self, client: TestClient, superuser_token_headers: dict[str, str]) -> None:
         response = client.post(
             f"{API}/calculate-contributions/",
             params={"gross_pay": 18000.0, "period_type": "monthly", "effective_date": "2024-01-01"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
@@ -262,10 +266,11 @@ class TestGovernmentCalculators:
 
 
 class TestPayrollApiHealth:
-    def test_sss_calculate_endpoint_responds(self, client: TestClient) -> None:
+    def test_sss_calculate_endpoint_responds(self, client: TestClient, superuser_token_headers: dict[str, str]) -> None:
         response = client.post(
             f"{API}/sss/calculate",
             params={"msc": 1000.0},
+            headers=superuser_token_headers,
         )
         assert response.status_code in [200, 404, 400]
 
@@ -278,7 +283,7 @@ class TestPayrollApiHealth:
             (f"{API}/calculate-contributions/", {"gross_pay": 1000.0, "period_type": "monthly"}),
         ]
         for endpoint, params in public_endpoints:
-            response = client.post(endpoint, params=params)
+            response = client.post(endpoint, params=params, headers=superuser_token_headers)
             assert response.status_code in [200, 404, 400, 422], f"Endpoint {endpoint} returned {response.status_code}: {response.text}"
 
         protected_endpoints = [

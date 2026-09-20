@@ -5,15 +5,30 @@ from __future__ import annotations
 import json
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.audit.models import AuditLog
 from app.audit.sink import DBAuditSink
 from app.common.audit.redactor import redact_json, redact_payload
-from app.common.audit.sink import AuditRecord
+from app.common.audit.sink import AuditRecord, LogSink, set_audit_sink
 from app.config.database import engine
 from app.config.settings import settings
+
+
+@pytest.fixture(autouse=True)
+def _db_audit_sink():
+    """These persistence tests assume the DB sink is wired.
+
+    `AUDIT_DB_SINK` defaults to False (see settings.py), so set it explicitly
+    here and install the sink on the app before any request runs.
+    """
+    settings.AUDIT_DB_SINK = True
+    set_audit_sink(DBAuditSink())
+    yield
+    settings.AUDIT_DB_SINK = False
+    set_audit_sink(LogSink())
 
 
 class TestRedactor:

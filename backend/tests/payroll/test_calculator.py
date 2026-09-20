@@ -161,10 +161,11 @@ def bir_brackets(db: Session) -> Generator[list[BIRBracket], None, None]:
 
 
 class TestSSSCalculation:
-    def test_calculate_employee_share(self, client: TestClient, sss_brackets: list[SSSBracket]) -> None:
+    def test_calculate_employee_share(self, client: TestClient, superuser_token_headers: dict[str, str], sss_brackets: list[SSSBracket]) -> None:
         response = client.post(
             f"{API}/sss/calculate",
             params={"msc": 10000.0, "effective_date": "2024-01-01"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
@@ -174,10 +175,11 @@ class TestSSSCalculation:
 
 
 class TestPhilHealthCalculation:
-    def test_calculate_employee_share(self, client: TestClient, philhealth_brackets: list[PhilHealthBracket]) -> None:
+    def test_calculate_employee_share(self, client: TestClient, superuser_token_headers: dict[str, str], philhealth_brackets: list[PhilHealthBracket]) -> None:
         response = client.post(
             f"{API}/philhealth/calculate",
             params={"salary": 25000.0, "effective_date": "2024-01-01"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
@@ -186,10 +188,11 @@ class TestPhilHealthCalculation:
 
 
 class TestPagIBIGCalculation:
-    def test_calculate_employee_share_high_salary(self, client: TestClient, pagibig_brackets: list[PagIBIGBracket]) -> None:
+    def test_calculate_employee_share_high_salary(self, client: TestClient, superuser_token_headers: dict[str, str], pagibig_brackets: list[PagIBIGBracket]) -> None:
         response = client.post(
             f"{API}/pagibig/calculate",
             params={"salary": 1800.0, "effective_date": "2024-07-01"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
@@ -197,10 +200,11 @@ class TestPagIBIGCalculation:
         assert data["employer_share"] == pytest.approx(36.0, abs=0.01)
         assert data["total"] == pytest.approx(54.0, abs=0.01)
 
-    def test_calculate_employee_share_very_high_salary(self, client: TestClient, pagibig_brackets: list[PagIBIGBracket]) -> None:
+    def test_calculate_employee_share_very_high_salary(self, client: TestClient, superuser_token_headers: dict[str, str], pagibig_brackets: list[PagIBIGBracket]) -> None:
         response = client.post(
             f"{API}/pagibig/calculate",
             params={"salary": 5000.0, "effective_date": "2024-07-01"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
@@ -209,29 +213,32 @@ class TestPagIBIGCalculation:
 
 
 class TestBIRCalculation:
-    def test_calculate_initial_bracket(self, client: TestClient, bir_brackets: list[BIRBracket]) -> None:
+    def test_calculate_initial_bracket(self, client: TestClient, superuser_token_headers: dict[str, str], bir_brackets: list[BIRBracket]) -> None:
         response = client.post(
             f"{API}/bir/calculate",
             params={"taxable_income": 10000.0, "period_type": "monthly"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
         assert data["tax_amount"] == pytest.approx(2000.0, abs=0.01)
 
-    def test_calculate_mid_range_bracket(self, client: TestClient, bir_brackets: list[BIRBracket]) -> None:
+    def test_calculate_mid_range_bracket(self, client: TestClient, superuser_token_headers: dict[str, str], bir_brackets: list[BIRBracket]) -> None:
         response = client.post(
             f"{API}/bir/calculate",
             params={"taxable_income": 15000.0, "period_type": "monthly"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
         expected_tax = 2083.33 + (15000.0 - 10416.68) * 0.25
         assert data["tax_amount"] == pytest.approx(expected_tax, abs=0.02)
 
-    def test_calculate_high_income_bracket(self, client: TestClient, bir_brackets: list[BIRBracket]) -> None:
+    def test_calculate_high_income_bracket(self, client: TestClient, superuser_token_headers: dict[str, str], bir_brackets: list[BIRBracket]) -> None:
         response = client.post(
             f"{API}/bir/calculate",
             params={"taxable_income": 30000.0, "period_type": "monthly"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
@@ -241,11 +248,12 @@ class TestBIRCalculation:
 
 class TestBatchContributionCalculation:
     def test_calculate_contributions(
-        self, client: TestClient, sss_brackets: list[SSSBracket], philhealth_brackets: list[PhilHealthBracket], pagibig_brackets: list[PagIBIGBracket]
+        self, client: TestClient, superuser_token_headers: dict[str, str], sss_brackets: list[SSSBracket], philhealth_brackets: list[PhilHealthBracket], pagibig_brackets: list[PagIBIGBracket]
     ) -> None:
         response = client.post(
             f"{API}/calculate-contributions/",
             params={"gross_pay": 25000.0, "period_type": "monthly", "effective_date": "2024-01-01"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
@@ -256,11 +264,12 @@ class TestBatchContributionCalculation:
         assert contributions["pagibig_employee"] == pytest.approx(30.0, abs=0.01)
 
     def test_calculate_contributions_without_effective_date(
-        self, client: TestClient, sss_brackets: list[SSSBracket], philhealth_brackets: list[PhilHealthBracket], pagibig_brackets: list[PagIBIGBracket]
+        self, client: TestClient, superuser_token_headers: dict[str, str], sss_brackets: list[SSSBracket], philhealth_brackets: list[PhilHealthBracket], pagibig_brackets: list[PagIBIGBracket]
     ) -> None:
         response = client.post(
             f"{API}/calculate-contributions/",
             params={"gross_pay": 15000.0, "period_type": "monthly"},
+            headers=superuser_token_headers,
         )
         assert response.status_code == 200, response.text
         data = response.json()
@@ -322,12 +331,62 @@ class TestBracketListEndpoints:
 
 
 class TestPayrollApiHealth:
-    def test_sss_calculate_endpoint_responds(self, client: TestClient) -> None:
+    def test_sss_calculate_endpoint_responds(self, client: TestClient, superuser_token_headers: dict[str, str]) -> None:
         response = client.post(
             f"{API}/sss/calculate",
             params={"msc": 1000.0},
+            headers=superuser_token_headers,
         )
         assert response.status_code in [200, 404, 400]
+
+
+class TestCalculatorRequiresAuthentication:
+    """The five contribution calculators were public; they now require a valid token."""
+
+    def test_calculate_contributions_requires_auth(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API}/calculate-contributions/",
+            params={"gross_pay": 25000.0, "period_type": "monthly"},
+        )
+        assert response.status_code == 401, response.text
+
+    def test_sss_calculate_requires_auth(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API}/sss/calculate",
+            params={"msc": 10000.0},
+        )
+        assert response.status_code == 401, response.text
+
+    def test_philhealth_calculate_requires_auth(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API}/philhealth/calculate",
+            params={"salary": 25000.0},
+        )
+        assert response.status_code == 401, response.text
+
+    def test_pagibig_calculate_requires_auth(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API}/pagibig/calculate",
+            params={"salary": 25000.0},
+        )
+        assert response.status_code == 401, response.text
+
+    def test_bir_calculate_requires_auth(self, client: TestClient) -> None:
+        response = client.post(
+            f"{API}/bir/calculate",
+            params={"taxable_income": 25000.0, "period_type": "monthly"},
+        )
+        assert response.status_code == 401, response.text
+
+    def test_sss_calculate_authenticated_returns_200(
+        self, client: TestClient, superuser_token_headers: dict[str, str], sss_brackets: list[SSSBracket]
+    ) -> None:
+        response = client.post(
+            f"{API}/sss/calculate",
+            params={"msc": 10000.0, "effective_date": "2024-01-01"},
+            headers=superuser_token_headers,
+        )
+        assert response.status_code == 200, response.text
 
 
 if __name__ == "__main__":

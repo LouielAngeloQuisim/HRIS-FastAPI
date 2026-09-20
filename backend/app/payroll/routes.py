@@ -324,6 +324,7 @@ async def calculate_contributions_endpoint(
     period_type: str = Query(default="monthly", description="Pay period type (daily/weekly/semi_monthly/monthly)"),
     effective_date: str | None = Query(default=None, description="Optional effective date for rate lookup"),
     session: SessionDep,
+    _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate all government contributions for a given gross pay amount."""
     result = calculate_all_contributions(session, gross_pay, period_type, effective_date)
@@ -336,6 +337,7 @@ async def calculate_sss(
     msc: Decimal = Query(..., gt=0, description="Monthly Salary Credit"),
     effective_date: str | None = Query(default=None),
     session: SessionDep,
+    _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate total SSS contribution (employee + employer) for a given MSC."""
     employee = calculate_sss_employee_share(session, msc, effective_date)
@@ -349,6 +351,7 @@ async def calculate_philhealth(
     salary: Decimal = Query(..., gt=0, description="Basic salary"),
     effective_date: str | None = Query(default=None),
     session: SessionDep,
+    _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate PhilHealth contribution (employee + employer)."""
     employee = calculate_philhealth_employee_share(session, salary, effective_date)
@@ -362,6 +365,7 @@ async def calculate_pagibig(
     salary: Decimal = Query(..., gt=0, description="Basic salary"),
     effective_date: str | None = Query(default=None),
     session: SessionDep,
+    _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate Pag-IBIG contribution (employee + employer)."""
     employee = calculate_pagibig_employee_share(session, salary, effective_date)
@@ -375,6 +379,7 @@ async def calculate_bir(
     taxable_income: Decimal = Query(..., gt=0, description="Taxable income"),
     period_type: str = Query(default="monthly", description="Pay period type for BIR bracket lookup"),
     session: SessionDep,
+    _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate BIR withholding tax."""
     tax = calculate_bir_tax(session, taxable_income, period_type)

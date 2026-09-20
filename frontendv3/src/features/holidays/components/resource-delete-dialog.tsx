@@ -59,11 +59,11 @@ export function ResourceDeleteDialog<T extends { id: string; name?: string | nul
       open={open}
       onOpenChange={onOpenChange}
       title={title}
-      description={desc}
-      confirmLabel={mutation.isPending ? 'Deleting...' : 'Delete'}
-      variant="destructive"
-      loading={mutation.isPending}
-      onConfirm={handleDelete}
+      desc={desc}
+      confirmText={mutation.isPending ? 'Deleting...' : 'Delete'}
+      destructive
+      isLoading={mutation.isPending}
+      handleConfirm={handleDelete}
     />
   )
 }

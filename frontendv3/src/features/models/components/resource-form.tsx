@@ -45,7 +45,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const { data: modelTypeData, isPending: modelTypesPending } = useModelTypes(1, 100)
 
   const modelTypeItems = modelTypeData?.data.map((mt) => ({
-    label: mt.name,
+    label: mt.name || mt.code,
     value: mt.id,
   }))
 

@@ -41,8 +41,6 @@ const formSchema = z.object({
   is_recurring: z.boolean().default(true),
 })
 
-type FormData = z.infer<typeof formSchema>
-
 interface Props {
   item: HolidayConfigPublic | null
   onClose: () => void
@@ -54,7 +52,7 @@ export function ResourceForm({ item, open, onClose }: Props) {
   const createMutation = useCreateHolidayConfig()
   const updateMutation = useUpdateHolidayConfig()
 
-  const form = useForm<FormData>({
+  const form = useForm<z.input<typeof formSchema>, unknown, z.output<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       code: item?.code ?? '',
@@ -66,7 +64,7 @@ export function ResourceForm({ item, open, onClose }: Props) {
     },
   })
 
-  const onSubmit = async (data: FormData) => {
+  const onSubmit = async (data: z.output<typeof formSchema>) => {
     try {
       if (isEdit && item?.id) {
         await updateMutation.mutateAsync({ id: item.id, data: data as unknown as HolidayConfigUpdate })

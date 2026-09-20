@@ -21,7 +21,6 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { useCreateSubdivision, useUpdateSubdivision } from '@/lib/api/subdivisions'
-import { useDepartments } from '@/lib/api/departments'
 import type { SubdivisionPublic, SubdivisionCreate, SubdivisionUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
@@ -29,7 +28,6 @@ const formSchema = z.object({
   name: z.string().optional(),
   description: z.string().optional(),
   location: z.string().optional(),
-  department_id: z.string().optional(),
 })
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FormData = any
@@ -44,12 +42,6 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const isEdit = Boolean(item?.id)
   const createMutation = useCreateSubdivision()
   const updateMutation = useUpdateSubdivision()
-  const { data: departmentData, isPending: departmentsPending } = useDepartments(1, 100)
-
-  const departmentItems = departmentData?.data.map((dept) => ({
-    label: dept.name,
-    value: dept.id,
-  }))
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -58,7 +50,6 @@ export function ResourceForm({ item, onClose, open }: Props) {
       name: item?.name ?? '',
       description: item?.description ?? '',
       location: item?.location ?? '',
-      department_id: item?.department_id ?? '',
     },
   })
 
@@ -114,22 +105,6 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Location</FormLabel>
                   <FormControl><Input {...field} value={field.value ?? ''} data-testid="subdivision-location-input" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="department_id" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Department</FormLabel>
-                  <FormControl>
-                     <SelectDropdown
-                       defaultValue={field.value}
-                       onValueChange={field.onChange}
-                       placeholder="Select department"
-                       items={departmentItems ?? []}
-                       isPending={departmentsPending}
-                       data-testid="subdivision-department-select"
-                     />
-                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />

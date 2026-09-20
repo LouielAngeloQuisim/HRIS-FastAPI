@@ -8,6 +8,7 @@ employees); those bugs are not reproduced here (design §1.6 / Q10).
 
 from sqlmodel import Session, func, select
 
+from app.attendance.adjustment_models import DtrAdjustment
 from app.dashboard.schemas import DashboardStats
 from app.employee.models import (
     Department,
@@ -19,6 +20,8 @@ from app.employee.models import (
     Project,
     Subdivision,
 )
+from app.leave.models import LeaveRequest
+from app.payroll.models import PayrollEntry, PayrollRun
 
 # Counted tables keyed by (model, label) for the shared counter helper.
 _COUNTED = [
@@ -59,4 +62,28 @@ def build_dashboard_stats(*, session: Session) -> DashboardStats:
     for model, label in _COUNTED:
         setattr(stats, label, _count_active(session, model))
     stats.dtr_records_daily_count = _dtr_records_daily_count(session)
+    stats.payroll_runs_count = _count_active(session, PayrollRun)
+    stats.pending_leave_requests = session.exec(
+        select(func.count()).select_from(LeaveRequest).where(
+            LeaveRequest.is_deleted == False,  # noqa: E712
+            LeaveRequest.status == "pending",
+        )
+    ).one()
+    stats.pending_dtr_adjustments = session.exec(
+        select(func.count()).select_from(DtrAdjustment).where(
+            DtrAdjustment.is_deleted == False,  # noqa: E712
+            DtrAdjustment.status == "pending",
+        )
+    ).one()
+
+    payroll_totals = session.exec(
+        select(
+            func.coalesce(func.sum(PayrollEntry.gross_pay), 0),
+            func.coalesce(func.sum(PayrollEntry.net_pay), 0),
+        )
+        .select_from(PayrollEntry)
+        .where(PayrollEntry.is_deleted == False)  # noqa: E712
+    ).one()
+    stats.payroll_total_gross = float(payroll_totals[0])
+    stats.payroll_total_net = float(payroll_totals[1])
     return stats

@@ -17,3 +17,8 @@ class DashboardStats(SQLModel):
     employee_projects: int = 0
     model_count: int = 0
     dtr_records_daily_count: int = 0
+    payroll_runs_count: int = 0
+    payroll_total_gross: float = 0
+    payroll_total_net: float = 0
+    pending_leave_requests: int = 0
+    pending_dtr_adjustments: int = 0

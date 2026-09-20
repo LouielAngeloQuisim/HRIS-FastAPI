@@ -19,6 +19,8 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.20.0",
     "pyjwt<3.0.0,>=2.8.0",
     "pwdlib[argon2,bcrypt]>=0.3.0",
+    "pymysql>=1.1.0",
+    "reportlab>=5.0.1",
 ]
 
 [dependency-groups]
@@ -28,6 +30,7 @@ dev = [
     "ruff<1.0.0,>=0.2.2",
     "prek>=0.2.24,<1.0.0",
     "coverage<8.0.0,>=7.4.3",
+    "types-reportlab>=5.0.0.20260911",
 ]
 
 [build-system]

@@ -10,9 +10,10 @@ Import this module for its side effects only.
 
 from sqlmodel import SQLModel
 
-from app.auth.models import RefreshToken
 from app.attendance.adjustment_models import DtrAdjustment
 from app.attendance.models import DailyTimeRecord, Shift
+from app.audit.models import AuditLog
+from app.auth.models import RefreshToken
 from app.employee.models import (
     Blocks,
     Category,
@@ -34,6 +35,35 @@ from app.employee.models import (
     Subdivision,
 )
 from app.item.models import Item
+from app.leave.models import (
+    EmployeeLeaveEnrollment,
+    HolidayConfig,
+    HolidayInstance,
+    LeaveLedgerEntry,
+    LeavePolicy,
+    LeaveRequest,
+    LeaveRequestEvent,
+)
+from app.notification.models import Notification
+from app.payroll.models import (
+    BIRBracket,
+    ConnectorType,
+    CutoffType,
+    EmployeeSalary,
+    IntegrationConfig,
+    IntegrationMapping,
+    Loan,
+    LoanAmortization,
+    LoanType,
+    PagIBIGBracket,
+    PayrollAdjustmentType,
+    PayrollEntry,
+    PayrollRun,
+    PayrollRunStatus,
+    PayType,
+    PhilHealthBracket,
+    SSSBracket,
+)
 from app.rbac.models import Module, Role, RolePermission
 from app.user.models import User
 
@@ -45,23 +75,49 @@ __all__ = [
     "Role",
     "RolePermission",
     "User",
+    "AuditLog",
+    "BIRBracket",
     "Blocks",
     "Category",
+    "ConnectorType",
+    "CutoffType",
     "Department",
     "Division",
     "EmpTask",
     "EmployeeAdditionalRecords",
     "EmployeeAttachments",
+    "EmployeeLeaveEnrollment",
     "EmployeeProjects",
     "EmployeeRecords",
+    "EmployeeSalary",
+    "HolidayConfig",
+    "HolidayInstance",
+    "IntegrationConfig",
+    "IntegrationMapping",
     "Lots",
+    "LeaveLedgerEntry",
+    "LeavePolicy",
+    "LeaveRequest",
+    "LeaveRequestEvent",
+    "Loan",
+    "LoanAmortization",
+    "LoanType",
     "Model",
     "ModelTypes",
+    "Notification",
     "Owner",
+    "PagIBIGBracket",
+    "PayrollAdjustmentType",
+    "PayrollEntry",
+    "PayrollRun",
+    "PayrollRunStatus",
+    "PayType",
     "Phase",
+    "PhilHealthBracket",
     "Position",
     "Project",
     "ProjectType",
+    "SSSBracket",
     "Subdivision",
     "Shift",
     "DailyTimeRecord",

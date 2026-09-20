@@ -11,7 +11,6 @@ from app.rbac.models import Module, PermissionAction, Role, RolePermission
 from app.rbac.seed import (
     DEFAULT_EMPLOYEE_ROLE_CODE,
     DEFAULT_ROLES,
-    EXPECTED_MAIN_MODULE_COUNT,
     EXPECTED_SUBMODULE_COUNT,
     LEGACY_SUBMODULE_CODE_MAP,
     MAIN_MODULES,
@@ -25,17 +24,22 @@ from app.user.models import User, UserCreate
 from app.user.services import create_user
 from tests.utils.utils import random_email, random_lower_string
 
-# Verbatim from src/Entity/MainModules.php - the five array columns.
+# Verbatim from src/Entity/MainModules.php - the five array columns,
+# plus Phase B5 additions (notification, audit, report).
 LEGACY_MAIN_MODULES = {
     "project",
     "humanres",
     "administration",
     "payroll",
     "emp_leaves",
+    "notification",
+    "audit",
+    "report",
 }
 
 # Verbatim from src/Entity/SubModules.php - the 24 array columns, plus the 3
 # Phase 1 submodules added because they had no legacy permission slot.
+# Phase B5 adds 1 submodule (audit_log); notification and report are main modules.
 LEGACY_SUBMODULES = {
     "daily_time_record",
     "subdivision",
@@ -65,6 +69,8 @@ LEGACY_SUBMODULES = {
     "project_type",
     "category",
     "emp_task",
+    # Phase B5 additions:
+    "audit_log",
 }
 
 # What those 24 legacy codes become after the documented collision mapping.
@@ -89,7 +95,7 @@ class TestModuleSeedMatchesLegacy:
             .select_from(Module)
             .where(Module.parent_id.is_(None))  # type: ignore[union-attr]
         ).one()
-        assert count == EXPECTED_MAIN_MODULE_COUNT
+        assert count == 8
 
     def test_submodules_match_legacy_exactly(self, db: Session) -> None:
         seeded = {
@@ -127,13 +133,13 @@ class TestModuleSeedMatchesLegacy:
                 f"legacy submodule {legacy_code} has no counterpart"
             )
 
-    def test_there_are_twenty_four_submodules(self, db: Session) -> None:
+    def test_there_are_twenty_eight_submodules(self, db: Session) -> None:
         count = db.exec(
             select(func.count())
             .select_from(Module)
             .where(Module.parent_id.is_not(None))  # type: ignore[union-attr]
         ).one()
-        assert count == EXPECTED_SUBMODULE_COUNT
+        assert count == 28
 
     def test_no_submodule_is_orphaned(self, db: Session) -> None:
         main_ids = {

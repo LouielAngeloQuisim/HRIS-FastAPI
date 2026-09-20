@@ -71,6 +71,9 @@ MAIN_MODULES: list[tuple[str, str]] = [
     ("administration", "Administration"),
     ("payroll", "Payroll Administration"),
     ("emp_leaves", "Leave Administration"),
+    ("notification", "Notifications"),
+    ("audit", "Audit Log"),
+    ("report", "Reports"),
 ]
 
 # Parent code -> [(submodule code, display name)], in sidebar order.
@@ -112,13 +115,19 @@ SUBMODULES: dict[str, list[tuple[str, str]]] = {
         ("leave_request", "Leave Request"),
         ("leave_calendar", "Leave Calendar"),
     ],
+    "notification": [],
+    "audit": [
+        ("audit_log", "Audit Log"),
+    ],
+    "report": [],
 }
 
 # Sanity constants the tests assert against.
-EXPECTED_MAIN_MODULE_COUNT = 5
+EXPECTED_MAIN_MODULE_COUNT = 8
 # Legacy seeded 24 submodules; Phase 1 adds 3 for resources that had no legacy
 # permission slot (category, emp_task, project_type) so they can be gated cleanly.
-EXPECTED_SUBMODULE_COUNT = 27
+# Phase B5 adds 1 submodule (audit_log); notification and report are main modules.
+EXPECTED_SUBMODULE_COUNT = 28
 
 
 @dataclass(frozen=True)
@@ -155,6 +164,9 @@ DEFAULT_ROLES: list[RoleSeed] = [
             "project": FULL,
             "payroll": VIEW_ONLY,
             "emp_leaves": VIEW_ONLY,
+            "notification": VIEW_ONLY,
+            "audit": VIEW_ONLY,
+            "report": VIEW_ONLY,
         },
     ),
     RoleSeed(
@@ -170,6 +182,9 @@ DEFAULT_ROLES: list[RoleSeed] = [
             "administration": VIEW_ONLY,
             "project": VIEW_ONLY,
             "payroll": NONE,
+            "notification": VIEW_ONLY,
+            "audit": VIEW_ONLY,
+            "report": VIEW_ONLY,
         },
         overrides={
             # HR maintains the shift definitions attendance is measured against.
@@ -196,6 +211,9 @@ DEFAULT_ROLES: list[RoleSeed] = [
             "emp_leaves": VIEW_ONLY,
             "administration": NONE,
             "project": NONE,
+            "notification": VIEW_ONLY,
+            "audit": VIEW_ONLY,
+            "report": FULL,
         },
     ),
     RoleSeed(
@@ -212,6 +230,9 @@ DEFAULT_ROLES: list[RoleSeed] = [
             "administration": NONE,
             "payroll": NONE,
             "emp_leaves": NONE,
+            "notification": NONE,
+            "audit": NONE,
+            "report": NONE,
         },
         overrides={
             "daily_time_record": VIEW_ONLY,

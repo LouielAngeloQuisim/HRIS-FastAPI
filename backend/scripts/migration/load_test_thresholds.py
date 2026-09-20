@@ -56,11 +56,13 @@ def _seed_employees(session: Session, count: int) -> None:
 
 def run_load_test(args: argparse.Namespace) -> int:
     engine = create_engine(args.pg_url, pool_pre_ping=True)
+    employees = args.employees
+    threshold_seconds = args.threshold_seconds
     with Session(engine) as session:
-        sys.stdout.write(f"[load] Seeding {args.employees} employees...\n")
-        _seed_employees(session, args.employees)
+        sys.stdout.write(f"[load] Seeding {employees} employees...\n")
+        _seed_employees(session, employees)
 
-        sys.stdout.write(f"[load] Running payroll generation for {args.employees} employees...\n")
+        sys.stdout.write(f"[load] Running payroll generation for {employees} employees...\n")
         start = time.perf_counter()
         try:
             generate_payroll(
@@ -74,13 +76,13 @@ def run_load_test(args: argparse.Namespace) -> int:
             sys.stdout.write(f"[load] Generation failed: {exc}\n")
             return 1
         elapsed = time.perf_counter() - start
-        sys.stdout.write(f"[load] Elapsed: {elapsed:.3f}s (threshold: {args.threshold_seconds}s)\n")
+        sys.stdout.write(f"[load] Elapsed: {elapsed:.3f}s (threshold: {threshold_seconds}s)\n")
 
-        if elapsed <= args.threshold_seconds:
+        if elapsed <= threshold_seconds:
             sys.stdout.write("[load] PASS\n")
             return 0
         else:
-            sys.stdout.write(f"[load] FAIL: {elapsed:.3f}s exceeds {args.threshold_seconds}s threshold\n")
+            sys.stdout.write(f"[load] FAIL: {elapsed:.3f}s exceeds {threshold_seconds}s threshold\n")
             return 1
 
 

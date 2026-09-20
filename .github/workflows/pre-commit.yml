@@ -55,7 +55,7 @@ jobs:
         run: bun ci
       - name: Run prek - pre-commit
         id: precommit
-        run: uvx prek run --from-ref origin/${GITHUB_BASE_REF} --to-ref HEAD --show-diff-on-failure
+        run: uvx prek run --from-ref "origin/${GITHUB_BASE_REF}" --to-ref HEAD --show-diff-on-failure
         continue-on-error: true
       - name: Commit and push changes
         if: env.HAS_SECRETS == 'true'

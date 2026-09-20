@@ -3,6 +3,16 @@ name: Build and Deploy
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - docs/**
+      - analysis/**
+      - .kilo/**
+      - '**/*.md'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -10,7 +20,13 @@ env:
   IMAGE_NAME_FRONTEND: louielangeloquisim/hris-fastapi/frontend
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      actions: read
+
   build-and-push:
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -63,9 +79,37 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
+            set -euo pipefail
             cd ${{ secrets.VM_PROJECT_PATH }}
             git pull origin main
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker compose -f compose.prod.yml pull
-            docker compose -f compose.prod.yml up -d --remove-orphans
+            export IMAGE_TAG=${{ github.sha }}
+            C="docker compose -f compose.prod.yml"
+            $C pull
+            mkdir -p "$HOME/backups"
+            $C exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > "$HOME/backups/pre-deploy-$(date +%Y%m%d-%H%M%S).sql.gz"
+            ls -t "$HOME"/backups/pre-deploy-*.sql.gz | tail -n +8 | xargs -r rm --
+            $C run --rm -T --no-deps backend bash scripts/prestart.sh
+            $C up -d --remove-orphans
+            cid=$($C ps -q backend)
+            s=starting
+            for i in $(seq 1 36); do s=$(docker inspect -f '{{.State.Health.Status}}' "$cid"); [ "$s" = healthy ] && break; sleep 5; done
+            [ "$s" = healthy ] || { $C logs --tail 60 backend; exit 1; }
+            [ -f "$HOME/.hris_deployed_tag" ] && cp "$HOME/.hris_deployed_tag" "$HOME/.hris_previous_tag" || true
+            echo "$IMAGE_TAG" > "$HOME/.hris_deployed_tag"
             docker image prune -f
+
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify API and Frontend health
+        run: |
+          for i in $(seq 1 12); do
+            api_code=$(curl -s -o /dev/null -w '%{http_code}' https://api.hrisly.duckdns.org/api/v1/utils/health-check/)
+            fe_code=$(curl -s -o /dev/null -w '%{http_code}' https://dashboard.hrisly.duckdns.org/)
+            echo "Attempt $i: api=$api_code fe=$fe_code"
+            [ "$api_code" = "200" ] && [ "$fe_code" = "200" ] && exit 0
+            sleep 10
+          done
+          exit 1

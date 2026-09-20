@@ -23,6 +23,12 @@ PUBLIC_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/reset-password/"),
     # Liveness probe. Returns a constant; leaks nothing.
     ("GET", "/api/v1/utils/health-check/"),
+    # Government contribution calculators. Pure functions, no side effects.
+    ("POST", "/api/v1/payroll/calculate-contributions/"),
+    ("POST", "/api/v1/payroll/sss/calculate"),
+    ("POST", "/api/v1/payroll/philhealth/calculate"),
+    ("POST", "/api/v1/payroll/pagibig/calculate"),
+    ("POST", "/api/v1/payroll/bir/calculate"),
 }
 
 # Routes that are exempt because they are mounted only outside production.

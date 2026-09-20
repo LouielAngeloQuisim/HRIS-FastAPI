@@ -1,8 +1,8 @@
 from collections.abc import Generator
-from typing import Annotated
+from typing import Annotated, Any
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import ValidationError
 from sqlmodel import Session
@@ -19,38 +19,7 @@ reusable_oauth2 = OAuth2PasswordBearer(
 CREDENTIALS_HEADERS = {"WWW-Authenticate": "Bearer"}
 
 
-def get_engine():
-    from app.config.database import engine
-
-    return engine
-
-
-def get_db() -> Generator[Session, None, None]:
-    with Session(get_engine()) as session:
-        yield session
-
-
-SessionDep = Annotated[Session, Depends(get_db)]
-TokenDep = Annotated[str, Depends(reusable_oauth2)]
-
-
-from collections.abc import Generator
-from typing import Annotated
-
-from fastapi import Depends, Request
-from fastapi.security import OAuth2PasswordBearer
-from sqlmodel import Session
-
-from app.config.settings import settings
-
-reusable_oauth2 = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_STR}/login/access-token"
-)
-
-CREDENTIALS_HEADERS = {"WWW-Authenticate": "Bearer"}
-
-
-def get_engine():
+def get_engine() -> Any:
     from app.config.database import engine
 
     return engine

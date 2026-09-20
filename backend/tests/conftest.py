@@ -16,6 +16,116 @@ from app.user.models import User
 from tests.utils.user import authentication_token_from_email
 from tests.utils.utils import get_superuser_token_headers
 
+
+# Phase B4A models (needed by tests)
+from app.payroll.models import (
+    SSSBracket,
+    PhilHealthBracket,
+    PagIBIGBracket,
+    BIRBracket,
+    EmployeeSalary,
+    PayrollRun,
+    PayrollEntry,
+    Loan,
+    LoanAmortization,
+    IntegrationConfig,
+    IntegrationMapping,
+)
+
+from app.payroll.schemas import (
+    SSSBracketList,
+    PhilHealthBracketList,
+    PagIBIGBracketList,
+    BIRBracketList,
+    EmployeeSalaryCreate,
+    EmployeeSalaryUpdate,
+    EmployeeSalaryPublic,
+    PayrollRunCreate,
+    PayrollRunPublic,
+    PayrollRunDetail,
+    PayrollRunList,
+    PayrollEntryPublic,
+    PayrollEntryPreview,
+    PayrollRunPreview,
+    LoanCreate,
+    LoanUpdate,
+    LoanPublic,
+    LoanList,
+    LoanAmortizationCreate,
+    LoanAmortizationPublic,
+    IntegrationConfigCreate,
+    IntegrationConfigUpdate,
+    IntegrationConfigPublic,
+    IntegrationConfigList,
+    IntegrationConfigDetail,
+    IntegrationMappingCreate,
+    IntegrationMappingUpdate,
+    IntegrationMappingPublic,
+    IntegrationMappingList,
+)
+
+# Leave models (needed by tests)
+from app.leave.models import (
+    LeavePolicy,
+    EmployeeLeaveEnrollment,
+    LeaveRequest,
+    LeaveLedgerEntry,
+    HolidayConfig,
+    HolidayInstance,
+)
+
+# Employee models (needed by tests)
+from app.employee.models import (
+    EmployeeRecords,
+    EmployeeStatus,
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def db() -> Generator[Session, None, None]:
+    with Session(engine) as session:
+        init_db(session)
+        yield session
+        session.execute(delete(RefreshToken))
+        statement = delete(Item)
+        session.execute(statement)
+        from sqlmodel import text as _text
+
+        for table in PHASE1_TABLES:
+            session.exec(_text(f"DELETE FROM {table}"))
+        session.execute(delete(User))
+        session.commit()
+
+
+class TestDBSession:
+    def get_session(self) -> Generator[Session, None, None]:
+        with Session(engine) as session:
+            yield session
+
+
+@pytest.fixture(scope="session")
+def test_db_session() -> TestDBSession:
+    return TestDBSession()
+
+
+@pytest.fixture(scope="module")
+def client() -> Generator[TestClient, None, None]:
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture(scope="module")
+def superuser_token_headers(client: TestClient) -> dict[str, str]:
+    return get_superuser_token_headers(client)
+
+
+@pytest.fixture(scope="module")
+def normal_user_token_headers(client: TestClient, db: Session) -> dict[str, str]:
+    return authentication_token_from_email(
+        client=client, email=settings.EMAIL_TEST_USER, db=db
+    )
+
+
 # Phase 1 tables, ordered so FK-referencing tables are deleted first.
 PHASE1_TABLES = [
     "emp_task",
@@ -47,41 +157,19 @@ PHASE1_TABLES = [
     "holiday_instance",
     "holiday_config",
     "leave_policy",
+    # Phase B4A — Payroll & Integration
+    "integration_mapping",
+    "integration_config",
+    "loan_amortization",
+    "loan",
+    "payroll_entry",
+    "payroll_run",
+    "employee_salary",
+    "bir_bracket",
+    "pagibig_bracket",
+    "philhealth_bracket",
+    "sss_bracket",
 ]
-
-
-@pytest.fixture(scope="session", autouse=True)
-def db() -> Generator[Session, None, None]:
-    with Session(engine) as session:
-        init_db(session)
-        yield session
-        session.execute(delete(RefreshToken))
-        statement = delete(Item)
-        session.execute(statement)
-        from sqlmodel import text as _text
-
-        for table in PHASE1_TABLES:
-            session.exec(_text(f"DELETE FROM {table}"))
-        session.execute(delete(User))
-        session.commit()
-
-
-@pytest.fixture(scope="module")
-def client() -> Generator[TestClient, None, None]:
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture(scope="module")
-def superuser_token_headers(client: TestClient) -> dict[str, str]:
-    return get_superuser_token_headers(client)
-
-
-@pytest.fixture(scope="module")
-def normal_user_token_headers(client: TestClient, db: Session) -> dict[str, str]:
-    return authentication_token_from_email(
-        client=client, email=settings.EMAIL_TEST_USER, db=db
-    )
 
 
 def pytest_terminal_summary(

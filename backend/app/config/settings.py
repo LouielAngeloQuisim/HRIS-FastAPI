@@ -120,6 +120,19 @@ class Settings(BaseSettings):
         "violations",
         "medical_drug_tests",
         "dependents",
+        # Phase B5 — payroll sensitive fields must never appear in audit logs.
+        "basic_rate",
+        "salary",
+        "gross_pay",
+        "net_pay",
+        "total_deductions",
+        "overtime_pay",
+        "thirteenth_month",
+        "non_taxable_income",
+        "taxable_income",
+        "loan_amount",
+        "loan_balance",
+        "amortization_amount",
     ]
 
     # Audit middleware: logs method/path/status/user/duration with redacted
@@ -127,7 +140,9 @@ class Settings(BaseSettings):
     # logging sink is authoritative and the DB sink is off by default so no
     # migration is required to boot.
     AUDIT_ENABLED: bool = True
-    AUDIT_DB_SINK: bool = False
+    # Phase B5: the DB sink is the authoritative, queryable audit trail. The
+    # ``audit_log`` table ships with the B5 migration, so it defaults on.
+    AUDIT_DB_SINK: bool = True
     AUDIT_BODY_MAX_BYTES: int = 4096
 
     # Uploaded 201-file documents are stored here (never in the public web root

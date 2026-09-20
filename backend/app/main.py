@@ -46,6 +46,12 @@ app = FastAPI(
 _configure_audit_logging()
 register_exception_handlers(app)
 
+if settings.AUDIT_ENABLED and settings.AUDIT_DB_SINK:
+    from app.audit.sink import DBAuditSink
+    from app.common.audit import set_audit_sink
+
+    set_audit_sink(DBAuditSink())
+
 if settings.AUDIT_ENABLED:
     app.add_middleware(AuditMiddleware)
 

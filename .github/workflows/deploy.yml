@@ -10,6 +10,9 @@ on:
       - '**/*.md'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: deploy
   cancel-in-progress: false
@@ -72,6 +75,9 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Deploy to VM via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -103,6 +109,7 @@ jobs:
   verify:
     needs: deploy
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Verify API and Frontend health
         run: |

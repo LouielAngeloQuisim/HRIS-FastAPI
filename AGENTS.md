@@ -138,3 +138,16 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 - **ErrorBody-specific 409 messages** are surfaced in delete toasts (asserted by §8.7/§8.8 tests asserting exact message text, not just "a toast appeared").
 - **DTR row-level filter `None` trap:** When a non-superuser has no linked EmployeeRecords, passing `employee_id_filter=None` to the selector skips the filter entirely (since the selector guards `if employee_id_filter is not None`). The correct pattern is an early return `return []` when the linked employee is `None` — do not rely on the selector to handle this case.
 - **Infra:** a `$` in `.env` values is escaped only for Docker Compose (`$$`) — pydantic-settings/pytest read the file literally, so the durable fix is a `$`-free password. `POSTGRES_PORT` differs between host (5433) and container (5432): keep `POSTGRES_PORT=5432` inside compose prestart/backend services or prestart will retry for ~5 minutes then fail.
+
+## 8. Production Deploy & VM Access (summary only)
+
+The authoritative step-by-step procedures are the runbooks in `docs/runbooks/`: `docs/runbooks/deploy.md`, `docs/runbooks/rollback.md`, `docs/runbooks/migrations.md`, `docs/runbooks/backup-restore.md`. This section 8 is only a summary — follow the runbooks for any production operation.
+
+- Deploys happen **ONLY by merging a pull request to `main`** (never by direct push; `main` is protected by the `Main Branch Rules` ruleset: PR required, no deletion, no force-push, `backend`/`frontend` status checks required).
+- The deploy pipeline (see `.github/workflows/deploy.yml`) runs: `ci` → `build-and-push` → `deploy` (pre-deploy `pg_dump`, migrate via `scripts/prestart.sh` (`alembic upgrade head`), `docker compose -f compose.prod.yml up -d`, health-check wait until the backend reports `healthy`) → `verify` (curl the API health-check and the frontend until both return 200).
+- `hris-deploy deploy` (the restricted VM SSH command) only runs `compose pull` + `compose up -d`. It skips the dump, the migration, and the health-check wait. It must **NEVER** be used when a migration is pending, and is **not** a substitute for a PR merge. It is only safe for restarting already-running, already-migrated containers.
+- `hris-debug` remains read-only (`ps`, `logs`, `inspect`, `stats`, `df`, `free`) for checking status.
+
+### Evidence requirement
+
+Any agent report claiming a push, commit, PR creation, deploy, or test result succeeded must be backed by an actual command whose raw output is shown (e.g. `git ls-remote`, `gh pr list`, `gh pr checks`). A summary alone is not sufficient evidence.

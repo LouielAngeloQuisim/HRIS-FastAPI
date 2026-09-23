@@ -174,17 +174,37 @@ ssh hris-debug "docker compose -f compose.prod.yml ps"
 > `deploy.yml` (the pipeline uses the `VM_HOST` secret, not a literal alias).
 > Confirm the real SSH alias and project path before relying on this command.
 
-## Manual / bypass deploys
+## `hris-deploy deploy` — restricted manual command (NOT a pipeline substitute)
 
-> **NEEDS HUMAN REVIEW:** The task asks this runbook to state that a command
-> `hris-deploy deploy` "bypasses this entire pipeline (no dump, no migration)
-> and must not be used for deploys with pending migrations." However, the string
-> `hris-deploy` does NOT appear anywhere in the repository (searched
-> `*.yml`, `*.sh`, `*.md` and all files). Its existence and its "no dump, no
-> migration" behavior cannot be verified from the repo files. Do not treat this
-> command as confirmed until a human verifies where it is defined and what it
-> does. If a manual deploy path does exist, it must still run migrations and
-> take a dump before going live when there are pending migrations.
+VM-verified fact: the restricted SSH command `/usr/local/bin/hris-deploy`
+contains:
+
+```bash
+deploy) $COMPOSE pull ; $COMPOSE up -d
+```
+
+where `COMPOSE="docker compose -f compose.yml -f compose.prod.yml"`.
+
+What this means, made plain:
+
+- It runs **only** `compose pull` and `compose up -d`. It **skips** the
+  pre-deploy database dump, the migration step (`scripts/prestart.sh` is never
+  invoked, so no `alembic upgrade head` runs), and the health-check wait that
+  the CI/CD pipeline (`deploy.yml`) performs.
+- It combines `compose.yml` **and** `compose.prod.yml`, rather than using
+  `compose.prod.yml` alone the way the `deploy.yml` pipeline does
+  (`C="docker compose -f compose.prod.yml"`).
+
+**Never use `hris-deploy deploy` when a migration is pending, and never use it
+as a substitute for merging a PR to `main`.** A schema change that has not been
+applied will not be applied by this command, and a frontend/backend image bump
+happens without any dump or health gate.
+
+It is safe only as a plain restart of already-running, already-migrated
+containers. Even then, note that the `compose.yml` + `compose.prod.yml`
+combination may differ from what `deploy.yml` actually deployed (the pipeline
+uses `compose.prod.yml` alone with `IMAGE_TAG` set to the commit SHA), so the
+resulting configuration is not guaranteed to match the CI/CD deploy.
 
 ## Image tags
 

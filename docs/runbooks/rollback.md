@@ -79,12 +79,25 @@ Two sources, both verifiable from `deploy.yml`:
    docker images | grep hris-fastapi
    ```
 
-   > **NEEDS HUMAN REVIEW:** The task suggested `docker images | grep pre-hris`.
-   > The string `pre-hris` does NOT appear anywhere in the repo; the real image
-   > names are `ghcr.io/louielangeloquisim/hris-fastapi/backend` and
-   > `.../frontend` (see `compose.prod.yml`), tagged with the commit SHA or
-   > `latest`. Use `docker images | grep hris-fastapi` instead. Confirm the
-   > exact tag convention on the VM before relying on a specific grep.
+   **No automated rollback-image tagging exists beyond `~/.hris_previous_tag`**
+   (written by `deploy.yml`). Any `pre-hris`-style tags found on the VM are NOT
+   created by any repo file or automation: they were applied manually one time
+   via `docker tag ... :pre-hris` as an ad hoc safety snapshot before the first
+   frontendv3 deploy. They are not a repeatable or automated mechanism, and the
+   pipeline will not produce more of them. Do not assume such tags exist going
+   forward.
+
+   If you want a manual safety snapshot before a risky deploy, tag the
+   currently-running images yourself *first*, e.g.:
+
+   ```bash
+   docker tag ghcr.io/louielangeloquisim/hris-fastapi/backend:latest ghcr.io/louielangeloquisim/hris-fastapi/backend:manual-safety-<date>
+   ```
+
+   (same for frontend: `ghcr.io/louielangeloquisim/hris-fastapi/frontend:latest`
+   → `...frontend:manual-safety-<date>`). This is a **manual, one-off practice,
+   not an automated feature** — you are responsible for creating and removing
+   these tags.
 
 ## Rollback procedure
 

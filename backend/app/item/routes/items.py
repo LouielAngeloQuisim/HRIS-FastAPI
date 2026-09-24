@@ -2,13 +2,12 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from sqlmodel import func, select
 
-from app.common.schemas import Message
 from app.common.dependencies import CurrentUser, SessionDep
+from app.common.schemas import Message
 from app.item.schemas import ItemCreate, ItemPublic, ItemsPublic, ItemUpdate
-from app.item.selectors import get_items, get_item_by_id
-from app.item.services import create_item as create_item_service, update_item, delete_item
+from app.item.selectors import get_item_by_id, get_items
+from app.item.services import create_item as create_item_service
 
 router = APIRouter(prefix="/items", tags=["items"])
 

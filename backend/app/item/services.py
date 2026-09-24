@@ -1,5 +1,5 @@
 import uuid
-from typing import Any
+
 from sqlmodel import Session
 
 from app.item.models import Item, ItemCreate, ItemUpdate

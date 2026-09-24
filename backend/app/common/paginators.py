@@ -1,7 +1,9 @@
-from typing import Generic, TypeVar, Sequence
+from collections.abc import Sequence
+from typing import Generic, TypeVar
+
 from pydantic import BaseModel
-from sqlmodel import Session, select, func
 from sqlalchemy import Select as SASelect
+from sqlmodel import Session, func, select
 
 T = TypeVar("T")
 

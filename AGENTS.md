@@ -18,6 +18,14 @@ This is NOT automatic behavior by default — it must be actively followed
 on every task, not only when explicitly reminded in a prompt. Treat this
 section itself as that standing reminder.
 
+**Before claiming any change is complete, run `scripts/verify.sh` and show its
+output. This replaces the old per-command manual checklist.** It runs ruff,
+mypy (report-only), alembic drift-check, pytest against a throwaway
+postgres container, then frontend tsc/eslint (report-only)/vitest/build, and
+prints a PASS/FAIL summary. Exit 0 = all hard gates green; 1 = at least one
+failed. mypy and eslint counts are reported but do not yet gate (known
+pre-existing errors tracked separately).
+
 ### For any backend change (`backend/`):
 1. Write or update a pytest test covering the change, in the matching
    `backend/tests/<domain>/` directory, following the existing patterns

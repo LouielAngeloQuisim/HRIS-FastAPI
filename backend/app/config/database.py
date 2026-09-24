@@ -1,11 +1,10 @@
 from sqlmodel import Session, create_engine, select
 
-from app.config.settings import settings
-
 # Importing the model registry has the side effect of registering every table
 # on SQLModel.metadata. Alembic autogenerate and create_all both depend on it,
 # so it must happen before the engine is used.
 import app.models  # noqa: F401
+from app.config.settings import settings
 from app.user.models import User, UserCreate
 
 # Exposed as a module constant so configuration intent is assertable without

@@ -5,7 +5,6 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import ConfigDict
 from sqlmodel import Field, SQLModel
 
 from app.leave.models import (

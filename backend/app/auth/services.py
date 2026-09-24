@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from sqlmodel import Session, update
+from sqlmodel import Session, col, update
 
 from app.auth.models import RefreshToken
 from app.auth.schemas import TokenPair
@@ -81,8 +81,8 @@ def revoke_all_for_user(*, session: Session, user_id: uuid.UUID) -> int:
     session.exec(
         update(RefreshToken)
         .where(
-            RefreshToken.user_id == user_id,
-            RefreshToken.revoked_at.is_(None),  # type: ignore[union-attr]
+            col(RefreshToken.user_id) == user_id,
+            col(RefreshToken.revoked_at).is_(None),
         )
         .values(revoked_at=now)
     )

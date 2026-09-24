@@ -7,51 +7,50 @@ model. All list queries filter ``is_deleted = false`` and return
 """
 
 import uuid
-from typing import TypeVar
+from typing import Any
 
-from sqlmodel import Session, func, select
-from sqlmodel.main import SQLModel as SQLModelBase
+from sqlmodel import Session, col, func, select
+from sqlmodel.sql.expression import SelectOfScalar
 
+from app.common.types import ModelT
 from app.employee.models import EmployeeAdditionalRecords, EmployeeAttachments
-
-T = TypeVar("T", bound=SQLModelBase)
 
 
 def get_list(
     *,
     session: Session,
-    model: type[T],
-    filter_column=None,
-    filter_value=None,
+    model: type[ModelT],
+    filter_column: Any = None,
+    filter_value: Any = None,
     skip: int = 0,
     limit: int = 100,
-) -> tuple[list[T], int]:
+) -> tuple[list[ModelT], int]:
     """Return (rows, total) with `is_deleted = false`, optionally filtered by one column."""
-    base = (
-        select(model).where(model.is_deleted == False)  # noqa: E712
+    base: SelectOfScalar[ModelT] = (
+        select(model).where(col(model.is_deleted) == False)  # noqa: E712
     )
     if filter_column is not None:
         base = base.where(filter_column == filter_value)
 
-    count_statement = select(func.count()).select_from(model).where(
-        model.is_deleted == False  # noqa: E712
+    count_statement: SelectOfScalar[int] = select(func.count()).select_from(model).where(
+        col(model.is_deleted) == False  # noqa: E712
     )
     if filter_column is not None:
         count_statement = count_statement.where(filter_column == filter_value)
     count = session.exec(count_statement).one()
 
     statement = (
-        base.order_by(model.created_at.desc()).offset(skip).limit(limit)
+        base.order_by(col(model.created_at).desc()).offset(skip).limit(limit)
     )
     rows = session.exec(statement).all()
     return list(rows), count
 
 
-def get_by_id(*, session: Session, model: type[T], obj_id: uuid.UUID) -> T | None:
+def get_by_id(*, session: Session, model: type[ModelT], obj_id: uuid.UUID) -> ModelT | None:
     return session.get(model, obj_id)
 
 
-def get_active_by_id(*, session: Session, model: type[T], obj_id: uuid.UUID) -> T | None:
+def get_active_by_id(*, session: Session, model: type[ModelT], obj_id: uuid.UUID) -> ModelT | None:
     """Fetch a non-deleted row by PK, or None."""
     row = session.get(model, obj_id)
     if row is None or getattr(row, "is_deleted", False):
@@ -59,7 +58,7 @@ def get_active_by_id(*, session: Session, model: type[T], obj_id: uuid.UUID) -> 
     return row
 
 
-def get_by_unique(*, session: Session, model: type[T], column, value) -> T | None:
+def get_by_unique(*, session: Session, model: type[ModelT], column: Any, value: Any) -> ModelT | None:
     return session.exec(select(model).where(column == value)).first()
 
 
@@ -78,9 +77,9 @@ def get_attachments_for_employee(
 ) -> tuple[list[EmployeeAttachments], int]:
     statement = select(EmployeeAttachments).where(
         EmployeeAttachments.employee_id == employee_id,
-        EmployeeAttachments.is_deleted == False,  # noqa: E712
+        col(EmployeeAttachments.is_deleted) == False,  # noqa: E712
     )
-    rows = session.exec(statement.order_by(EmployeeAttachments.date_uploaded.desc())).all()
+    rows = session.exec(statement.order_by(col(EmployeeAttachments.date_uploaded).desc())).all()
     return list(rows), len(rows)
 
 

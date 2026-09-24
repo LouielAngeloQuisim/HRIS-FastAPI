@@ -9,10 +9,11 @@ physical delete.
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TypeVar
 
+from pydantic import BaseModel
 from sqlmodel import Session
 
+from app.common.types import ModelT
 from app.config.settings import settings
 from app.employee.models import EmployeeAdditionalRecords, EmployeeAttachments
 from app.employee.selectors import (
@@ -21,10 +22,8 @@ from app.employee.selectors import (
     get_additional_records_for_employee,
 )
 
-T = TypeVar("T")
 
-
-def create_obj(*, session: Session, model: type[T], data) -> T:
+def create_obj(*, session: Session, model: type[ModelT], data: BaseModel) -> ModelT:
     db_obj = model.model_validate(data)
     session.add(db_obj)
     session.commit()
@@ -32,7 +31,7 @@ def create_obj(*, session: Session, model: type[T], data) -> T:
     return db_obj
 
 
-def update_obj(*, session: Session, db_obj: T, data) -> T:
+def update_obj(*, session: Session, db_obj: ModelT, data: BaseModel) -> ModelT:
     update_dict = data.model_dump(exclude_unset=True)
     db_obj.sqlmodel_update(update_dict)
     db_obj.updated_at = datetime.now(timezone.utc)
@@ -42,7 +41,7 @@ def update_obj(*, session: Session, db_obj: T, data) -> T:
     return db_obj
 
 
-def soft_delete_obj(*, session: Session, db_obj: T) -> T:
+def soft_delete_obj(*, session: Session, db_obj: ModelT) -> ModelT:
     db_obj.is_deleted = True
     db_obj.deleted_at = datetime.now(timezone.utc)
     session.add(db_obj)
@@ -63,7 +62,7 @@ def ensure_not_referenced_by_active_category(
     )
 
 
-def get_or_404(*, session: Session, model: type[T], obj_id: uuid.UUID) -> T:
+def get_or_404(*, session: Session, model: type[ModelT], obj_id: uuid.UUID) -> ModelT:
     """Fetch a non-deleted row; used by routes that raise 404 on absence."""
     db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
     if db_obj is None:
@@ -74,7 +73,7 @@ def get_or_404(*, session: Session, model: type[T], obj_id: uuid.UUID) -> T:
 
 
 def upsert_additional_records(
-    *, session: Session, employee_id: uuid.UUID, data
+    *, session: Session, employee_id: uuid.UUID, data: BaseModel
 ) -> EmployeeAdditionalRecords:
     """Create or update the single 201-file annex row for an employee."""
     existing = get_additional_records_for_employee(session=session, employee_id=employee_id)
@@ -125,7 +124,12 @@ def store_attachment_file(*, employee_id: uuid.UUID, filename: str, content: byt
 
 
 def create_attachment(
-    *, session: Session, employee_id: uuid.UUID, data, file_path: str, attachment_size: int
+    *,
+    session: Session,
+    employee_id: uuid.UUID,
+    data: BaseModel,
+    file_path: str,
+    attachment_size: int,
 ) -> EmployeeAttachments:
     db_obj = EmployeeAttachments.model_validate(
         data,

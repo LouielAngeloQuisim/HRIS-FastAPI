@@ -136,7 +136,7 @@ REQUEST_ID_HEADER = "x-request-id"
 
 def get_request_id(request: Any | None = None) -> str:
     if request is not None:
-        rid = getattr(request.state, "request_id", None)
+        rid: str | None = getattr(request.state, "request_id", None)
         if rid:
             return rid
     return str(uuid.uuid4())

@@ -10,6 +10,8 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlmodel import SQLModel
 
 from app.attendance import adjustment_schemas as adj_s
 from app.attendance import schemas as s
@@ -34,9 +36,8 @@ from app.attendance.services import (
 )
 from app.common.dependencies import CurrentUser, SessionDep
 from app.common.schemas import Message
+from app.common.types import ModelT
 from app.rbac.dependencies import require_permission
-
-Type = type
 
 
 def _make_crud_router(
@@ -44,11 +45,11 @@ def _make_crud_router(
     prefix: str,
     tag: str,
     module: str,
-    model: Type,
-    create: Type,
-    update: Type,
-    public: Type,
-    listing: Type,
+    model: type[ModelT],
+    create: type[BaseModel],
+    update: type[BaseModel],
+    public: type[SQLModel],
+    listing: type[SQLModel],
     custom_delete: bool = False,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=[tag])
@@ -60,17 +61,15 @@ def _make_crud_router(
         dependencies=[Depends(require_permission(module, "view"))],
     )
     def list_objs(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
-        rows: list[Any]
-        count: int
         rows, count = get_list(session=session, model=model, skip=skip, limit=limit)
-        return listing(data=[public.model_validate(r) for r in rows], count=count)  # type: ignore[attr-defined]
+        return listing(data=[public.model_validate(r) for r in rows], count=count)
 
     @router.get(
         "/{obj_id}",
         response_model=public,
         dependencies=[Depends(require_permission(module, "view"))],
     )
-    def read_obj(session: SessionDep, obj_id) -> Any:
+    def read_obj(session: SessionDep, obj_id: uuid.UUID) -> Any:
         db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
         if db_obj is None:
             raise HTTPException(status_code=404, detail=f"{model_name} not found")
@@ -82,24 +81,37 @@ def _make_crud_router(
         status_code=201,
         dependencies=[Depends(require_permission(module, "add"))],
     )
-    def create_route(*, session: SessionDep, obj_in: create) -> Any:  # type: ignore[valid-type] # factory param used as annotation; identical pattern in employee/routes.py:112 (pre-existing)
+    def create_route(
+        *,
+        session: SessionDep,
+        # create/update are factory params; FastAPI needs the raw class as the
+        # runtime body annotation, and mypy cannot treat a non-global variable
+        # as a type alias (variables-vs-type-aliases) — genuinely unavoidable.
+        obj_in: create,  # type: ignore[valid-type]
+    ) -> Any:
         from app.attendance.services import create_obj
 
-        db_obj: Any = create_obj(session=session, model=model, data=obj_in)
-        return public.model_validate(db_obj)  # type: ignore[attr-defined]
+        db_obj = create_obj(session=session, model=model, data=obj_in)
+        return public.model_validate(db_obj)
 
     @router.patch(
         "/{obj_id}",
         response_model=public,
         dependencies=[Depends(require_permission(module, "edit"))],
     )
-    def update_route(*, session: SessionDep, obj_id, obj_in: update) -> Any:  # type: ignore[valid-type] # factory param used as annotation; identical pattern in employee/routes.py:121 (pre-existing)
-        db_obj: Any = get_active_by_id(session=session, model=model, obj_id=obj_id)
+    def update_route(
+        *,
+        session: SessionDep,
+        obj_id: uuid.UUID,
+        obj_in: update,  # type: ignore[valid-type]  # see create_route
+    ) -> Any:
+        db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
         if db_obj is None:
             raise HTTPException(status_code=404, detail=f"{model_name} not found")
+
         from app.attendance.services import update_obj
 
-        return public.model_validate(update_obj(session=session, db_obj=db_obj, data=obj_in))  # type: ignore[attr-defined]
+        return public.model_validate(update_obj(session=session, db_obj=db_obj, data=obj_in))
 
     if not custom_delete:
         @router.delete(
@@ -107,7 +119,7 @@ def _make_crud_router(
             response_model=Message,
             dependencies=[Depends(require_permission(module, "delete"))],
         )
-        def delete_route(session: SessionDep, obj_id) -> Any:
+        def delete_route(session: SessionDep, obj_id: uuid.UUID) -> Any:
             db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
             if db_obj is None:
                 raise HTTPException(status_code=404, detail=f"{model_name} not found")
@@ -176,7 +188,7 @@ def list_dtr(
     response_model=s.DailyTimeRecordPublic,
     dependencies=[Depends(require_permission("daily_time_record", "view"))],
 )
-def read_dtr(session: SessionDep, obj_id) -> Any:
+def read_dtr(session: SessionDep, obj_id: uuid.UUID) -> Any:
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
     if db_obj is None:
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
@@ -202,7 +214,7 @@ def create_dtr_route(
     dependencies=[Depends(require_permission("daily_time_record", "edit"))],
 )
 def update_dtr_route(
-    *, session: SessionDep, obj_id, obj_in: s.DailyTimeRecordUpdate, current_user: CurrentUser
+    *, session: SessionDep, obj_id: uuid.UUID, obj_in: s.DailyTimeRecordUpdate, current_user: CurrentUser
 ) -> Any:
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
     if db_obj is None:
@@ -227,11 +239,11 @@ def update_dtr_route(
     response_model=Message,
     dependencies=[Depends(require_permission("daily_time_record", "delete"))],
 )
-def delete_dtr(session: SessionDep, obj_id) -> Any:
+def delete_dtr(session: SessionDep, obj_id: uuid.UUID) -> Any:
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
     if db_obj is None:
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
-    soft_delete_obj(session=session, db_obj=db_obj)  # type: ignore[type-var] # SQLModel subclass not recognized as _DBAudit by mypy
+    soft_delete_obj(session=session, db_obj=db_obj)
     return Message(message="DailyTimeRecord deleted successfully")
 
 
@@ -241,7 +253,7 @@ def delete_dtr(session: SessionDep, obj_id) -> Any:
     dependencies=[Depends(require_permission("daily_time_record", "edit"))],
 )
 def approve_overtime(
-    *, session: SessionDep, obj_id, current_user: CurrentUser
+    *, session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser
 ) -> Any:
     """Phase 2B: approve a DTR's overtime (paid only when overtime_approved=True)."""
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
@@ -259,7 +271,7 @@ def approve_overtime(
     dependencies=[Depends(require_permission("daily_time_record", "edit"))],
 )
 def reject_overtime(
-    *, session: SessionDep, obj_id, current_user: CurrentUser
+    *, session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser
 ) -> Any:
     """Phase 2B: reject a DTR's overtime."""
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
@@ -292,7 +304,7 @@ def list_adjustments(session: SessionDep, skip: int = 0, limit: int = 100) -> An
     response_model=adj_s.DtrAdjustmentPublic,
     dependencies=[Depends(require_permission("daily_time_record", "view"))],
 )
-def read_adjustment(session: SessionDep, obj_id) -> Any:
+def read_adjustment(session: SessionDep, obj_id: uuid.UUID) -> Any:
     db_obj = get_adjustment(session=session, adjustment_id=obj_id)
     if db_obj is None:
         raise HTTPException(status_code=404, detail="DtrAdjustment not found")
@@ -323,7 +335,7 @@ def create_adjustment_route(
     dependencies=[Depends(require_permission("daily_time_record", "edit"))],
 )
 def approve_adjustment_route(
-    *, session: SessionDep, obj_id, current_user: CurrentUser
+    *, session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser
 ) -> Any:
     db_obj = get_adjustment(session=session, adjustment_id=obj_id)
     if db_obj is None:
@@ -338,7 +350,7 @@ def approve_adjustment_route(
     dependencies=[Depends(require_permission("daily_time_record", "edit"))],
 )
 def reject_adjustment_route(
-    *, session: SessionDep, obj_id, current_user: CurrentUser
+    *, session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser
 ) -> Any:
     db_obj = get_adjustment(session=session, adjustment_id=obj_id)
     if db_obj is None:

@@ -2,8 +2,8 @@ from collections.abc import Sequence
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Select as SASelect
 from sqlmodel import Session, func, select
+from sqlmodel.sql.expression import Select
 
 T = TypeVar("T")
 
@@ -12,7 +12,7 @@ class PaginationParams(BaseModel):
     skip: int = 0
     limit: int = 100
 
-    def apply(self, statement: SASelect) -> SASelect:
+    def apply(self, statement: Select[T]) -> Select[T]:
         return statement.offset(self.skip).limit(self.limit)
 
 
@@ -23,9 +23,9 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 def paginate(
     session: Session,
-    statement: SASelect,
+    statement: Select[T],
     params: PaginationParams,
-) -> PaginatedResponse:
+) -> PaginatedResponse[T]:
     count_statement = select(func.count()).select_from(statement.subquery())
     count = session.exec(count_statement).one()
 

@@ -2,55 +2,55 @@
 
 import uuid
 from datetime import datetime
-from typing import Protocol, TypeVar
+from typing import Any
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, col, func, select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from app.attendance.models import DailyTimeRecord, Shift
+from app.common.types import ModelT
 from app.employee.models import EmployeeRecords
-
-
-class SoftDeletable(Protocol):
-    is_deleted: bool
-
-
-class Timestamped(Protocol):
-    created_at: datetime
-
-
-T = TypeVar("T", bound=SoftDeletable)
 
 
 def get_list(
     *,
     session: Session,
-    model: type[T],
-    filter_column=None,
-    filter_value=None,
+    model: type[ModelT],
+    filter_column: Any = None,
+    filter_value: Any = None,
     employee_id_filter: uuid.UUID | None = None,
     skip: int = 0,
     limit: int = 100,
-) -> tuple[list[T], int]:
+) -> tuple[list[ModelT], int]:
     """Return (rows, total) with `is_deleted = false`, optionally filtered by one column
     and/or scoped to a single employee (row-level security for non-HR viewers).
     """
-    base = select(model).where(model.is_deleted == False)  # noqa: E712
+    base: SelectOfScalar[ModelT] = select(model).where(
+        col(model.is_deleted) == False  # noqa: E712
+    )
     if filter_column is not None:
         base = base.where(filter_column == filter_value)
     if employee_id_filter is not None:
+        # Row-level security is only ever requested for DTR/adjustment-style
+        # models; Shift callers never pass the filter. employee_id is not on the
+        # shared audit protocol, so it stays a structural access.
         base = base.where(model.employee_id == employee_id_filter)  # type: ignore[attr-defined]
 
-    count_statement = select(func.count()).select_from(model).where(
-        model.is_deleted == False  # noqa: E712
+    count_statement: SelectOfScalar[int] = (
+        select(func.count())
+        .select_from(model)
+        .where(col(model.is_deleted) == False)  # noqa: E712
     )
     if filter_column is not None:
         count_statement = count_statement.where(filter_column == filter_value)
     if employee_id_filter is not None:
-        count_statement = count_statement.where(model.employee_id == employee_id_filter)  # type: ignore[attr-defined]
+        count_statement = count_statement.where(
+            model.employee_id == employee_id_filter  # type: ignore[attr-defined]  # see base above
+        )
     count = session.exec(count_statement).one()
 
     statement = (
-        base.order_by(model.created_at.desc())  # type: ignore[attr-defined]
+        base.order_by(col(model.created_at).desc())
         .offset(skip)
         .limit(limit)
     )
@@ -58,11 +58,11 @@ def get_list(
     return list(rows), count
 
 
-def get_by_id(*, session: Session, model: type[T], obj_id: uuid.UUID) -> T | None:
+def get_by_id(*, session: Session, model: type[ModelT], obj_id: uuid.UUID) -> ModelT | None:
     return session.get(model, obj_id)
 
 
-def get_active_by_id(*, session: Session, model: type[T], obj_id: uuid.UUID) -> T | None:
+def get_active_by_id(*, session: Session, model: type[ModelT], obj_id: uuid.UUID) -> ModelT | None:
     """Fetch a non-deleted row by PK, or None."""
     row = session.get(model, obj_id)
     if row is None or getattr(row, "is_deleted", False):

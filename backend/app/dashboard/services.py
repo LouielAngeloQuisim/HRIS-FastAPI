@@ -6,9 +6,11 @@ employees); those bugs are not reproduced here (design §1.6 / Q10).
 """
 
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, col, func, select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from app.attendance.adjustment_models import DtrAdjustment
+from app.common.types import AuditedSQLModel
 from app.dashboard.schemas import DashboardStats
 from app.employee.models import (
     Department,
@@ -24,7 +26,7 @@ from app.leave.models import LeaveRequest
 from app.payroll.models import PayrollEntry, PayrollRun
 
 # Counted tables keyed by (model, label) for the shared counter helper.
-_COUNTED = [
+_COUNTED: list[tuple[type[AuditedSQLModel], str]] = [
     (EmployeeRecords, "employee_records"),
     (Division, "divisions"),
     (Department, "departments"),
@@ -36,11 +38,11 @@ _COUNTED = [
 ]
 
 
-def _count_active(session: Session, model) -> int:
-    statement = (
+def _count_active(session: Session, model: type[AuditedSQLModel]) -> int:
+    statement: SelectOfScalar[int] = (
         select(func.count())
         .select_from(model)
-        .where(model.is_deleted == False)  # noqa: E712
+        .where(col(model.is_deleted) == False)  # noqa: E712
     )
     return session.exec(statement).one()
 

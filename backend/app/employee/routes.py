@@ -6,12 +6,16 @@ resources with special behaviour (delete-guards, approve/deny, ownership reads)
 declare additional handlers on their router.
 """
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
+from sqlmodel import SQLModel
 
 from app.common.dependencies import CurrentUser, SessionDep
 from app.common.schemas import Message
+from app.common.types import ModelT
 from app.employee import models as m
 from app.employee import schemas as s
 from app.employee.selectors import (
@@ -35,10 +39,10 @@ from app.rbac.dependencies import require_permission
 from app.rbac.models import PermissionAction
 from app.rbac.services import user_has_permission
 
-Type = type
 
-
-def _employee_or_404(session: SessionDep, employee_id) -> m.EmployeeRecords:
+def _employee_or_404(
+    session: SessionDep, employee_id: uuid.UUID
+) -> m.EmployeeRecords:
     emp = get_active_by_id(session=session, model=m.EmployeeRecords, obj_id=employee_id)
     if emp is None:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -73,11 +77,11 @@ def _make_crud_router(
     prefix: str,
     tag: str,
     module: str,
-    model: Type,
-    create: Type,
-    update: Type,
-    public: Type,
-    listing: Type,
+    model: type[ModelT],
+    create: type[BaseModel],
+    update: type[BaseModel],
+    public: type[SQLModel],
+    listing: type[SQLModel],
     custom_delete: bool = False,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=[tag])
@@ -97,7 +101,7 @@ def _make_crud_router(
         response_model=public,
         dependencies=[Depends(require_permission(module, "view"))],
     )
-    def read_obj(session: SessionDep, obj_id) -> Any:
+    def read_obj(session: SessionDep, obj_id: uuid.UUID) -> Any:
         db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
         if db_obj is None:
             raise HTTPException(status_code=404, detail=f"{model_name} not found")
@@ -109,7 +113,14 @@ def _make_crud_router(
         status_code=201,
         dependencies=[Depends(require_permission(module, "add"))],
     )
-    def create_route(*, session: SessionDep, obj_in: create) -> Any:
+    def create_route(
+        *,
+        session: SessionDep,
+        # create/update are factory params; FastAPI needs the raw class as the
+        # runtime body annotation, and mypy cannot treat a non-global variable
+        # as a type alias (variables-vs-type-aliases) — genuinely unavoidable.
+        obj_in: create,  # type: ignore[valid-type]
+    ) -> Any:
         db_obj = create_obj(session=session, model=model, data=obj_in)
         return public.model_validate(db_obj)
 
@@ -118,7 +129,12 @@ def _make_crud_router(
         response_model=public,
         dependencies=[Depends(require_permission(module, "edit"))],
     )
-    def update_route(*, session: SessionDep, obj_id, obj_in: update) -> Any:
+    def update_route(
+        *,
+        session: SessionDep,
+        obj_id: uuid.UUID,
+        obj_in: update,  # type: ignore[valid-type]  # see create_route
+    ) -> Any:
         db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
         if db_obj is None:
             raise HTTPException(status_code=404, detail=f"{model_name} not found")
@@ -130,7 +146,7 @@ def _make_crud_router(
             response_model=Message,
             dependencies=[Depends(require_permission(module, "delete"))],
         )
-        def delete_route(session: SessionDep, obj_id) -> Any:
+        def delete_route(session: SessionDep, obj_id: uuid.UUID) -> Any:
             db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
             if db_obj is None:
                 raise HTTPException(status_code=404, detail=f"{model_name} not found")
@@ -174,7 +190,7 @@ def read_own_employee(session: SessionDep, current_user: CurrentUser) -> Any:
     response_model=s.EmployeeAdditionalRecordsPublic,
 )
 def read_additional_records(
-    session: SessionDep, employee_id, current_user: CurrentUser
+    session: SessionDep, employee_id: uuid.UUID, current_user: CurrentUser
 ) -> Any:
     """Read a single employee's 201-file annex (ownership-checked)."""
     employee = _employee_or_404(session, employee_id)
@@ -190,7 +206,7 @@ def read_additional_records(
     response_model=s.EmployeeAdditionalRecordsPublic,
 )
 def update_additional_records(
-    *, session: SessionDep, employee_id, body: s.EmployeeAdditionalRecordsUpdate,
+    *, session: SessionDep, employee_id: uuid.UUID, body: s.EmployeeAdditionalRecordsUpdate,
     current_user: CurrentUser,
 ) -> Any:
     """Upsert a single employee's 201-file annex (ownership-checked)."""
@@ -205,7 +221,7 @@ def update_additional_records(
     response_model=s.EmployeeAttachmentsList,
 )
 def list_attachments(
-    session: SessionDep, employee_id, current_user: CurrentUser
+    session: SessionDep, employee_id: uuid.UUID, current_user: CurrentUser
 ) -> Any:
     """List an employee's uploaded documents (ownership-checked)."""
     employee = _employee_or_404(session, employee_id)
@@ -224,7 +240,7 @@ def list_attachments(
 def upload_attachment(
     *,
     session: SessionDep,
-    employee_id,
+    employee_id: uuid.UUID,
     current_user: CurrentUser,
     file: UploadFile = File(...),
     type: str | None = Form(default=None),
@@ -255,7 +271,7 @@ def upload_attachment(
     response_model=Message,
 )
 def delete_attachment(
-    session: SessionDep, employee_id, attachment_id, current_user: CurrentUser
+    session: SessionDep, employee_id: uuid.UUID, attachment_id: uuid.UUID, current_user: CurrentUser
 ) -> Any:
     employee = _employee_or_404(session, employee_id)
     _ensure_annex_access(
@@ -287,7 +303,7 @@ divisions_router = _make_crud_router(
     response_model=Message,
     dependencies=[Depends(require_permission("division", "delete"))],
 )
-def delete_division(session: SessionDep, obj_id) -> Any:
+def delete_division(session: SessionDep, obj_id: uuid.UUID) -> Any:
     """Q4: block deletion if active Departments reference the Division (409)."""
     db_obj = get_active_by_id(session=session, model=m.Division, obj_id=obj_id)
     if db_obj is None:
@@ -391,7 +407,7 @@ blocks_router = _make_crud_router(
     response_model=Message,
     dependencies=[Depends(require_permission("projects", "delete"))],
 )
-def delete_block(session: SessionDep, obj_id) -> Any:
+def delete_block(session: SessionDep, obj_id: uuid.UUID) -> Any:
     """Q7: 409 if an ACTIVE Category still references the Block."""
     db_obj = get_active_by_id(session=session, model=m.Blocks, obj_id=obj_id)
     if db_obj is None:
@@ -420,7 +436,7 @@ lots_router = _make_crud_router(
     response_model=Message,
     dependencies=[Depends(require_permission("projects", "delete"))],
 )
-def delete_lot(session: SessionDep, obj_id) -> Any:
+def delete_lot(session: SessionDep, obj_id: uuid.UUID) -> Any:
     """Q7: 409 if an ACTIVE Category still references the Lot."""
     db_obj = get_active_by_id(session=session, model=m.Lots, obj_id=obj_id)
     if db_obj is None:
@@ -482,7 +498,7 @@ owners_router = _make_crud_router(
     response_model=s.CategoryPublic,
     dependencies=[Depends(require_permission("owner", "view"))],
 )
-def read_owner_lot_via_category(session: SessionDep, obj_id) -> Any:
+def read_owner_lot_via_category(session: SessionDep, obj_id: uuid.UUID) -> Any:
     """Point 3: resolve the Lot an Owner holds THROUGH the Category record.
 
     ``Owner`` has no FK to Lots; the authoritative link is
@@ -518,7 +534,7 @@ employee_projects_router = _make_crud_router(
     response_model=Message,
     dependencies=[Depends(require_permission("emp_project", "edit"))],
 )
-def unassign_employee_project(session: SessionDep, obj_id) -> Any:
+def unassign_employee_project(session: SessionDep, obj_id: uuid.UUID) -> Any:
     db_obj = get_active_by_id(session=session, model=m.EmployeeProjects, obj_id=obj_id)
     if db_obj is None:
         raise HTTPException(status_code=404, detail="EmployeeProject not found")
@@ -546,7 +562,7 @@ emp_tasks_router = _make_crud_router(
     response_model=Message,
     dependencies=[Depends(require_permission("emp_project", "edit"))],
 )
-def approve_emp_task(session: SessionDep, obj_id) -> Any:
+def approve_emp_task(session: SessionDep, obj_id: uuid.UUID) -> Any:
     """Q9: approve/deny gated under emp_project/edit, not emp_task."""
     db_obj = get_active_by_id(session=session, model=m.EmpTask, obj_id=obj_id)
     if db_obj is None:
@@ -563,7 +579,7 @@ def approve_emp_task(session: SessionDep, obj_id) -> Any:
     response_model=Message,
     dependencies=[Depends(require_permission("emp_project", "edit"))],
 )
-def deny_emp_task(session: SessionDep, obj_id) -> Any:
+def deny_emp_task(session: SessionDep, obj_id: uuid.UUID) -> Any:
     db_obj = get_active_by_id(session=session, model=m.EmpTask, obj_id=obj_id)
     if db_obj is None:
         raise HTTPException(status_code=404, detail="EmpTask not found")

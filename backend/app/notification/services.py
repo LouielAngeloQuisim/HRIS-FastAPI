@@ -18,7 +18,7 @@ import uuid
 from datetime import date, timedelta
 from typing import Any
 
-from sqlmodel import Session, or_, select
+from sqlmodel import Session, col, or_, select
 
 from app.config.settings import settings
 from app.notification import models as m
@@ -349,14 +349,16 @@ def run_pre_payday_check(
     employee_count = len(active_employees)
     from sqlmodel import func
 
-    estimated_total_payroll_cost = session.exec(
+    payroll_cost_raw = session.exec(
         select(func.coalesce(func.sum(EmployeeSalary.basic_rate), 0)).where(
-            EmployeeSalary.employee_id.in_([e.id for e in active_employees]),  # type: ignore[union-attr]
+            col(EmployeeSalary.employee_id).in_(
+                [e.id for e in active_employees]
+            ),
             EmployeeSalary.is_active == True,  # noqa: E712
             EmployeeSalary.is_deleted == False,  # noqa: E712
         )
     ).one()
-    estimated_total_payroll_cost = float(estimated_total_payroll_cost or 0)
+    estimated_total_payroll_cost = float(payroll_cost_raw or 0)
 
     if upcoming_runs:
         title = f"Pre-payday check: {len(upcoming_runs)} upcoming payroll run(s)"

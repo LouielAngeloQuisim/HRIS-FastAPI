@@ -169,6 +169,42 @@ def payroll_brackets(db: Session) -> None:
         db.refresh(b)
 
 
+class TestGenerateRunAuthorization:
+    def test_generate_requires_payroll_add_permission(
+        self,
+        client: TestClient,
+        employee_with_salary: EmployeeRecords,
+        normal_user_token_headers: dict[str, str],
+        payroll_brackets: None,
+    ) -> None:
+        """An authenticated user without payroll:add must get 403, not create a run."""
+        payload = {
+            "cutoff_type": "monthly",
+            "date_from": "2024-01-01",
+            "date_to": "2024-01-31",
+            "employee_ids": [str(employee_with_salary.id)],
+        }
+        resp = client.post(
+            f"{API}/runs/generate", json=payload, headers=normal_user_token_headers
+        )
+        assert resp.status_code == 403, resp.text
+        detail = resp.json()["detail"]
+        assert "permission" in detail.lower()
+
+    def test_generate_without_token_is_rejected(
+        self, client: TestClient, employee_with_salary: EmployeeRecords
+    ) -> None:
+        """Unauthenticated request must fail before authorization (401)."""
+        payload = {
+            "cutoff_type": "monthly",
+            "date_from": "2024-01-01",
+            "date_to": "2024-01-31",
+            "employee_ids": [str(employee_with_salary.id)],
+        }
+        resp = client.post(f"{API}/runs/generate", json=payload)
+        assert resp.status_code == 401, resp.text
+
+
 class TestPreviewGenerateConsistency:
     def test_preview_and_generate_return_same_entries(
         self, client: TestClient, employee_with_salary: EmployeeRecords, superuser_token_headers: dict[str, str], payroll_brackets: None

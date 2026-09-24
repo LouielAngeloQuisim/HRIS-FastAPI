@@ -1,15 +1,15 @@
+from app.common.schemas import Message, NewPassword, Token, TokenPayload
 from app.user.models import (
-    UserBase,
-    UserCreate,
-    UserRegister,
-    UserUpdate,
-    UserUpdateMe,
     UpdatePassword,
     User,
+    UserBase,
+    UserCreate,
     UserPublic,
+    UserRegister,
     UsersPublic,
+    UserUpdate,
+    UserUpdateMe,
 )
-from app.common.schemas import Message, Token, TokenPayload, NewPassword
 
 __all__ = [
     "Message",

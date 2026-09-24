@@ -21,7 +21,11 @@ from app.attendance.adjustment_services import (
     reject_adjustment,
 )
 from app.attendance.models import DailyTimeRecord, Shift
-from app.attendance.selectors import get_active_by_id, get_employee_id_for_user, get_list
+from app.attendance.selectors import (
+    get_active_by_id,
+    get_employee_id_for_user,
+    get_list,
+)
 from app.attendance.services import (
     create_dtr,
     set_overtime_approved,

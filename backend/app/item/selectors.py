@@ -1,6 +1,6 @@
 import uuid
-from typing import Any
-from sqlmodel import Session, select, func
+
+from sqlmodel import Session, func, select
 
 from app.item.models import Item
 

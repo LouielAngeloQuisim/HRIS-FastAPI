@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 
 from starlette.requests import Request
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.common.audit.redactor import redact_json
 from app.common.audit.sink import AuditRecord, get_audit_sink
@@ -45,7 +45,7 @@ class AuditMiddleware:
         status_code = 500
         error = None
 
-        async def send_wrapper(message: dict) -> None:
+        async def send_wrapper(message: Message) -> None:
             nonlocal status_code
             if message["type"] == "http.response.start":
                 status_code = message["status"]
@@ -54,7 +54,7 @@ class AuditMiddleware:
                 )
             await send(message)
 
-        async def cached_receive() -> dict:
+        async def cached_receive() -> Message:
             return {"type": "http.request", "body": raw, "more_body": False}
 
         try:

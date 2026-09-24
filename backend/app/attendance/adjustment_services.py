@@ -13,8 +13,9 @@ from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.attendance.adjustment_models import DtrAdjustment
+from app.attendance.adjustment_schemas import DtrAdjustmentCreate
 from app.attendance.models import DailyTimeRecord
-from app.attendance.services import get_active_by_id
+from app.attendance.selectors import get_active_by_id
 
 
 def get_adjustment(*, session: Session, adjustment_id: uuid.UUID) -> DtrAdjustment | None:
@@ -28,7 +29,7 @@ def get_adjustment(*, session: Session, adjustment_id: uuid.UUID) -> DtrAdjustme
 def create_adjustment(
     *,
     session: Session,
-    data,
+    data: DtrAdjustmentCreate,
     dtr: DailyTimeRecord,
     actor_id: uuid.UUID,
 ) -> DtrAdjustment:

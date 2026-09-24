@@ -9,23 +9,16 @@ the request body.
 
 import uuid
 from datetime import datetime, timezone
-from typing import Protocol, TypeVar
 
 from fastapi import HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.attendance import calc
 from app.attendance.models import DailyTimeRecord, Shift
+from app.attendance.schemas import DailyTimeRecordCreate, DailyTimeRecordUpdate
 from app.attendance.selectors import get_active_by_id
-
-
-class _DBAudit(Protocol):
-    updated_at: datetime
-    is_deleted: bool
-    deleted_at: datetime
-
-
-T = TypeVar("T", bound=_DBAudit)
+from app.common.types import ModelT
 
 
 def _build_shift_params(shift: Shift | None) -> calc.ShiftParams:
@@ -56,17 +49,17 @@ def _compute_and_apply(
     db_obj.is_time_calculated = True
 
 
-def create_obj(*, session: Session, model: type[T], data) -> T:
-    db_obj = model.model_validate(data)  # type: ignore[attr-defined] # SQLModel metaclass defines this
+def create_obj(*, session: Session, model: type[ModelT], data: BaseModel) -> ModelT:
+    db_obj = model.model_validate(data)
     session.add(db_obj)
     session.commit()
     session.refresh(db_obj)
     return db_obj
 
 
-def update_obj(*, session: Session, db_obj: T, data) -> T:
+def update_obj(*, session: Session, db_obj: ModelT, data: BaseModel) -> ModelT:
     update_dict = data.model_dump(exclude_unset=True)
-    db_obj.sqlmodel_update(update_dict)  # type: ignore[attr-defined] # SQLModel instance method not in Protocol attrs
+    db_obj.sqlmodel_update(update_dict)
     db_obj.updated_at = datetime.now(timezone.utc)
     session.add(db_obj)
     session.commit()
@@ -74,7 +67,7 @@ def update_obj(*, session: Session, db_obj: T, data) -> T:
     return db_obj
 
 
-def soft_delete_obj(*, session: Session, db_obj: T) -> T:
+def soft_delete_obj(*, session: Session, db_obj: ModelT) -> ModelT:
     db_obj.is_deleted = True
     db_obj.deleted_at = datetime.now(timezone.utc)
     session.add(db_obj)
@@ -86,7 +79,7 @@ def soft_delete_obj(*, session: Session, db_obj: T) -> T:
 def create_dtr(
     *,
     session: Session,
-    data,
+    data: DailyTimeRecordCreate,
     actor_id: uuid.UUID,
 ) -> DailyTimeRecord:
     """Create a punch record: resolve codes, validate, run the calc core, set actor.
@@ -171,7 +164,7 @@ def update_dtr(
     *,
     session: Session,
     db_obj: DailyTimeRecord,
-    data,
+    data: DailyTimeRecordUpdate,
     shift: Shift | None,
     actor_id: uuid.UUID,
 ) -> DailyTimeRecord:

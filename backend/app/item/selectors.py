@@ -1,6 +1,6 @@
 import uuid
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, col, func, select
 
 from app.item.models import Item
 
@@ -18,7 +18,7 @@ def get_items(
         statement = (
             select(Item)
             .where(Item.owner_id == owner_id)
-            .order_by(Item.created_at.desc())
+            .order_by(col(Item.created_at).desc())
             .offset(skip)
             .limit(limit)
         )
@@ -27,12 +27,12 @@ def get_items(
         count = session.exec(count_statement).one()
         statement = (
             select(Item)
-            .order_by(Item.created_at.desc())
+            .order_by(col(Item.created_at).desc())
             .offset(skip)
             .limit(limit)
         )
     items = session.exec(statement).all()
-    return items, count
+    return list(items), count
 
 
 def get_item_by_id(*, session: Session, item_id: uuid.UUID) -> Item | None:

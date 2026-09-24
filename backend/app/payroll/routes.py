@@ -405,7 +405,11 @@ async def preview_payroll_endpoint(
     return PayrollPreviewResponse(payroll_run_id=run.id, entries=[PayrollEntryRead.model_validate(e) for e in entries])
 
 
-@router.post("/runs/generate", response_model=PayrollRun)
+@router.post(
+    "/runs/generate",
+    response_model=PayrollRun,
+    dependencies=[Depends(require_permission("payroll", "add"))],
+)
 async def generate_payroll_endpoint(
     *,
     session: SessionDep,

@@ -1,5 +1,5 @@
 # Architecture Map (generated, do not hand-edit)
-Generated: 2026-09-24, from commit 4cc67e8
+Generated: 2026-09-24, from commit 50b7cee
 Regenerate this file with `bash scripts/gen-map.sh` rather than editing it by hand.
 
 ## Backend routes (`/api/*`): 225 endpoints in 39 groups
@@ -242,7 +242,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `POST /api/v1/payroll/philhealth-brackets/`  `[perms: payroll:add]`
 - `POST /api/v1/payroll/philhealth/calculate`
 - `GET /api/v1/payroll/runs`  `[perms: payroll:view]`
-- `POST /api/v1/payroll/runs/generate`
+- `POST /api/v1/payroll/runs/generate`  `[perms: payroll:add]`
 - `POST /api/v1/payroll/runs/preview`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/runs/status`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/runs/{run_id}`  `[perms: payroll:view]`

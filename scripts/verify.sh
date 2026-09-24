@@ -3,8 +3,9 @@
 # scripts/verify.sh - single entry point for "does this actually work".
 #
 # Runs the real backend + frontend checks and prints a PASS/FAIL summary.
-# Exit code 0 only when every HARD-GATE check passed. mypy and eslint are
-# REPORT-ONLY for now (known pre-existing issues tracked separately).
+# Exit code 0 only when every HARD-GATE check passed. mypy, eslint, and the
+# docs/MAP.md drift check are REPORT-ONLY for now (known pre-existing issues
+# tracked separately).
 #
 # Safety:
 #   * Never touches production, the VM, or any live database.
@@ -131,8 +132,8 @@ if [ "$PREFLIGHT_OK" != "1" ]; then
   exit 1
 fi
 
-# --------------------------------------------------------------- check 1/8
-section "[1/8] backend: ruff check (HARD GATE)"
+# --------------------------------------------------------------- check 1/9
+section "[1/9] backend: ruff check (HARD GATE)"
 if ( cd backend && uv run ruff check app ); then
   echo "ruff: clean"
   record PASS "backend/ruff" "clean"
@@ -140,16 +141,16 @@ else
   record FAIL "backend/ruff" "lint errors (see output above)"
 fi
 
-# --------------------------------------------------------------- check 2/8
-section "[2/8] backend: mypy app (REPORT-ONLY known gap)"
+# --------------------------------------------------------------- check 2/9
+section "[2/9] backend: mypy app (REPORT-ONLY known gap)"
 MYPY_OUT="$( cd backend && uv run mypy app 2>&1 )" || true
 MYPY_COUNT="$(printf '%s\n' "$MYPY_OUT" | grep -cE 'error:' || true)"
 printf '%s\n' "$MYPY_OUT" | tail -n 3
 echo "mypy error count: ${MYPY_COUNT} (report-only: known pre-existing issues, tracked separately, NOT gating)"
 record REPORT "backend/mypy" "${MYPY_COUNT} errors (known gap, not gating)"
 
-# --------------------------------------------------------------- check 3/8
-section "[3/8] backend: alembic upgrade head + alembic check (HARD GATE)"
+# --------------------------------------------------------------- check 3/9
+section "[3/9] backend: alembic upgrade head + alembic check (HARD GATE)"
 if [ "$DB_READY" = "1" ]; then
   (
     cd backend \
@@ -168,8 +169,8 @@ else
   record SKIP "backend/alembic-check" "no DB: ${DB_SKIP_REASON:-unknown}"
 fi
 
-# --------------------------------------------------------------- check 4/8
-section "[4/8] backend: pytest tests/ -q (HARD GATE)"
+# --------------------------------------------------------------- check 4/9
+section "[4/9] backend: pytest tests/ -q (HARD GATE)"
 if [ "$DB_READY" = "1" ]; then
   PYTEST_OUT="$( cd backend && uv run python app/tests_pre_start.py >/dev/null 2>&1 && uv run pytest tests/ -q 2>&1 )"
   PYTEST_RC=$?
@@ -188,8 +189,8 @@ else
   record SKIP "backend/pytest" "no DB: ${DB_SKIP_REASON:-unknown}"
 fi
 
-# --------------------------------------------------------------- check 5/8
-section "[5/8] frontend: pnpm exec tsc -b (HARD GATE)"
+# --------------------------------------------------------------- check 5/9
+section "[5/9] frontend: pnpm exec tsc -b (HARD GATE)"
 if ( cd frontendv3 && pnpm exec tsc -b ); then
   echo "tsc: 0 errors"
   record PASS "frontend/tsc" "0 errors"
@@ -197,16 +198,16 @@ else
   record FAIL "frontend/tsc" "type errors (see output above)"
 fi
 
-# --------------------------------------------------------------- check 6/8
-section "[6/8] frontend: pnpm exec eslint . (REPORT-ONLY known gap)"
+# --------------------------------------------------------------- check 6/9
+section "[6/9] frontend: pnpm exec eslint . (REPORT-ONLY known gap)"
 ESLINT_OUT="$( cd frontendv3 && pnpm exec eslint . 2>&1 )" || true
 ESLINT_SUMMARY="$(printf '%s\n' "$ESLINT_OUT" | grep -E 'problems' | tail -n 1)"
 printf '%s\n' "$ESLINT_SUMMARY"
 echo "eslint: report-only (known no-explicit-any pre-existing errors, NOT gating)"
 record REPORT "frontend/eslint" "${ESLINT_SUMMARY:-see tool output} (known gap, not gating)"
 
-# --------------------------------------------------------------- check 7/8
-section "[7/8] frontend: vitest run --browser.headless (HARD GATE)"
+# --------------------------------------------------------------- check 7/9
+section "[7/9] frontend: vitest run --browser.headless (HARD GATE)"
 (
   cd frontendv3
   # Chromium system libs (this host lacks libnss3 et al; see docs/AGENTS.md)
@@ -233,8 +234,36 @@ else
   record FAIL "frontend/vitest" "rc=${VITEST_RC} (see output above)"
 fi
 
-# --------------------------------------------------------------- check 8/8
-section "[8/8] frontend: pnpm build (HARD GATE)"
+# --------------------------------------------------------------- check 8/9
+section "[8/9] generated map: docs/MAP.md drift check (REPORT-ONLY)"
+# Regenerates the architecture map to a temp file (via MAP_OUT, so the
+# committed docs/MAP.md is never touched) and diffs it against the committed
+# version. Drift = architecture changed without the map being regenerated.
+MAP_REGEN="/tmp/verify-map-regen-$$.md"
+if MAP_OUT="$MAP_REGEN" bash scripts/gen-map.sh >/dev/null 2>&1 && [ -s "$MAP_REGEN" ]; then
+  if [ ! -f docs/MAP.md ]; then
+    echo "MAP.md drift: docs/MAP.md is MISSING but the generator runs - commit a regenerated map"
+    record REPORT "docs/map-drift" "missing (known gap, not gating)"
+  else
+    # ignore only the 'Generated:' date/commit line; real content diffs matter
+    DIFF_LINES="$( (diff <(grep -v '^Generated:' docs/MAP.md) <(grep -v '^Generated:' "$MAP_REGEN") || true) | grep -c '^[<>]' || true)"
+    if [ "$DIFF_LINES" -gt 0 ]; then
+      echo "MAP.md drift: ${DIFF_LINES} content lines differ from the committed docs/MAP.md"
+      echo "  (regenerate with: bash scripts/gen-map.sh)"
+      record REPORT "docs/map-drift" "${DIFF_LINES} lines differ (known gap, not gating)"
+    else
+      echo "docs/MAP.md: IN-SYNC with the code"
+      record REPORT "docs/map-drift" "in-sync (not gating)"
+    fi
+  fi
+else
+  echo "WARN: gen-map.sh failed or produced empty output; skipping drift check"
+  record REPORT "docs/map-drift" "generator failed (see manual re-run, not gating)"
+fi
+rm -f "$MAP_REGEN" || true
+
+# --------------------------------------------------------------- check 9/9
+section "[9/9] frontend: pnpm build (HARD GATE)"
 if ( cd frontendv3 && pnpm build >/tmp/verify-build.log 2>&1 ); then
   tail -n 5 /tmp/verify-build.log
   echo "build: OK (full log: /tmp/verify-build.log)"

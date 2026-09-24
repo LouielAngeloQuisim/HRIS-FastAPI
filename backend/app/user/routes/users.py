@@ -230,7 +230,7 @@ def delete_user_route(
         )
     from sqlmodel import delete as sql_delete
     statement = sql_delete(Item).where(col(Item.owner_id) == user_id)
-    session.exec(statement)  # type: ignore
+    session.exec(statement)
     session.delete(user)
     session.commit()
     return Message(message="User deleted successfully")

@@ -111,7 +111,7 @@ def _make_crud_router(
             db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
             if db_obj is None:
                 raise HTTPException(status_code=404, detail=f"{model_name} not found")
-            soft_delete_obj(session=session, db_obj=db_obj)  # type: ignore[valid-type, type-var]
+            soft_delete_obj(session=session, db_obj=db_obj)
             return Message(message=f"{model_name} deleted successfully")
 
     return router
@@ -231,7 +231,7 @@ def delete_dtr(session: SessionDep, obj_id) -> Any:
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
     if db_obj is None:
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
-    soft_delete_obj(session=session, db_obj=db_obj)  # type: ignore[valid-type, type-var] # SQLModel subclass not recognized as _DBAudit by mypy
+    soft_delete_obj(session=session, db_obj=db_obj)  # type: ignore[type-var] # SQLModel subclass not recognized as _DBAudit by mypy
     return Message(message="DailyTimeRecord deleted successfully")
 
 

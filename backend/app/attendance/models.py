@@ -30,7 +30,7 @@ class Shift(SQLModel, table=True):
     end_time: str = Field(max_length=5)
     lunch_break_duration: int = Field(default=60)
     total_hours_minus_lunch: int = Field(default=480)
-    days_of_week: list[str] = Field(default_factory=lambda: ["1", "2", "3", "4", "5"], sa_type=JSON)  # type: ignore
+    days_of_week: list[str] = Field(default_factory=lambda: ["1", "2", "3", "4", "5"], sa_type=JSON)
     description: str | None = Field(default=None, max_length=1024)
     is_deleted: bool = Field(default=False)
     deleted_at: datetime | None = Field(

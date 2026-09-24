@@ -351,7 +351,7 @@ def run_pre_payday_check(
 
     estimated_total_payroll_cost = session.exec(
         select(func.coalesce(func.sum(EmployeeSalary.basic_rate), 0)).where(
-            EmployeeSalary.employee_id.in_([e.id for e in active_employees]),  # type: ignore[attr-defined]
+            EmployeeSalary.employee_id.in_([e.id for e in active_employees]),  # type: ignore[union-attr]
             EmployeeSalary.is_active == True,  # noqa: E712
             EmployeeSalary.is_deleted == False,  # noqa: E712
         )

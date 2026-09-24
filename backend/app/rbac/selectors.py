@@ -43,7 +43,7 @@ def get_all_modules(*, session: Session) -> list[Module]:
 
 
 def get_all_roles(*, session: Session) -> list[Role]:
-    rows = session.exec(select(Role).order_by(Role.code)).all()  # type: ignore[arg-type]
+    rows = session.exec(select(Role).order_by(Role.code)).all()
     return list(rows)
 
 
@@ -57,7 +57,7 @@ def get_role_permission(
         .where(
             RolePermission.role_id == role_id,
             Module.code == module_code,
-            Module.is_active.is_(True),  # type: ignore[union-attr]
+            Module.is_active.is_(True),  # type: ignore[attr-defined]
         )
     ).first()
 

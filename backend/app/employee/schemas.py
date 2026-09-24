@@ -7,6 +7,7 @@ them plus the request/response DTOs used by the Phase 1 routes.
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlmodel import Field, SQLModel
 
@@ -67,17 +68,17 @@ __all__ = [
 # EmployeeAdditionalRecords (201-file annex; one row per employee)
 # ---------------------------------------------------------------------------
 class EmployeeAdditionalRecordsUpdate(SQLModel):
-    employment_history: dict | None = None
-    past_employment_record: dict | None = None
-    educational_background: dict | None = None
-    seminars_trainings: dict | None = None
-    assessments_exams: dict | None = None
-    skills: dict | None = None
-    awards: dict | None = None
-    licenses: dict | None = None
-    dependents: dict | None = None
-    violations: dict | None = None
-    medical_drug_tests: dict | None = None
+    employment_history: dict[str, Any] | None = None
+    past_employment_record: dict[str, Any] | None = None
+    educational_background: dict[str, Any] | None = None
+    seminars_trainings: dict[str, Any] | None = None
+    assessments_exams: dict[str, Any] | None = None
+    skills: dict[str, Any] | None = None
+    awards: dict[str, Any] | None = None
+    licenses: dict[str, Any] | None = None
+    dependents: dict[str, Any] | None = None
+    violations: dict[str, Any] | None = None
+    medical_drug_tests: dict[str, Any] | None = None
     school_graduated: str | None = Field(default=None, max_length=255)
     course: str | None = Field(default=None, max_length=255)
     career_band_level: str | None = Field(default=None, max_length=255)
@@ -93,17 +94,17 @@ class EmployeeAdditionalRecordsUpdate(SQLModel):
 class EmployeeAdditionalRecordsPublic(SQLModel):
     id: uuid.UUID
     employee_id: uuid.UUID
-    employment_history: dict | None = None
-    past_employment_record: dict | None = None
-    educational_background: dict | None = None
-    seminars_trainings: dict | None = None
-    assessments_exams: dict | None = None
-    skills: dict | None = None
-    awards: dict | None = None
-    licenses: dict | None = None
-    dependents: dict | None = None
-    violations: dict | None = None
-    medical_drug_tests: dict | None = None
+    employment_history: dict[str, Any] | None = None
+    past_employment_record: dict[str, Any] | None = None
+    educational_background: dict[str, Any] | None = None
+    seminars_trainings: dict[str, Any] | None = None
+    assessments_exams: dict[str, Any] | None = None
+    skills: dict[str, Any] | None = None
+    awards: dict[str, Any] | None = None
+    licenses: dict[str, Any] | None = None
+    dependents: dict[str, Any] | None = None
+    violations: dict[str, Any] | None = None
+    medical_drug_tests: dict[str, Any] | None = None
     school_graduated: str | None = None
     course: str | None = None
     career_band_level: str | None = None

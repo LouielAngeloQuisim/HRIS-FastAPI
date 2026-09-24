@@ -5,6 +5,8 @@ else's. An elevated role (HR: emp_list edit) can access any employee's annex.
 """
 
 
+import uuid
+
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
@@ -116,3 +118,34 @@ class TestAdditionalRecordsOwnership:
         assert annex is not None
         assert annex.course == "BSCS"
         assert annex.school_graduated == "UP"
+
+
+class TestAdditionalRecordsJsonFields:
+    """Regression for the dict[str, Any] annotations on the 201-file JSON annex
+    fields (mypy type-arg cleanup): validates that dict payloads still pass
+    schema validation and serialize through the update/public DTOs unchanged."""
+
+    def test_update_dto_serializes_json_annex_dicts(self) -> None:
+        from app.employee.schemas import (
+            EmployeeAdditionalRecordsPublic,
+            EmployeeAdditionalRecordsUpdate,
+        )
+
+        payload = {
+            "employment_history": {"2020": "Acme Corp"},
+            "educational_background": {"2019": {"school": "UP", "degree": "BSCS"}},
+            "skills": {"python": 5},
+            "dependents": {"d1": "child"},
+        }
+        update = EmployeeAdditionalRecordsUpdate(**payload)
+        dumped = update.model_dump(exclude_unset=True)
+        assert dumped == payload
+
+        public = EmployeeAdditionalRecordsPublic(
+            id=uuid.uuid4(),
+            employee_id=uuid.uuid4(),
+            **payload,
+        )
+        for field, value in payload.items():
+            assert getattr(public, field) == value
+        assert public.model_dump()["skills"] == {"python": 5}

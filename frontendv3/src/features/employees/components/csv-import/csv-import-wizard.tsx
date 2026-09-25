@@ -79,7 +79,7 @@ export function CsvImportWizard({ open, onOpenChange }: { open: boolean; onOpenC
       parseCsv(text)
     }
     reader.readAsText(selectedFile)
-  }, [])
+  }, [parseCsv])
 
  
 

@@ -3,6 +3,7 @@ vi.mock("./components/resource-form", () => ({ ResourceForm: () => null }))
 vi.mock("./components/resource-delete-dialog", () => ({ ResourceDeleteDialog: () => null }))
 vi.mock("@/lib/api/client", () => ({ api: { delete: vi.fn() } }))
 import { render } from 'vitest-browser-react'
+import { type useHolidayConfigs } from '@/lib/api/holidays'
 import HolidaysPage from './index'
 
 describe('HolidaysPage (permissions)', () => {
@@ -11,9 +12,9 @@ describe('HolidaysPage (permissions)', () => {
       useCan: () => false,
     }))
 
-    const { useHolidayConfigsMock } = vi.hoisted(() => ({ useHolidayConfigsMock: vi.fn(() => ({ data: { data: [], count: 0 }, isPending: false, isError: false, refetch: vi.fn() })) }))
+    const { useHolidayConfigsMock } = vi.hoisted(() => ({ useHolidayConfigsMock: vi.fn((..._args: Parameters<typeof useHolidayConfigs>) => ({ data: { data: [], count: 0 }, isPending: false, isError: false, refetch: vi.fn() })) }))
     vi.mock('@/lib/api/holidays', () => ({
-      useHolidayConfigs: (...args: any[]) => (useHolidayConfigsMock as any)(...args),
+      useHolidayConfigs: (...args: Parameters<typeof useHolidayConfigs>) => useHolidayConfigsMock(...args),
     }))
 
     vi.mock('@/components/layout/header', () => ({

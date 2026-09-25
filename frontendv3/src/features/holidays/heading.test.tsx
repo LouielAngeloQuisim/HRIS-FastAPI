@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { type Mock, describe, expect, it, vi } from 'vitest'
 vi.mock("./components/resource-form", () => ({ ResourceForm: () => null }))
 vi.mock("./components/resource-delete-dialog", () => ({ ResourceDeleteDialog: () => null }))
 vi.mock("@/lib/api/client", () => ({ api: { delete: vi.fn() } }))
 import { render } from 'vitest-browser-react'
+import { type useHolidayConfigs } from '@/lib/api/holidays'
 import HolidaysPage from './index'
 
 const { refetch } = vi.hoisted(() => ({ refetch: vi.fn() }))
@@ -15,9 +16,9 @@ vi.mock('@/tanstack/react-router', () => ({
   getRouteApi: () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }),
 }))
 
-const { useHolidayConfigsMock } = vi.hoisted(() => ({ useHolidayConfigsMock: vi.fn() }))
+const { useHolidayConfigsMock } = vi.hoisted(() => ({ useHolidayConfigsMock: vi.fn() as Mock<(...args: Parameters<typeof useHolidayConfigs>) => unknown> }))
 vi.mock('@/lib/api/holidays', () => ({
-  useHolidayConfigs: (...args: any[]) => (useHolidayConfigsMock as any)(...args),
+  useHolidayConfigs: (...args: Parameters<typeof useHolidayConfigs>) => useHolidayConfigsMock(...args),
 }))
 
 vi.mock('@/components/layout/header', () => ({

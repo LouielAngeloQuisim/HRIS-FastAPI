@@ -79,7 +79,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
       parseCsv(text)
     }
     reader.readAsText(selectedFile)
-  }, [])
+  }, [parseCsv])
 
   const handleTextareaChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setCsvText(e.target.value)

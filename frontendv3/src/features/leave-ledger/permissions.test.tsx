@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
+import { type useLeaveLedger } from '@/lib/api/leave-ledger'
 import LeaveLedgerPage from './index'
 
 describe('LeaveLedgerPage (permissions)', () => {
@@ -8,9 +9,9 @@ describe('LeaveLedgerPage (permissions)', () => {
       useCan: () => false,
     }))
 
-    const { useLeaveLedgerMock } = vi.hoisted(() => ({ useLeaveLedgerMock: vi.fn(() => ({ data: { data: [], summary: { granted_total: 0, consumed_total: 0, remaining: 0 } }, isPending: false, isError: false, refetch: vi.fn() })) }))
+    const { useLeaveLedgerMock } = vi.hoisted(() => ({ useLeaveLedgerMock: vi.fn((..._args: Parameters<typeof useLeaveLedger>) => ({ data: { data: [], summary: { granted_total: 0, consumed_total: 0, remaining: 0 } }, isPending: false, isError: false, refetch: vi.fn() })) }))
     vi.mock('@/lib/api/leave-ledger', () => ({
-      useLeaveLedger: (...args: any[]) => (useLeaveLedgerMock as any)(...args),
+      useLeaveLedger: (...args: Parameters<typeof useLeaveLedger>) => useLeaveLedgerMock(...args),
     }))
 
     vi.mock('@/components/layout/header', () => ({

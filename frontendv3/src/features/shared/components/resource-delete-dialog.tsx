@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { extractDeleteErrorMessage } from '@/lib/extract-delete-error-message'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 
 type ResourceDeleteDialogProps<T> = {
@@ -11,26 +12,6 @@ type ResourceDeleteDialogProps<T> = {
   resourceType: string
   deleteFn: (id: string) => Promise<unknown>
   queryKey: string[]
-}
-
-export function extractDeleteErrorMessage(
-  err: unknown,
-  resourceType: string
-): string {
-  try {
-    if (err && typeof err === 'object' && 'response' in err) {
-      const data = (err as { response?: { data?: unknown } }).response?.data as
-        | { error?: { message?: string }; detail?: string | string[] }
-        | undefined
-      const msg =
-        data?.error?.message ??
-        (Array.isArray(data?.detail) ? data.detail[0] : data?.detail)
-      if (typeof msg === 'string' && msg.length > 0) return msg
-    }
-  } catch {
-    /* fall through to generic */
-  }
-  return `Failed to delete ${resourceType}`
 }
 
 export function ResourceDeleteDialog<T extends { id: string; name?: string }>({

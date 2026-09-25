@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { toast } from 'sonner'
-import { extractDeleteErrorMessage } from '@/features/shared/components/resource-delete-dialog'
+import { extractDeleteErrorMessage } from '@/lib/extract-delete-error-message'
 
 type ResourceDeleteDialogProps<T> = {
   open: boolean

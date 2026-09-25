@@ -1,19 +1,23 @@
 # Stage 0: build the frontendv3 app
-FROM node:20-alpine AS build-stage
+FROM node:22-alpine AS build-stage
 
 WORKDIR /app
 
 COPY frontendv3/package.json ./
 COPY frontendv3/pnpm-lock.yaml ./
+COPY frontendv3/pnpm-workspace.yaml ./
+COPY frontendv3/.npmrc ./
 
-RUN npm install --legacy-peer-deps
+RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
+
+RUN pnpm install --frozen-lockfile
 
 COPY frontendv3/ ./
 
 ARG VITE_API_URL
 ARG NODE_ENV=production
 
-RUN npm run build
+RUN pnpm build
 
 # Stage 1: serve with nginx
 FROM nginx:1

@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { type Mock, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
+import { type useDailyTimeRecords } from '@/lib/api/daily-time-records'
 import DailyTimeRecordsPage from './index'
 
 vi.mock('@/context/permissions-provider', () => ({
@@ -11,12 +12,12 @@ vi.mock('@/tanstack/react-router', () => ({
 }))
 
 const { useDailyTimeRecordsMock, useApproveOvertimeMock, useRejectOvertimeMock } = vi.hoisted(() => ({
-  useDailyTimeRecordsMock: vi.fn(),
+  useDailyTimeRecordsMock: vi.fn() as Mock<(...args: Parameters<typeof useDailyTimeRecords>) => unknown>,
   useApproveOvertimeMock: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
   useRejectOvertimeMock: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }))
 vi.mock('@/lib/api/daily-time-records', () => ({
-  useDailyTimeRecords: (...args: any[]) => useDailyTimeRecordsMock(...args),
+  useDailyTimeRecords: (...args: Parameters<typeof useDailyTimeRecords>) => useDailyTimeRecordsMock(...args),
   useApproveOvertime: () => useApproveOvertimeMock(),
   useRejectOvertime: () => useRejectOvertimeMock(),
 }))

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
+import { type useLeaveCalendar } from '@/lib/api/leave-ledger'
 import LeaveCalendarPage from './index'
 
 describe('LeaveCalendarPage (permissions)', () => {
@@ -8,9 +9,9 @@ describe('LeaveCalendarPage (permissions)', () => {
       useCan: () => false,
     }))
 
-    const { useLeaveCalendarMock } = vi.hoisted(() => ({ useLeaveCalendarMock: vi.fn(() => ({ data: [], isPending: false, isError: false, refetch: vi.fn() })) }))
+    const { useLeaveCalendarMock } = vi.hoisted(() => ({ useLeaveCalendarMock: vi.fn((..._args: Parameters<typeof useLeaveCalendar>) => ({ data: [], isPending: false, isError: false, refetch: vi.fn() })) }))
     vi.mock('@/lib/api/leave-ledger', () => ({
-      useLeaveCalendar: (...args: any[]) => (useLeaveCalendarMock as any)(...args),
+      useLeaveCalendar: (...args: Parameters<typeof useLeaveCalendar>) => useLeaveCalendarMock(...args),
     }))
 
     vi.mock('@/components/layout/header', () => ({

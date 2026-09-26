@@ -1,5 +1,5 @@
 # Stage 0: build the frontendv3 app
-FROM node:22-alpine AS build-stage
+FROM node:26-alpine AS build-stage
 
 WORKDIR /app
 

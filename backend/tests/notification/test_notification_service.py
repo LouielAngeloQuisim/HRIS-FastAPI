@@ -80,7 +80,10 @@ class TestPayrollRunEvents:
 
     def test_approved_and_voided_events_use_correct_types(self, db: Session) -> None:
         _user_with_payroll_view(db)
-        run = _draft_run(db, date(2026, 10, 1))
+        # Past-dated on purpose: a future-dated DRAFT run here lands inside the
+        # inclusive window of run_pre_payday_check used by later tests in this
+        # session-scoped db and makes them fail on certain calendar dates.
+        run = _draft_run(db, date.today() - timedelta(days=400))
 
         notify_payroll_run_event(session=db, run=run, event="approved")
         notify_payroll_run_event(session=db, run=run, event="voided")
@@ -93,7 +96,9 @@ class TestPayrollRunEvents:
             assert rows, f"no notification for {event_type}"
 
     def test_unknown_event_is_noop(self, db: Session) -> None:
-        run = _draft_run(db, date(2026, 11, 1))
+        # Past-dated: future-dated DRAFT runs here would enter the inclusive
+        # pre-payday window of later tests (see the approved/voided test above).
+        run = _draft_run(db, date.today() - timedelta(days=400))
         assert notify_payroll_run_event(session=db, run=run, event="bogus") == []
 
 
@@ -137,10 +142,16 @@ class TestPrePaydayCheck:
         run = _draft_run(db, date.today() + timedelta(days=1))
         result = run_pre_payday_check(session=db, days_before=3)
 
-        matching = [f for f in result["flags"] if f["employee_code"] == emp.employee_code]
-        assert matching, "missing-salary employee was not flagged"
+        # Filter on both employee and run so the assertion does not depend on the
+        # order of result["flags"]: run_pre_payday_check has no ORDER BY, so any
+        # other in-window run would otherwise make matching[0] nondeterministic.
+        matching = [
+            f
+            for f in result["flags"]
+            if f["employee_code"] == emp.employee_code and f["run_id"] == str(run.id)
+        ]
+        assert matching, "missing-salary employee was not flagged for this run"
         assert matching[0]["missing_salary"] is True
-        assert matching[0]["run_id"] == str(run.id)
         assert matching[0]["link"] == f"/payroll-runs/{run.id}"
 
 

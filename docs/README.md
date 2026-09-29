@@ -8,6 +8,7 @@
 | [`STATUS.md`](./STATUS.md) | Current status/counts snapshot (hand-maintained; each number lists the command that measured it). |
 | [`MAP.md`](./MAP.md) | Generated repository architecture map (routes, permissions, domain packages, frontend features, migration chain). Regenerate with `bash scripts/gen-map.sh`; do not hand-edit. Drift-checked by `scripts/verify.sh`. |
 | [`../AGENTS.md`](../AGENTS.md) | Hand-written project rules, conventions, baselines, and the mandatory testing policy. |
+| [`feature-development-workflow.md`](./feature-development-workflow.md) | End-to-end development process: worktree from `origin/main`, one plan per task, fresh-session-per-step, evidence-first verification, PR rules, migration handling. Tracked home of the workflow (`.kilo/` is intentionally gitignored). |
 
 ## Historical / superseded
 

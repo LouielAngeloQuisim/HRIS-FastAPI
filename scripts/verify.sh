@@ -245,8 +245,10 @@ if MAP_OUT="$MAP_REGEN" bash scripts/gen-map.sh >/dev/null 2>&1 && [ -s "$MAP_RE
     echo "MAP.md drift: docs/MAP.md is MISSING but the generator runs - commit a regenerated map"
     record REPORT "docs/map-drift" "missing (known gap, not gating)"
   else
-    # ignore only the 'Generated:' date/commit line; real content diffs matter
-    DIFF_LINES="$( (diff <(grep -v '^Generated:' docs/MAP.md) <(grep -v '^Generated:' "$MAP_REGEN") || true) | grep -c '^[<>]' || true)"
+    # ignore only the provenance header lines ('Generated:' date and
+    # 'Source commit:' sha, which legitimately differ when the map was
+    # committed after its source commit); real content diffs matter
+    DIFF_LINES="$( (diff <(grep -vE '^(Generated:|Source commit:)' docs/MAP.md) <(grep -vE '^(Generated:|Source commit:)' "$MAP_REGEN") || true) | grep -c '^[<>]' || true)"
     if [ "$DIFF_LINES" -gt 0 ]; then
       echo "MAP.md drift: ${DIFF_LINES} content lines differ from the committed docs/MAP.md"
       echo "  (regenerate with: bash scripts/gen-map.sh)"

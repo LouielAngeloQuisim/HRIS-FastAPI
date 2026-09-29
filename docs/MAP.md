@@ -1,6 +1,11 @@
 # Architecture Map (generated, do not hand-edit)
-Generated: 2026-09-24, from commit 50b7cee
-Regenerate this file with `bash scripts/gen-map.sh` rather than editing it by hand.
+Generated: 2026-09-28
+Source commit: bf2a479c7b0fdd07efffc49037e9d8be629ecb4d
+Provenance: the content below was extracted from the working tree at the
+Source commit shown. When this file is itself committed, the commit that
+stores it is a DESCENDANT of the Source commit, not the Source commit.
+Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
+rather than editing it by hand.
 
 ## Backend routes (`/api/*`): 225 endpoints in 39 groups
 
@@ -438,6 +443,21 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 21. `a1b2c3d4e5f6` - add pre_payday_check to notificationtype enum
 22. `54ff6e36652b` - add_payroll_tables
 23. `3f0e3e733925` - change employee_salary unique constraint to include effective_date
+
+### Migration anomalies (static findings, report-only)
+
+Derived by `scripts/gen-map.sh` from the migration source text only. These
+are NOT defects proven by running anything: each needs human review before
+any action. Historical migration files are never modified by the generator.
+
+6 finding(s):
+
+- `3009113137ba` (add notification and audit_log tables): `upgrade()` contains no `op.*` call (effectively a no-op migration; its child may carry the intended work)
+- `3f0e3e733925` (change employee_salary unique constraint to include effective_date), `f176e167c8e7` (change employee_salary unique constraint to include effective_date): identical normalized `upgrade()` constraint-operation signature
+- `54ff6e36652b` (add_payroll_tables): description mentions table creation but `upgrade()` contains no `op.create_table` call
+- `7286295e0903` (add employee core and org structure tables): creates native enum type(s) `employeestatus` in `upgrade()` with no matching `DROP TYPE` in its `downgrade()` (downgrade leaves the postgres type orphaned; enum cleanup would need a follow-up migration or explicit ops runbook)
+- `b9748b3e7b5c` (add leave_policy, enrollment, request, ledger, holiday tables (Phase b3)): creates native enum type(s) `genderscope`, `holidaytype`, `leavecadence`, `leaveledgersource`, `leaverequesteventtype`, `leavestatus`, `maritalstatusscope`, `observeweekendas` in `upgrade()` with no matching `DROP TYPE` in its `downgrade()` (downgrade leaves the postgres type orphaned; enum cleanup would need a follow-up migration or explicit ops runbook)
+- `d4b4a4d0b4a1` (add payroll bracket, integration, salary, run, entry, loan tables (Phase B4A)): creates native enum type(s) `connectortype`, `cutofftype`, `loantype`, `payrolladjustmenttype`, `payrollrunstatus`, `paytype` in `upgrade()` with no matching `DROP TYPE` in its `downgrade()` (downgrade leaves the postgres type orphaned; enum cleanup would need a follow-up migration or explicit ops runbook)
 
 ## Cross-reference: backend domain <-> frontend feature (exact name match)
 

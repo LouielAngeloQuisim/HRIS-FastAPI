@@ -125,7 +125,7 @@ branch `chore/b1-docs-process-residue`.)
 | #89 | DONE |
 | #90 | IN PROGRESS (round 1 merged #55; round 2 in Batch B1 PR) |
 | #91 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
-| #92 | OPEN |
+| #92 | IN PROGRESS (implementation submitted in final-cleanup Batch B2; closes when that PR merges) |
 | #93 | IN PROGRESS (evidence-based decision; closes when Batch B1 PR merges) |
 | #94 | NEEDS RECONCILIATION (partial status preserved; see note) |
 
@@ -170,8 +170,10 @@ describe the old error counts (or the bf2a479 warning count) as current.
 ### #28 — scripts/verify.sh — DONE
 `scripts/verify.sh` exists (commit 4cc67e8) and runs ruff, mypy, alembic
 drift-check, pytest, tsc, eslint, vitest, MAP drift, and frontend build with a
-PASS/FAIL summary. Report-only comments inside it still name already-fixed
-gaps; hardening is optional Batch D work.
+PASS/FAIL summary. Report-only comments inside it named already-fixed gaps
+(as of the `f8b890d` baseline); they were corrected in final-cleanup Batch
+B2 (`chore/b2-ci-verification-hardening`, pending merge) — mypy/eslint stay
+REPORT-ONLY by policy, no longer labeled as known gaps.
 
 ### #29 / #30 — Stale documentation / AGENTS information — IN PROGRESS
 Original concern: migration counts, test counts, router counts, coverage
@@ -240,8 +242,9 @@ and verify.sh's drift check reports IN-SYNC on `f8b890d` (re-measured
 merged (PR #54, `0c68537`); Batch B.3 / template residue round 1 is merged
 (PR #55, `f8b890d`) with round 2 submitted in the final-cleanup Batch B1 PR.
 Remaining: Batch C operational docs (architecture/decisions/modules/plans/
-testing/archive are still stubs), Batch D verification improvements (including
-the stale report-only comments in verify.sh/ci.yml naming already-fixed gaps).
+testing/archive are still stubs), Batch D verification improvements (the
+stale report-only comments in verify.sh/ci.yml naming already-fixed gaps
+were corrected in final-cleanup Batch B2, pending merge).
 
 ### #52 — Migration `b9748b3e7b5c` leaves orphaned PostgreSQL enum types after downgrade — OPEN
 Confirmed: its `upgrade()` creates 8 enum types (`genderscope`, `holidaytype`,
@@ -267,6 +270,16 @@ health-check and the frontend root expecting HTTP 200; `compose.prod.yml`
 healthchecks exist for backend and db only (frontend and Traefik have none).
 Decide whether verification must also exercise auth/redirect/protected
 behavior and add missing healthchecks or document the gaps.
+Re-verified 2026-09-29 on `62f1372` (final-cleanup Batch B2 investigation):
+every healthcheck that IS defined is already consumed — db via `depends_on:
+condition: service_healthy` (compose.yml + compose.prod.yml), backend via
+the deploy job's `docker inspect -f '{{.State.Health.Status}}'` wait loop —
+so there is no "defined but unused" healthcheck to wire up mechanically.
+Anything further (frontend/Traefik healthchecks, deeper verify probes) is a
+new operational policy choice, not a fix.
+DECISION REQUIRED (owner): (a) deepen the `verify` job beyond HTTP 200,
+(b) add frontend/Traefik healthchecks, or (c) document the gaps and close.
+Batch B2 deliberately implements none of these.
 
 ### #67 — Payroll migration review — DONE
 Review found no destructive `upgrade()` operations in the payroll migration.
@@ -389,9 +402,34 @@ remaining candidates, with per-file evidence re-gathered on `f8b890d`
   empty `frontend/blob-report/` and `frontend/test-results/` directories
   (0 tracked files); removing them is a host action, not a PR change.
 
-### #92 — CI config-check job — OPEN
+### #92 — CI config-check job — IN PROGRESS (implementation submitted in final-cleanup Batch B2; closes when that PR merges)
 `.github/workflows/ci.yml` contains exactly the `frontend` and `backend` jobs;
 no workflow-config validation (e.g. actionlint) job exists.
+Batch B2 (branch `chore/b2-ci-verification-hardening`) submits the smallest
+maintainable check: a new `ci-config-check` job runs
+`scripts/check-ci-config.sh`, which fetches actionlint **1.7.12 pinned by
+version AND sha256** (linux amd64/arm64 digests recorded in the script; the
+binary is cached under gitignored `.cache/actionlint/` and re-verified on
+use) and validates every workflow under `.github/workflows/` — YAML
+structure, `${{ }}` expressions and context access, `needs` job references,
+action inputs/outputs, reusable-workflow calls, runner labels, and embedded
+shell (via shellcheck when present). `.github/actionlint.yaml` declares
+`ubuntu-26.04` as an accepted runner label because actionlint 1.7.12's
+bundled label table predates it — the label is real (roadmap #60, PR #46
+migrated the runners to it). Evidence (2026-09-29, local run): bare
+actionlint 1.7.12 flags every `runs-on: ubuntu-26.04` line [runner-label]
+without the config and exits 0 with it, while still catching an injected
+bad `needs:` reference ([job-needs], exit 1). The job is NOT added to the
+`Main Branch Rules` ruleset's required status checks (only `backend` /
+`frontend` are required — verified via `gh api .../rulesets`); promoting it
+to a merge gate is an owner decision. Dependabot label hygiene:
+`.github/dependabot.yml` requests `labels: [dependencies, internal]` but the
+repo only had `internal` (verified `gh label list`); the `dependencies`
+label was created 2026-09-29 via `gh label create dependencies --color 0366d6
+--description "Pull requests that update a dependency file"` (repo-settings
+change, verified with `gh label list`), so new Dependabot PRs now carry both
+configured labels. Existing PRs were not relabeled; disposition of open
+Dependabot PRs remains #22's owner decision.
 
 ### #93 — Reusable Kilocode command file — IN PROGRESS (decision resolved by evidence; closes when Batch B1 PR merges)
 `.kilo/commands/feature-dev.md` exists but is untracked; decide commit vs keep

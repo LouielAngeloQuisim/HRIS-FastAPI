@@ -1,5 +1,26 @@
 # SOURCE OF TRUTH — Verified State Snapshot
 
+> **SUPERSEDED / HISTORICAL SNAPSHOT**
+>
+> This document records repository state as of 2026-08-31 (commit `c6996b1`)
+> and is **not** the current project source of truth. Much of its content —
+> backend/frontend phase status, test counts, migration counts, lint/type
+> results, and the "not on origin/main" claims — was overtaken by events
+> (attendance, leave, payroll modules and their tests have since been
+> committed; CI is green on `origin/main`).
+>
+> The authoritative numbered cleanup roadmap is `docs/ROADMAP.md`.
+> Current repository/status information is maintained in `docs/STATUS.md`
+> and `docs/MAP.md`.
+>
+> The historical body below is preserved verbatim for provenance. Its §5
+> "Architecture Decisions That Must Not Be Reversed" invariants are still
+> potentially valuable and are identified for future migration into `docs/
+> decisions/` as a separate task (tracked under roadmap #29/#30 follow-up);
+> they are not rewritten or deleted here.
+
+---
+
 > Compiled: 2026-08-31. Command output used wherever possible; values
 > derived from inspection only are marked **[UNVERIFIED — inspection only, not run]**.
 >

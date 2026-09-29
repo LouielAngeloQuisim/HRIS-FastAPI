@@ -6,6 +6,13 @@ This repository is an HRIS (Human Resource Information System) project, rewritte
 
 The original template shell (FastAPI + SQLModel + Alembic, generic user/item CRUD, admin-table frontend) is still present, but the HRIS rewrite is well underway: a domain backend module, a full frontend feature set, a custom JWT auth system with RBAC, and a phase-0-3 test suite. Some template features remain as unwired demos (see Known Gaps).
 
+### Documentation map (source of truth)
+
+- `docs/ROADMAP.md` — **the authoritative numbered cleanup roadmap** (tasks #1–#94). Task numbers are stable identifiers; never renumber or replace them with the phase JSON trackers.
+- `docs/MAP.md` — generated repository architecture map (routes, permissions, domains, features, migration chain); regenerate with `bash scripts/gen-map.sh`, do not hand-edit; `scripts/verify.sh` drift-checks it.
+- `docs/STATUS.md` — hand-maintained current status/counts snapshot (see that file's header for its maintenance model).
+- `docs/README.md` — documentation index. `docs/runbooks/` — authoritative operational procedures (§8 below is a summary only).
+
 ## 1.5 Mandatory Testing Policy — applies to EVERY change, no exceptions
 
 **Every code change — however small, however "quick," including one-line
@@ -23,8 +30,9 @@ output. This replaces the old per-command manual checklist.** It runs ruff,
 mypy (report-only), alembic drift-check, pytest against a throwaway
 postgres container, then frontend tsc/eslint (report-only)/vitest/build, and
 prints a PASS/FAIL summary. Exit 0 = all hard gates green; 1 = at least one
-failed. mypy and eslint counts are reported but do not yet gate (known
-pre-existing errors tracked separately).
+failed. mypy and eslint counts are reported but do not yet gate (both currently
+report 0 errors on `origin/main`; remaining eslint output is 5 warnings — see
+docs/STATUS.md).
 
 ### For any backend change (`backend/`):
 1. Write or update a pytest test covering the change, in the matching
@@ -79,15 +87,16 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 
 ## 2. Current Status
 
-### Backend — Phase 0-1 + Phase 2A/2B + Phase B3: 464 tests collected (verified 2026-09-24 via `uv run pytest --collect-only -q` from `backend/`); green run count unknown - run scripts/verify.sh once it exists
+### Backend — Phase 0-1 + Phase 2A/2B + Phase B3: 444 tests, green (verified 2026-09-28: `uv run pytest --collect-only -q` from `backend/` collects 444; CI backend job on origin/main bf2a479 reports `444 passed, 676 warnings in 17.79s`)
 - **Phase 0-1:** 25 of the repo's 43 `test_*.py` files under `backend/tests/` (verified 2026-09-24 via `find backend/tests -name "test_*.py" | wc -l`) live in: `employee/` (crud, crud_relations, dashboard, owner/category/lots, blocks/lots delete-guard, attachments, additional_records, indexes_constraints), `auth/` (flow, rate-limit), `rbac/` (require_permission, route_protection, role_escalation, seed), `foundation/` (scaffold, responses), `item/`, `user/` (crud, private, routes), `scripts/` (pre-start waits).
 - **Phase 2A/2B — Attendance module** (`backend/app/attendance/`): full CRUD for `Shift` + `DailyTimeRecord`, plus `DTRAdjustment`. Routers under `/shifts`, `/daily-time-records`, `/dtr-adjustments`. Row-level filter on DTR list: non-superusers see only their own records; users with no linked EmployeeRecords see `[]`.
 - **Phase B3 — Leave & Holidays module** (`backend/app/leave/`): full CRUD for `LeavePolicy`, `EmployeeLeaveEnrollment`, `LeaveRequest`, `LeaveLedgerEntry`, `HolidayConfig`, `HolidayInstance`. 84 tests in `backend/tests/leave/`.
+- **Additional backend modules on `origin/main`** (phase trackers lag the code — treat the modules, not `docs/roadmap/*.json`, as truth): `payroll` (routers under `/payroll/*` incl. `runs/generate` gated by `payroll:add`), `notification`, `audit`, `reports`, `dashboard`. Full generated inventory: `docs/MAP.md` (225 endpoints in 39 groups across 12 domain packages).
 - **23 Alembic migrations** (`backend/alembic/versions/`, verified 2026-09-24 via `ls backend/alembic/versions/*.py | wc -l`).
 - All 16 HRIS domain resource routers are implemented in the `employee` module and served via the `routers` list in `app/employee/routes.py`: **employees, divisions, departments, subdivisions, positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks** — plus `/dashboard`, `/rbac`, `/items`, `/users`, `/auth`, `/shifts`, `/daily-time-records`, `/dtr-adjustments`, `/leave/*`, notifications, audit, reports, payroll, and local-only `/private`.
 
-### Frontend — Phase 0-3: 78 test files in `frontendv3/src` (verified 2026-09-24 via `find frontendv3/src -name "*.test.tsx" -o -name "*.test.ts" | wc -l`; 66 of them under `src/features`); green test count unknown - run scripts/verify.sh once it exists
-- `vitest run --browser.headless` → **78 test files** confirmed by file count; green test count unknown - run scripts/verify.sh once it exists.
+### Frontend — Phase 0-3: 79 test files in `frontendv3/src` (verified 2026-09-28 via `git ls-tree -r --name-only origin/main -- frontendv3/src | grep -cE '\.test\.(tsx|ts)$'` = 79; 66 of them under `src/features`; local equivalent: `find frontendv3/src \( -name '*.test.tsx' -o -name '*.test.ts' \) -not -path '*__screenshots__*' | wc -l` — the parentheses and the `__screenshots__` exclusion are required, because the old unparenthesized `-o` find counted 139 gitignored Vitest screenshot artifacts), 270 tests green (`npx vitest run --browser.headless` → `Test Files 79 passed (79) / Tests 270 passed (270)`, verified 2026-09-28 with `LD_LIBRARY_PATH` set per §6)
+- `vitest run --browser.headless` → **79 test files / 270 tests, all passing** (verified 2026-09-28).
 - CRUD-complete feature pages with tests: divisions, departments, subdivisions (create wizard with failure-resume), positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks, shifts (**UI only**), roles (admin + permission matrix), dashboard, employees (**read-only list + profile + CSV import**).
 - §8.1–§8.13 coverage: permission gating, 409 delete-error flows, CSV import success/retry, subdivision wizard state + resume.
 - **Playwright E2E infrastructure:** `e2e/fixtures/`, `e2e/helpers/`, `e2e/pages/`, 24 page objects covering every domain; 25 specs across `e2e/organization/`, `e2e/projects/`, `e2e/hris/`, `e2e/system/`, `e2e/attendance/` (verified 2026-09-24 via `ls frontendv3/e2e/pages/*.ts | wc -l` = 24 and `find frontendv3/e2e -name "*.spec.ts" | wc -l` = 25) with stable `data-testid` selectors on buttons, dialogs, and form fields.
@@ -98,7 +107,7 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 - **7 inert local `resource-delete-dialog` copies** (chats, dashboard, employees, roles, settings, tasks, users) carry the ErrorBody fix but are not imported anywhere (verified 2026-09-24: `git ls-files "*resource-delete-dialog.tsx"` lists 26 files, of which 25 are feature-local plus 1 shared, and `grep -rln` shows those 7 features' copies have zero importers; the `shared/` copy is imported by 23 files).
 - **EmployeeAttachments UI gap:** backend model + tests exist; the frontend annex/attachments UI is deferred.
 - **Unwired template demo features:** `apps`, `chats`, `tasks`, `users`, `settings` are complete shadcn-admin template UIs backed by local `./data/` mocks — no HRIS backend wiring.
-- Minor: `react-refresh/only-export-components` warning from exporting `extractDeleteErrorMessage` from the shared delete-dialog component module (fix: extract the helper to its own module).
+- Minor: ~~`react-refresh/only-export-components` warning from exporting `extractDeleteErrorMessage` from the shared delete-dialog component module~~ resolved by PR #42 (helper extracted into its own module; no react-refresh warning appears in `npx eslint .` output as of 2026-09-28).
 - Minor: ~~`frontendv3/src/lib/api/roles.ts:3` — `RolePublic` imported but never used~~ verified fixed (2026-09-24): `grep -n RolePublic frontendv3/src/lib/api/roles.ts` returns nothing.
 
 ## 4. Tech Stack
@@ -110,9 +119,9 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 
 ### Frontend (`frontendv3/package.json`, caret ranges)
 - react `^19.2.5` / react-dom `^19.2.5`, typescript `~6.0.3`, vite `^8.0.8` (+ `@vitejs/plugin-react`), @tanstack/react-router `^1.168.22` (file-based), @tanstack/react-query `^5.99.0`, @tanstack/react-table `^8.21.3`, tailwindcss `^4.2.2` + `@tailwindcss/vite`, lucide-react `^1.8.0`, zod `^4.3.6`, react-hook-form `^7.72.1` + `@hookform/resolvers`, sonner `^2.0.7`, **axios `^1.15.0`**, zustand `^5.0.12`, recharts `^3.8.1`, date-fns, class-variance-authority, tailwind-merge, clsx, cmdk, input-otp, react-day-picker, react-top-loading-bar, tw-animate-css, Radix UI primitives (alert-dialog, avatar, checkbox, collapsible, dialog, direction, dropdown-menu, icons, label, popover, radio-group, scroll-area, select, separator, slot, switch, tabs, tooltip).
-- Dev: eslint `^10.2.1` + typescript-eslint + eslint-plugin-react-hooks + eslint-plugin-react-refresh, prettier `^3.8.3` (+ @trivago/prettier-plugin-sort-imports, prettier-plugin-tailwindcss), vitest `^4.1.4` (browser-playwright, coverage-v8, ui), playwright `1.59.1`, @faker-js/faker, @testing-library/react, knip, happy-dom, @tanstack/router-plugin + devtools.
+- Dev: eslint `^10.2.1` + typescript-eslint + eslint-plugin-react-hooks + eslint-plugin-react-refresh, prettier `^3.8.3` (+ @trivago/prettier-plugin-sort-imports, prettier-plugin-tailwindcss), vitest `^4.1.4` (browser-playwright, coverage-v8, ui), playwright `1.62.1`, @faker-js/faker, @testing-library/react, knip, happy-dom, @tanstack/router-plugin + devtools.
 - **Auth:** custom JWT (see §5).
-- **Explicit corrections vs the old template AGENTS.md:** there is **no Biome** (lint is eslint, format is prettier), **no next-themes** (theme is a custom `ThemeProvider`), **no @hey-api/openapi-ts client** (hand-written axios client), and **`frontendv3/`** is the frontend (the old template `frontend/` folder was removed; `ls frontend` now fails).
+- **Explicit corrections vs the old template AGENTS.md:** there is **no Biome** (lint is eslint, format is prettier), **no next-themes** (theme is a custom `ThemeProvider`), **no @hey-api/openapi-ts client** (hand-written axios client), and **`frontendv3/`** is the frontend (the tracked template `frontend/` folder was removed in PR #26; a root `frontend/` directory still exists on some dev hosts as an untracked residue of empty `blob-report/` + `test-results/` dirs — tracked file count 0; removal is roadmap #90).
 
 ### Infrastructure / CI-CD
 - PostgreSQL `18` (`postgres:18`), Traefik `3.6` (`compose.traefik.yml`), Nginx for frontend static serving (prod), GitHub Container Registry (GHCR) + GitHub Actions deployment. Compose split: `compose.yml` (base), `compose.override.yml` (dev), `compose.prod.yml` (prod), `compose.traefik.yml`.
@@ -120,7 +129,7 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 ## 5. Architecture Conventions
 
 ### Backend
-- **Domain packages, not one-file-per-resource.** Each domain is a package (e.g. `app/employee/`, `app/auth/`, `app/rbac/`, `app/user/`) layering `models.py` / `schemas.py` / `routes.py` / `services.py` / `selectors.py`. `app/employee/routes.py` uses a router factory (`_make_crud_router`) to build **16 per-resource routers** (`/employees`, `/divisions`, `/departments`, `/subdivisions`, `/positions`, `/project-types`, `/projects`, `/phases`, `/blocks`, `/lots`, `/categories`, `/models`, `/model-types`, `/owners`, `/employee-projects`, `/emp-tasks`), aggregated in a module-level `routers: list[APIRouter]` at `backend/app/employee/routes.py:578` (verified 2026-09-24: `grep -c "_router = " backend/app/employee/routes.py` = 16; the file contains no `include_router`/`sub_router` tokens; `app/api.py:22` loops `for employee_router in employee_routes.routers`). `app/api.py` includes auth, users, items, utils, rbac, employee (16 routers), attendance, leave, notifications, audit, payroll, reports, dashboard, and local-only private.
+- **Domain packages, not one-file-per-resource.** Each domain is a package (e.g. `app/employee/`, `app/auth/`, `app/rbac/`, `app/user/`) layering `models.py` / `schemas.py` / `routes.py` / `services.py` / `selectors.py`. `app/employee/routes.py` uses a router factory (`_make_crud_router`) to build **16 per-resource routers** (`/employees`, `/divisions`, `/departments`, `/subdivisions`, `/positions`, `/project-types`, `/projects`, `/phases`, `/blocks`, `/lots`, `/categories`, `/models`, `/model-types`, `/owners`, `/employee-projects`, `/emp-tasks`), aggregated in a module-level `routers: list[APIRouter]` at `backend/app/employee/routes.py:594` (verified 2026-09-28: `grep -c "_router = " backend/app/employee/routes.py` = 16; the file contains no `include_router`/`sub_router` tokens; `app/api.py:22` loops `for employee_router in employee_routes.routers`). `app/api.py` includes auth, users, items, utils, rbac, employee (16 routers), attendance, leave, notifications, audit, payroll, reports, dashboard, and local-only private.
 - **Shared infra in `app/common/`:** `responses.py` (ErrorBody `{success, error, request_id}` envelope), `pagination.py`/`paginators.py`, `rate_limit.py` + deps, `route_policy.py` (public-route whitelist incl. `POST /api/v1/login/refresh-token`), `security.py`, `regex.py`, `schemas.py`, `types.py`, `audit/`.
 - **Auth:** custom JWT. Access token + **rotating single-use refresh token** (PyJWT). `POST /api/v1/login/refresh-token` rotates the refresh token; `route_policy` marks it public. Passwords via pwdlib (Argon2 primary, Bcrypt fallback). RBAC enforced via route policy / `require_permission`.
 - **DB:** SQLModel tables, Alembic migrations in `backend/alembic/versions/` (23, same count as §2, verified 2026-09-24), engine/config in `app/config/`.
@@ -133,10 +142,10 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 
 ## 6. Frontend Test Environment
 
-- **Vitest browser mode** (`vitest run --browser.headless`, Playwright-backed). On this host, run once: `scripts/setup-playwright-libs.sh`, then export `LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"` before running tests.
+- **Vitest browser mode** (`vitest run --browser.headless`, Playwright-backed). On this host, run once: `frontendv3/scripts/setup-playwright-libs.sh`, then export `LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"` before running tests.
 - Commands (from `frontendv3/`): full suite `npx vitest run --browser.headless`; single file `npx vitest run --browser.headless <path>`; lint `npx eslint .`; format `npx prettier --write .`; typecheck `npx tsc --noEmit`.
 - Test conventions: `renderWithClient` from `@/test-utils/providers`, `userEvent` from `vitest/browser`, hoisted `vi.mock` blocks (per-action `useCan` policy mock, `use*` hook mocks, axios `api.delete` mocks, sonner toast spies).
-- Baseline: **78 frontend test files (green test count unknown - run scripts/verify.sh once it exists), 464 backend tests collected (green pass count unknown - run scripts/verify.sh once it exists), 23 Alembic migrations, tsc 0 errors, eslint 15 errors / 5 warnings** (verified this session on 2026-09-24: tsc clean; eslint is now 15 `@typescript-eslint/no-explicit-any` errors + 2 `react-hooks/exhaustive-deps` + 2 `react-hooks/incompatible-library` + 1 `react-refresh/only-export-components` warning - the old 14-error breakdown, and the `RolePublic` unused import, no longer reproduce: `grep -n RolePublic frontendv3/src/lib/api/roles.ts` returns nothing; see §3).
+- Baseline (verified 2026-09-28): **79 frontend test files / 270 Vitest tests green, 444 backend tests green (`444 passed` in CI on origin/main bf2a479; `scripts/verify.sh` runs the full gate set), 23 Alembic migrations, tsc 0 errors, mypy 0 errors (97 source files), ruff clean, eslint 0 errors / 5 warnings** — the former 15 `@typescript-eslint/no-explicit-any` errors and the `RolePublic` unused import were fixed in PRs #41/#42; the 5 remaining warnings are 2 `react-hooks/incompatible-library` (React Compiler notices, not gating) and 3 unused `eslint-disable` directive warnings left by the #41 cleanup.
 - Playwright E2E: 25 spec files (organization, projects, hris, system, attendance) across `e2e/auth.spec.ts`, `e2e/organization/divisions.spec.ts`, `e2e/attendance/daily-time-records.spec.ts`, `e2e/attendance/leave-requests.spec.ts`, `e2e/attendance/dtr-adjustments.spec.ts`. Verified pass count: specs written, structured for Playwright execution. Full execution requires a running backend and Playwright browser dependencies (`LD_LIBRARY_PATH` set per §6).
 
 ## 7. Lessons Learned (verified, no current regressions)

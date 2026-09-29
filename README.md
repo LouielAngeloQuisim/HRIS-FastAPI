@@ -2,6 +2,8 @@
 
 A full-stack HRIS application built with FastAPI + React, covering core HR workflows: employee records, attendance, payroll, leave management, and organizational structure.
 
+Docs entry point: [docs/README.md](./docs/README.md) (numbered cleanup roadmap: [docs/ROADMAP.md](./docs/ROADMAP.md)).
+
 ## Technology Stack
 
 ### Backend (`backend/`)
@@ -11,7 +13,7 @@ A full-stack HRIS application built with FastAPI + React, covering core HR workf
 - **PostgreSQL 18** — database
 - **Custom JWT auth** — access + rotating refresh tokens, Argon2 password hashing
 - **RBAC** — permission-based access control with role/seat assignment
-- **pytest** — 275 tests (backend)
+- **pytest** — 444 tests (backend, green in CI)
 
 ### Frontend (`frontendv3/`)
 - [**React 19**](https://react.dev) + [**TypeScript**](https://www.typescriptlang.org)
@@ -21,7 +23,7 @@ A full-stack HRIS application built with FastAPI + React, covering core HR workf
 - [**Tailwind CSS v4**](https://tailwindcss.com) + [**shadcn/ui**](https://ui.shadcn.com) — UI components
 - [**Zustand**](https://zustand-demo.pmnd.rs) — client state
 - **Axios** — HTTP client
-- **Vitest + Playwright** — 187 browser-mode tests
+- **Vitest + Playwright** — 270 browser-mode tests (79 test files)
 
 ### Infrastructure
 - **Docker Compose** — development + production
@@ -45,19 +47,19 @@ A full-stack HRIS application built with FastAPI + React, covering core HR workf
 | **DTR Adjustments** | HR-approved attendance corrections |
 | **Roles + Permissions** | Admin UI with permission matrix |
 | **Dashboard** | KPI cards |
+| **Leave & Holidays** | Leave policies, enrollment, requests, ledger, holiday config/instances (Phase B3) |
 | **Auth** | Login, JWT tokens, RBAC-gated sidebar |
 
-### Deferred (per design §7)
+### Deferred (per design §7 / roadmap)
 - Employee create/edit/delete UI (backend exists, frontend read-only)
 - Employee attachments/annex UI
-- Leave management module
-- Payroll module
+- Payroll frontend UI (payroll backend module + `/payroll` routes are shipped; F5A–F5C editors/generation UI remain open phases)
 
 ## Project Phases
 
 See [`docs/roadmap/frontend-phase2-3-design.md`](./docs/roadmap/frontend-phase2-3-design.md) for the full phase plan and [`AGENTS.md`](./AGENTS.md) for current status.
 
-Current: **Phase 2A/2B (backend) + Phase 3 (frontend) complete.**
+Current: **Backend Phase B3 (leave & holidays) and Frontend Phase 4B complete; payroll UI (F5+), notifications/audit/reports UI polish (F6), and cutover (F7) remain open.** See `docs/ROADMAP.md` (authoritative numbered list) and `docs/roadmap/*.json` (phase trackers).
 
 ## Local Setup
 
@@ -71,13 +73,13 @@ Current: **Phase 2A/2B (backend) + Phase 3 (frontend) complete.**
 ```bash
 git clone https://github.com/LouielAngeloQuisim/HRIS-FastAPI.git
 cd HRIS-FastAPI
-cp .env.example .env  # edit as needed
+cp backend/env_sample.txt .env  # edit as needed (no .env.example exists; values in .env are used by pydantic-settings)
 ```
 
 ### 2. Start infrastructure
 
 ```bash
-docker compose up -d postgres traefik
+docker compose up -d   # dev stack: db + adminer + prestart + backend + frontend (proxy/Traefik comes from compose.override.yml)
 ```
 
 ### 3. Backend
@@ -86,7 +88,7 @@ docker compose up -d postgres traefik
 cd backend
 uv sync
 uv run alembic upgrade head
-uv run python -m pytest tests/ -q          # 275 tests
+uv run python -m pytest tests/ -q          # 444 tests
 uv run uvicorn app.main:app --reload       # http://localhost:8000
 ```
 
@@ -102,9 +104,9 @@ To run frontend tests (first-time setup required):
 
 ```bash
 cd frontendv3
-bash scripts/setup-playwright-libs.sh       # one-time: download Chromium libs
+bash scripts/setup-playwright-libs.sh       # one-time: download Chromium libs (lives under frontendv3/scripts/)
 LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH" \
-  pnpm test                                # 187 tests
+  pnpm test                                # 270 tests / 79 files
 ```
 
 ## Environment Variables
@@ -137,9 +139,9 @@ uv run alembic upgrade head
 
 ## Deployment
 
-Staging deploy is automatic on push to `main` via GitHub Actions (`deploy.yml`).
+Deploys happen **only by merging a pull request to `main`** (direct push is blocked by branch protection). Merging triggers `deploy.yml`: build/push GHCR images → SSH deploy to the production VM (pre-deploy `pg_dump`, migrations, health-check wait) → post-deploy verification. There is no separate staging pipeline.
 
-See [`deployment.md`](./deployment.md) for production deployment instructions.
+The authoritative step-by-step procedures are the runbooks: [`docs/runbooks/deploy.md`](./docs/runbooks/deploy.md), [`docs/runbooks/rollback.md`](./docs/runbooks/rollback.md). See also [`deployment.md`](./deployment.md) for the original infrastructure walkthrough.
 
 ## License
 

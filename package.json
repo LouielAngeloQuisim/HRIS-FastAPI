@@ -1,5 +1,5 @@
 {
-  "name": "fastapi-full-stack-template",
+  "name": "hris-fastapi",
   "private": true,
   "scripts": {
     "roadmap": "npm --prefix docs install --no-save && npm --prefix docs run start"

@@ -12,6 +12,7 @@ The original template shell (FastAPI + SQLModel + Alembic, generic user/item CRU
 - `docs/MAP.md` — generated repository architecture map (routes, permissions, domains, features, migration chain); regenerate with `bash scripts/gen-map.sh`, do not hand-edit; `scripts/verify.sh` drift-checks it.
 - `docs/STATUS.md` — hand-maintained current status/counts snapshot (see that file's header for its maintenance model).
 - `docs/README.md` — documentation index. `docs/runbooks/` — authoritative operational procedures (§8 below is a summary only).
+- `docs/feature-development-workflow.md` — end-to-end process for any change: worktree from `origin/main`, one plan per task, implementation, `scripts/verify.sh`, PR with evidence. The `.kilo/` directory is intentionally untracked (see `.gitignore`); this document is the tracked source of the workflow.
 
 ## 1.5 Mandatory Testing Policy — applies to EVERY change, no exceptions
 
@@ -31,7 +32,7 @@ mypy (report-only), alembic drift-check, pytest against a throwaway
 postgres container, then frontend tsc/eslint (report-only)/vitest/build, and
 prints a PASS/FAIL summary. Exit 0 = all hard gates green; 1 = at least one
 failed. mypy and eslint counts are reported but do not yet gate (both currently
-report 0 errors on `origin/main`; remaining eslint output is 5 warnings — see
+report 0 errors on `origin/main`; remaining eslint output is 2 warnings — see
 docs/STATUS.md).
 
 ### For any backend change (`backend/`):
@@ -145,7 +146,7 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 - **Vitest browser mode** (`vitest run --browser.headless`, Playwright-backed). On this host, run once: `frontendv3/scripts/setup-playwright-libs.sh`, then export `LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"` before running tests.
 - Commands (from `frontendv3/`): full suite `npx vitest run --browser.headless`; single file `npx vitest run --browser.headless <path>`; lint `npx eslint .`; format `npx prettier --write .`; typecheck `npx tsc --noEmit`.
 - Test conventions: `renderWithClient` from `@/test-utils/providers`, `userEvent` from `vitest/browser`, hoisted `vi.mock` blocks (per-action `useCan` policy mock, `use*` hook mocks, axios `api.delete` mocks, sonner toast spies).
-- Baseline (verified 2026-09-28): **79 frontend test files / 270 Vitest tests green, 444 backend tests green (`444 passed` in CI on origin/main bf2a479; `scripts/verify.sh` runs the full gate set), 23 Alembic migrations, tsc 0 errors, mypy 0 errors (97 source files), ruff clean, eslint 0 errors / 5 warnings** — the former 15 `@typescript-eslint/no-explicit-any` errors and the `RolePublic` unused import were fixed in PRs #41/#42; the 5 remaining warnings are 2 `react-hooks/incompatible-library` (React Compiler notices, not gating) and 3 unused `eslint-disable` directive warnings left by the #41 cleanup.
+- Baseline (verified 2026-09-28, re-measured 2026-09-29 on `origin/main` `f8b890d` via `scripts/verify.sh`): **79 frontend test files / 270 Vitest tests green, 444 backend tests green (`444 passed, 1 warning in 37.47s` locally; CI on bf2a479 reported `444 passed`), 23 Alembic migrations, tsc 0 errors, mypy 0 errors (97 source files), ruff clean, eslint 0 errors / 2 warnings** — the former 15 `@typescript-eslint/no-explicit-any` errors and the `RolePublic` unused import were fixed in PRs #41/#42; the 2 remaining warnings are both `react-hooks/incompatible-library` (React Compiler notices about react-hook-form `watch()`, not gating). Do not claim ESLint is warning-free.
 - Playwright E2E: 25 spec files (organization, projects, hris, system, attendance) across `e2e/auth.spec.ts`, `e2e/organization/divisions.spec.ts`, `e2e/attendance/daily-time-records.spec.ts`, `e2e/attendance/leave-requests.spec.ts`, `e2e/attendance/dtr-adjustments.spec.ts`. Verified pass count: specs written, structured for Playwright execution. Full execution requires a running backend and Playwright browser dependencies (`LD_LIBRARY_PATH` set per §6).
 
 ## 7. Lessons Learned (verified, no current regressions)
@@ -168,3 +169,14 @@ The authoritative step-by-step procedures are the runbooks in `docs/runbooks/`: 
 ### Evidence requirement
 
 Any agent report claiming a push, commit, PR creation, deploy, or test result succeeded must be backed by an actual command whose raw output is shown (e.g. `git ls-remote`, `gh pr list`, `gh pr checks`). A summary alone is not sufficient evidence.
+
+## 9. Secrets / Environment / AI-prompt Safety (policy)
+
+Documentation-only policy — there is no secret-scanning hook or CI gate enforcing these rules yet (roadmap #40 tracks the pending history scan; roadmap #92 the missing CI checks). Treat them as project rules, not as claims of technical enforcement.
+
+- **Secrets never enter the repository.** Real `.env` values, tokens, DB passwords, and production credentials belong in the git-ignored `.env` (root) and in GitHub Actions secrets — never in a tracked file, a commit message, a PR body, or an issue. The only committed env material is placeholder-grade (`backend/env_sample.txt`, `frontendv3/.env.example`).
+- **Never paste real environment values into terminal output, tests, docs, or reports.** Echo key names / redact values. This applies to agent output as well as humans.
+- **Do not put production credentials or production data into AI prompts**, logs, screenshots, or test fixtures. Use throwaway values (as `scripts/verify.sh` does) for any reproduction.
+- **Logs must not record secrets.** The audit middleware redacts bodies (`AUDIT_BODY_MAX_BYTES`); keep it that way when extending logging.
+- **AI/agent coding sessions** must follow the same evidence rules as §1.5/§8: read-only inspection first, no direct edits on `main`, no history rewrites, and any discovered secret is reported as a finding (via the process in `SECURITY.md`), not "cleaned up" silently.
+- **Historical template artifact:** `.copier/.copier-answers.yml` is still tracked and contains template-era credential-shaped placeholder values; its disposition is deliberately held under roadmap #40/#88 — do not delete or rewrite it (or any git history) without the owner's security decision.

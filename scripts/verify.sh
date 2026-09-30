@@ -4,8 +4,9 @@
 #
 # Runs the real backend + frontend checks and prints a PASS/FAIL summary.
 # Exit code 0 only when every HARD-GATE check passed. mypy, eslint, and the
-# docs/MAP.md drift check are REPORT-ONLY for now (known pre-existing issues
-# tracked separately).
+# docs/MAP.md drift check are REPORT-ONLY (not promoted to hard gates): the
+# former known gaps were fixed (roadmap #25/#58 DONE - both report 0 errors
+# on origin/main), but promotion is a separate decision. See docs/STATUS.md.
 #
 # Safety:
 #   * Never touches production, the VM, or any live database.
@@ -142,12 +143,12 @@ else
 fi
 
 # --------------------------------------------------------------- check 2/9
-section "[2/9] backend: mypy app (REPORT-ONLY known gap)"
+section "[2/9] backend: mypy app (REPORT-ONLY)"
 MYPY_OUT="$( cd backend && uv run mypy app 2>&1 )" || true
 MYPY_COUNT="$(printf '%s\n' "$MYPY_OUT" | grep -cE 'error:' || true)"
 printf '%s\n' "$MYPY_OUT" | tail -n 3
-echo "mypy error count: ${MYPY_COUNT} (report-only: known pre-existing issues, tracked separately, NOT gating)"
-record REPORT "backend/mypy" "${MYPY_COUNT} errors (known gap, not gating)"
+echo "mypy error count: ${MYPY_COUNT} (report-only: not gating)"
+record REPORT "backend/mypy" "${MYPY_COUNT} errors (report-only, not gating)"
 
 # --------------------------------------------------------------- check 3/9
 section "[3/9] backend: alembic upgrade head + alembic check (HARD GATE)"
@@ -199,12 +200,12 @@ else
 fi
 
 # --------------------------------------------------------------- check 6/9
-section "[6/9] frontend: pnpm exec eslint . (REPORT-ONLY known gap)"
+section "[6/9] frontend: pnpm exec eslint . (REPORT-ONLY)"
 ESLINT_OUT="$( cd frontendv3 && pnpm exec eslint . 2>&1 )" || true
 ESLINT_SUMMARY="$(printf '%s\n' "$ESLINT_OUT" | grep -E 'problems' | tail -n 1)"
 printf '%s\n' "$ESLINT_SUMMARY"
-echo "eslint: report-only (known no-explicit-any pre-existing errors, NOT gating)"
-record REPORT "frontend/eslint" "${ESLINT_SUMMARY:-see tool output} (known gap, not gating)"
+echo "eslint: report-only (not gating)"
+record REPORT "frontend/eslint" "${ESLINT_SUMMARY:-see tool output} (report-only, not gating)"
 
 # --------------------------------------------------------------- check 7/9
 section "[7/9] frontend: vitest run --browser.headless (HARD GATE)"

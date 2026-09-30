@@ -7,7 +7,7 @@
 |---|---|---|---|
 | Component / integration | Vitest + `vitest-browser-react` | **Active** — 78 files, 263 tests | Missing submit-flow assertions, error-state coverage for new forms |
 | E2E | Playwright (`e2e/*.spec.ts`) | **Active** — 25 spec files, 24 page objects, full CRUD coverage | Covers login, navigation, create/edit/delete, permission matrix, approval flows, empty/error states |
-| Lint / type | ESLint + TypeScript | Active | 14 pre-existing errors, 5 warnings (not introduced by recent changes) |
+| Lint / type | ESLint + TypeScript | Active | 0 errors / 2 warnings (`react-hooks/incompatible-library`; former error/warning counts fixed in PRs #41/#42 — re-measured on f8b890d 2026-09-29, see docs/STATUS.md) |
 | Coverage | Vitest `coverage-v8` | Configured; UI components excluded | Needs enforcement gate in CI |
 
 ## 2. Testing Pyramid

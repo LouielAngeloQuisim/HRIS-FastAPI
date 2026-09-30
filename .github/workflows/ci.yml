@@ -12,6 +12,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-config-check:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate CI configuration (roadmap #92)
+        run: bash scripts/check-ci-config.sh
+
   frontend:
     runs-on: ubuntu-26.04
     defaults:
@@ -29,7 +36,9 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm exec tsc -b
       - name: Lint
-        # eslint . reports 15 errors (see /tmp/batchD/eslintall.txt)
+        # non-blocking lint: currently reports 0 errors / 2 warnings
+        # (react-hooks/incompatible-library; see docs/STATUS.md - the old
+        # "15 errors" baseline was fixed in PRs #41/#42, roadmap #25/#58 DONE)
         continue-on-error: true
         run: pnpm exec eslint .
       - run: pnpm exec vitest run --browser.headless

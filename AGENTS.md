@@ -172,7 +172,7 @@ Any agent report claiming a push, commit, PR creation, deploy, or test result su
 
 ## 9. Secrets / Environment / AI-prompt Safety (policy)
 
-Documentation-only policy — there is no secret-scanning hook or CI gate enforcing these rules yet (roadmap #40 tracks the pending history scan; roadmap #92 the missing CI checks). Treat them as project rules, not as claims of technical enforcement.
+Documentation-only policy — there is no secret-scanning hook or CI gate enforcing these rules yet (roadmap #40 tracks the pending history scan; roadmap #92's `ci-config-check` job — added by final-cleanup Batch B2, pending merge — validates workflow configuration only, not content). Treat them as project rules, not as claims of technical enforcement.
 
 - **Secrets never enter the repository.** Real `.env` values, tokens, DB passwords, and production credentials belong in the git-ignored `.env` (root) and in GitHub Actions secrets — never in a tracked file, a commit message, a PR body, or an issue. The only committed env material is placeholder-grade (`backend/env_sample.txt`, `frontendv3/.env.example`).
 - **Never paste real environment values into terminal output, tests, docs, or reports.** Echo key names / redact values. This applies to agent output as well as humans.

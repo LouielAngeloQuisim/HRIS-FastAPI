@@ -1,0 +1,13 @@
+# actionlint configuration (roadmap #92; consumed by the `ci-config-check`
+# job in .github/workflows/ci.yml).
+#
+# `ubuntu-26.04` is a real GitHub-hosted runner label this repo migrated to
+# (roadmap #60, PR #46), but it is newer than the bundled known-labels table
+# of the pinned actionlint version, so it would be flagged as an unknown
+# [runner-label] otherwise. Declaring it here accepts exactly that label
+# while every other actionlint check (expressions, needs, shells, scopes...)
+# stays strict. Keep in sync with the `runs-on:` values in
+# .github/workflows/ci.yml and .github/workflows/deploy.yml.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

@@ -1,6 +1,6 @@
 # Status (hand-maintained snapshot)
 
-Last updated: 2026-09-29 (final-cleanup batch B1 — docs reconciliation; baseline Batch B.2 was PR #54), describing `origin/main` at commit `f8b890d` (includes merged PRs #53 MAP-generator correctness, #54 docs reconciliation, #55 template-residue cleanup). All numbers below were re-measured against `f8b890d` via `scripts/verify.sh` on 2026-09-29 (RESULT: PASS, exit 0).
+Last updated: 2026-09-30 (post-#56/#57 reconciliation of merge-status wording; PRs #56 `62f1372` Batch B1 and #57 `a4f33d3` Batch B2 are merged, roadmap #85/#88/#90/#92/#93 DONE). The measurement baseline below remains `origin/main` at commit `f8b890d` (includes merged PRs #53 MAP-generator correctness, #54 docs reconciliation, #55 template-residue cleanup): PRs #56/#57 touched docs/CI only, no backend/frontend test or source changes (`git diff --stat f8b890d..a4f33d3 -- backend/tests` is empty), so the counts measured on 2026-09-29 via `scripts/verify.sh` (RESULT: PASS, exit 0) still describe main.
 
 Maintenance model: this file is **hand-maintained**, not generated — no STATUS
 generator exists in the repository (the old header claiming "generated, do not
@@ -54,11 +54,14 @@ from the repo-root `.env`; pytest otherwise exits with code 4.
   section listing 6 findings (3 of them orphaned-enum-type downgrades, roadmap
   #52). `scripts/verify.sh` re-check: docs/MAP.md IN-SYNC with
   origin/main@f8b890d (2026-09-29).
-- **Future work:** Batch C operational docs; Batch D verification hardening.
-  Template-residue round 2 (roadmap #90) is submitted in the final-cleanup
-  batch B1 PR (`chore/b1-docs-process-residue`) after round 1 merged as
-  PR #55; `.copier/.copier-answers.yml` is deliberately retained under
-  roadmap #40/#88.
+- **Future work:** Batch C operational docs (architecture/decisions/modules/
+  plans/testing/archive are still one-paragraph stub READMEs, re-verified
+  2026-09-30 on `a4f33d3`). Batch D verification hardening is MERGED (final-
+  cleanup Batch B2, PR #57 `a4f33d3`: `ci-config-check` actionlint job in
+  ci.yml, corrected verify.sh report-only comments). Template-residue round 2
+  (roadmap #90) is MERGED in the final-cleanup batch B1 PR (#56 `62f1372`)
+  after round 1 merged as PR #55; `.copier/.copier-answers.yml` is deliberately
+  retained under roadmap #40/#88.
 
 ## CI/CD
 
@@ -86,5 +89,6 @@ git worktree list
 git worktree prune --dry-run --verbose   # preview stale registrations only
 ```
 
-Prune decisions belong to roadmap #85 (IN PROGRESS); do not remove active
-worktrees.
+Prune decisions belong to roadmap #85 (DONE — the one stale registration
+`/tmp/kilo/notif-test-fix` from merged PR #52 was pruned 2026-09-30; dry run
+now silent); do not remove active worktrees.

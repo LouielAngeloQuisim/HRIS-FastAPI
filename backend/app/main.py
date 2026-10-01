@@ -52,9 +52,12 @@ if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
         profile_lifecycle="trace",
     )
 
+_docs = docs_urls(settings.ENVIRONMENT)
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    **docs_urls(settings.ENVIRONMENT),
+    openapi_url=_docs["openapi_url"],
+    docs_url=_docs["docs_url"],
+    redoc_url=_docs["redoc_url"],
     generate_unique_id_function=custom_generate_unique_id,
 )
 

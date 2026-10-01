@@ -26,6 +26,21 @@ def custom_generate_unique_id(route: APIRoute) -> str:
     return f"{route.tags[0]}-{route.name}"
 
 
+def docs_urls(environment: str) -> dict[str, str | None]:
+    """API docs are only served in local environments (#83).
+
+    Outside local, /docs, /redoc and openapi.json are disabled so the
+    production API surface is not published.
+    """
+    if environment == "local":
+        return {
+            "openapi_url": f"{settings.API_V1_STR}/openapi.json",
+            "docs_url": "/docs",
+            "redoc_url": "/redoc",
+        }
+    return {"openapi_url": None, "docs_url": None, "redoc_url": None}
+
+
 if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
     sentry_sdk.init(
         dsn=str(settings.SENTRY_DSN),
@@ -39,7 +54,7 @@ if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    **docs_urls(settings.ENVIRONMENT),
     generate_unique_id_function=custom_generate_unique_id,
 )
 

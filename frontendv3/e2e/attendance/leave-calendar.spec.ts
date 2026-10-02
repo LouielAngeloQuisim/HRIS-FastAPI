@@ -1,24 +1,18 @@
 import { test, expect } from '../fixtures'
-import { LeaveCalendarPage } from '../pages/leave-calendar.page'
+import { apiUrl } from '../helpers/crud-journey'
 
-test.describe('Leave Calendar E2E', () => {
-  test.beforeEach(async ({ loginAsAdmin }) => {
-    await loginAsAdmin()
-  })
-
-  test('should display the leave calendar', async ({ page }) => {
-    const leaveCalendar = new LeaveCalendarPage(page)
-    await leaveCalendar.goto()
-    const count = await leaveCalendar.getRowCount()
-    expect(count).toBeGreaterThanOrEqual(0)
-  })
-
-  test('should apply date range filter', async ({ page }) => {
-    const leaveCalendar = new LeaveCalendarPage(page)
-    await leaveCalendar.goto()
-    await leaveCalendar.setFromDate('2026-01-01')
-    await leaveCalendar.setToDate('2026-12-31')
-    await leaveCalendar.clickApply()
-    await expect(page.locator('[data-testid="leave-calendar-from-date"]')).toHaveValue('2026-01-01', { timeout: 5000 })
-  })
+test('calendar shows an empty range and sends changed dates', async ({ page, loginAsAdmin }) => {
+  await loginAsAdmin()
+  const load = page.waitForResponse(r => r.url().startsWith(apiUrl) && r.url().includes('/leave-calendar') && r.request().method() === 'GET')
+  await page.goto('/leave-calendar')
+  const response = await load
+  expect(response.status()).toBe(200)
+  expect(await response.json()).toEqual([])
+  await expect(page.getByText('No leave events found for the selected range.')).toBeVisible()
+  await page.getByTestId('leave-calendar-from-date').fill('2026-01-01')
+  await page.getByTestId('leave-calendar-to-date').fill('2026-12-31')
+  const filtered = page.waitForResponse(r => r.url().startsWith(apiUrl) && r.url().includes('/leave-calendar') && new URL(r.url()).searchParams.get('to_date') === '2026-12-31')
+  await page.getByTestId('leave-calendar-apply-button').click()
+  expect((await filtered).status()).toBe(200)
+  await expect(page.getByTestId('leave-calendar-from-date')).toHaveValue('2026-01-01')
 })

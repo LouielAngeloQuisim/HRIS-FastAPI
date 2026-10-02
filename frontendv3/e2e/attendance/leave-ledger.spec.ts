@@ -1,23 +1,11 @@
 import { test, expect } from '../fixtures'
-import { LeaveLedgerPage } from '../pages/leave-ledger.page'
 
-test.describe('Leave Ledger E2E', () => {
-  test.beforeEach(async ({ loginAsAdmin }) => {
-    await loginAsAdmin()
-  })
-
-  test('should display the leave ledger', async ({ page }) => {
-    const leaveLedger = new LeaveLedgerPage(page)
-    await leaveLedger.goto()
-    const count = await leaveLedger.getRowCount()
-    expect(count).toBeGreaterThanOrEqual(0)
-  })
-
-  test('should refresh with a different year', async ({ page }) => {
-    const leaveLedger = new LeaveLedgerPage(page)
-    await leaveLedger.goto()
-    await leaveLedger.setYear('2025')
-    await leaveLedger.clickRefresh()
-    await expect(page.locator('[data-testid="leave-ledger-year-input"]')).toHaveValue('2025', { timeout: 5000 })
-  })
+test('ledger shell exposes year and refresh controls before a policy is selected', async ({ page, loginAsAdmin }) => {
+  await loginAsAdmin()
+  await page.goto('/leave-ledger')
+  await expect(page.getByRole('heading', { name: 'Leave Ledger', exact: true })).toBeVisible()
+  await expect(page.getByTestId('leave-ledger-year-input')).toBeVisible()
+  await page.getByTestId('leave-ledger-year-input').fill('2025')
+  await expect(page.getByTestId('leave-ledger-year-input')).toHaveValue('2025')
+  await expect(page.getByTestId('leave-ledger-refresh-button')).toBeEnabled()
 })

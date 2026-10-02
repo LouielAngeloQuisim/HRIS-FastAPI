@@ -38,6 +38,7 @@ describe('Holidays ResourceForm', () => {
     await expect
       .element(screen.getByTestId('holiday-submit-button'))
       .toBeVisible()
+    await expect.element(screen.getByTestId('holiday-type-select')).toBeVisible()
     await expect
       .element(screen.getByText('Create Holiday'))
       .toBeVisible()
@@ -49,7 +50,7 @@ describe('Holidays ResourceForm', () => {
       code: 'NEWYEAR',
       name: "New Year's Day",
       month_day: '01-01',
-      type: 'regular',
+      type: 'special_non_working',
       region_code: null,
       observe_weekend_as: null,
       multiplier_regular: null,
@@ -112,7 +113,7 @@ describe('Holidays ResourceForm', () => {
       code: 'NEWYEAR',
       name: "New Year's Day",
       month_day: '01-01',
-      type: 'regular',
+      type: 'special_non_working',
       region_code: null,
       observe_weekend_as: null,
       multiplier_regular: null,
@@ -133,6 +134,7 @@ describe('Holidays ResourceForm', () => {
     expect(updateMock.mutateAsync).toHaveBeenCalled()
     const call = updateMock.mutateAsync.mock.calls[0][0]
     expect(call.id).toBe('h1')
+    expect(call.data.type).toBe('special_non_working')
     expect(onClose).toHaveBeenCalled()
   })
 })

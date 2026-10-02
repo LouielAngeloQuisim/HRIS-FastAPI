@@ -1,46 +1,30 @@
 import { test, expect } from '../fixtures'
-import { RolesPage } from '../pages/roles.page'
+import { apiUrl, waitForWrite, assertWrite } from '../helpers/crud-journey'
 
-test.describe('Roles E2E', () => {
-  test.beforeEach(async ({ loginAsAdmin }) => {
-    await loginAsAdmin()
-  })
-
-  test('should display the roles list', async ({ page }) => {
-    const roles = new RolesPage(page)
-    await roles.goto()
-    const count = await roles.getRowCount()
-    expect(count).toBeGreaterThanOrEqual(0)
-  })
-
-  test('should create a new role', async ({ page }) => {
-    const roles = new RolesPage(page)
-    await roles.goto()
-    await roles.clickAdd()
-    await roles.fillName('E2E Test Role')
-    await roles.submit()
-    await expect(page.locator('[data-testid="role-submit-button"]')).toHaveText('Create', { timeout: 10000 })
-  })
-
-  test('should edit an existing role', async ({ page }) => {
-    const roles = new RolesPage(page)
-    await roles.goto()
-    const rowCount = await roles.getRowCount()
-    if (rowCount > 0) {
-      await roles.clickEditOnRow(0)
-      await roles.fillName('Updated E2E Role')
-      await roles.submit()
-      await expect(page.locator('text=/success|updated/i')).toBeVisible({ timeout: 5000 })
-    }
-  })
-
-  test('should open permission matrix for a role', async ({ page }) => {
-    const roles = new RolesPage(page)
-    await roles.goto()
-    const rowCount = await roles.getRowCount()
-    if (rowCount > 0) {
-      await roles.clickPermissionMatrixOnRow(0)
-      await expect(page.locator('text=/Permissions for/i')).toBeVisible({ timeout: 5000 })
-    }
-  })
+test('custom role can be created, renamed and assigned a permission', async ({ page, loginAsAdmin }) => {
+  await loginAsAdmin()
+  await page.goto('/roles')
+  await page.getByTestId('add-role-button').click()
+  const unique = Date.now().toString(36)
+  await page.getByTestId('role-name-input').fill('Role ' + unique)
+  const creating = waitForWrite(page, 'rbac/roles', 'POST')
+  await page.getByTestId('role-submit-button').click()
+  const created = await assertWrite(await creating, 201)
+  await expect(page.getByTestId('role-submit-button')).not.toBeVisible()
+  await page.getByTestId('edit-role-button-' + created.id).click()
+  await page.getByTestId('role-name-input').fill('Updated ' + unique)
+  const updating = waitForWrite(page, 'rbac/roles', 'PATCH', created.id)
+  await page.getByTestId('role-submit-button').click()
+  expect((await assertWrite(await updating, 200)).name).toBe('Updated ' + unique)
+  await page.getByTestId('role-permission-matrix-button-' + created.id).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.locator('[id="division.view"]').check()
+  const saving = waitForWrite(page, 'rbac/roles', 'PATCH', created.id)
+  await page.getByRole('button', { name: 'Save Permissions', exact: true }).click()
+  await assertWrite(await saving, 200)
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  const token = (await page.context().cookies()).find(c => c.name === 'hris_at')!.value
+  const response = await page.request.get(apiUrl + '/rbac/roles/' + created.id + '/permissions', { headers: { Authorization: 'Bearer ' + token } })
+  expect(response.status()).toBe(200)
+  expect((await response.json()).permissions).toContain('division.view')
 })

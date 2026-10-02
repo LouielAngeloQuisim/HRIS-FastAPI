@@ -1,51 +1,10 @@
-import { test, expect } from '../fixtures'
-import { ProjectsPage } from '../pages/projects.page'
+import { test } from '../fixtures'
+import { createParent, crudJourney, selectLabel } from '../helpers/crud-journey'
+import { subdivision } from '../helpers/parent-records'
 
-test.describe('Projects E2E', () => {
-  test.beforeEach(async ({ loginAsAdmin }) => {
-    await loginAsAdmin()
-  })
-
-  test('should display the projects list', async ({ page }) => {
-    const projects = new ProjectsPage(page)
-    await projects.goto()
-    const count = await projects.getRowCount()
-    expect(count).toBeGreaterThanOrEqual(0)
-  })
-
-  test('should create a new project', async ({ page }) => {
-    const projects = new ProjectsPage(page)
-    await projects.goto()
-    await projects.clickAdd()
-    await projects.fillCode('E2E-PROJ-001')
-    await projects.fillName('E2E Test Project')
-    await projects.fillDescription('Created by E2E test')
-    await projects.selectSubdivision('E2E Test Subdivision')
-    await projects.selectProjectType('E2E Test Project Type')
-    await projects.submit()
-    await expect(page.locator('[data-testid="project-submit-button"]')).toHaveText('Create', { timeout: 10000 })
-  })
-
-  test('should edit an existing project', async ({ page }) => {
-    const projects = new ProjectsPage(page)
-    await projects.goto()
-    const rowCount = await projects.getRowCount()
-    if (rowCount > 0) {
-      await projects.clickEditOnRow(0)
-      await projects.fillName('Updated E2E Project')
-      await projects.submit()
-      await expect(page.locator('text=/success|updated/i')).toBeVisible({ timeout: 5000 })
-    }
-  })
-
-  test('should delete a project', async ({ page }) => {
-    const projects = new ProjectsPage(page)
-    await projects.goto()
-    const rowCount = await projects.getRowCount()
-    if (rowCount > 0) {
-      await projects.clickDeleteOnRow(0)
-      await projects.confirmDelete()
-      await expect(page.locator('text=/success|deleted/i')).toBeVisible({ timeout: 5000 })
-    }
-  })
+test('projects preserves associations through create, edit and delete', async ({ page, loginAsAdmin }) => {
+  await loginAsAdmin()
+  const unique = Date.now().toString(36)
+  const parent = await subdivision(page, unique); const type = await createParent(page, 'project-types', { code: 'T' + unique, name: 'Type ' + unique })
+  await crudJourney(page, { route: 'projects', prefix: 'project', fields: { code: unique, name: 'Project ' + unique }, editField: 'name', editValue: 'Updated ' + unique, expected: { subdivision_id: parent.id, project_type_id: type.id }, prepare: async () => { await selectLabel(page, 'project-subdivision-select', parent.name); await selectLabel(page, 'project-type-select', type.name) } })
 })

@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures'
+import { createParent, waitForWrite, assertWrite } from '../helpers/crud-journey'
 import { LeaveRequestsPage } from '../pages/leave-requests.page'
 
 test.describe('Leave Requests E2E', () => {
@@ -17,13 +18,21 @@ test.describe('Leave Requests E2E', () => {
     const leave = new LeaveRequestsPage(page)
     await leave.goto()
     await leave.clickNew()
-    await leave.fillEmployeeId('E2E-EMP-001')
-    await leave.fillPolicyId('E2E-POL-001')
+    const unique = Date.now().toString(36)
+    const employee = await createParent(page, 'employees', { employee_code: 'E' + unique, first_name: 'E2E', last_name: 'Leave', birthdate: '1990-01-01' })
+    const policy = await createParent(page, 'leave-policies', { code: 'L' + unique, name: 'E2E leave', annual_entitlement_days: '15.00', cadence: 'annual' })
+    await createParent(page, 'employees/' + employee.id + '/leave-enrollments', { policy_id: policy.id, leave_year: 2026 })
+    await leave.fillEmployeeId(employee.id)
+    await leave.fillPolicyId(policy.id)
     await leave.fillDateStart('2026-09-15')
     await leave.fillDateEnd('2026-09-16')
     await leave.fillReason('E2E test leave')
+    const submitted = waitForWrite(page, 'leave-requests', 'POST')
     await leave.submit()
-    await expect(page.locator('[data-testid="leave-request-submit-button"]')).toHaveText('Submit Request', { timeout: 10000 })
+    const created = await assertWrite(await submitted, 201)
+    expect(created.employee_id).toBe(employee.id)
+    expect(created.policy_id).toBe(policy.id)
+    await expect(page.getByTestId('leave-request-submit-button')).not.toBeVisible()
   })
 
   test('should filter by status', async ({ page }) => {

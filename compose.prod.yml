@@ -45,7 +45,31 @@ services:
       - traefik-public
       - default
     depends_on:
+      audit-retention:
+    image: ghcr.io/louielangeloquisim/hris-fastapi/backend:${IMAGE_TAG:-latest}
+    restart: always
+    command: ["python", "-m", "app.audit.retention", "--scheduled"]
+    depends_on:
       db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - PROJECT_NAME=HRIS
+      - ENVIRONMENT=${ENVIRONMENT}
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - FIRST_SUPERUSER=${FIRST_SUPERUSER?Variable not set}
+      - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD?Variable not set}
+      - POSTGRES_SERVER=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - AUDIT_RETENTION_ENABLED=${AUDIT_RETENTION_ENABLED:-false}
+      - AUDIT_RETENTION_DAYS=${AUDIT_RETENTION_DAYS:-90}
+      - AUDIT_RETENTION_BATCH_SIZE=${AUDIT_RETENTION_BATCH_SIZE:-1000}
+
+  db:
         condition: service_healthy
     env_file:
       - .env

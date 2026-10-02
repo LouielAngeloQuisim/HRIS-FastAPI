@@ -115,7 +115,7 @@ and #57 respectively.)
 | #77 | IN PROGRESS |
 | #78 | NEEDS RECONCILIATION (investigated; documentation-only decision outstanding) |
 | #79 | DONE |
-| #80 | OPEN |
+| #80 | DONE |
 | #81 | IN PROGRESS (partial) |
 | #82 | DONE |
 | #83 | OPEN |
@@ -355,10 +355,13 @@ final one. No production calculator/route logic changed. Existing authentication
 for all five calculators and authenticated success are preserved. Verification
 evidence is recorded in the implementation PR.
 
-### #80 — Audit-log retention job — OPEN
-No retention/cleanup job exists in `backend/app/audit/`; a comment in
-`backend/app/config/settings.py` awaits it. Decide implementation or defer
-explicitly.
+### #80 - Audit retention job - DONE
+Implemented bounded daily retention in app.audit.retention and a dedicated
+Compose service. Owner chose 90 days on 2026-10-02 and explicitly required
+deletion to remain disabled until enabled. Default dry runs preserve data;
+enabled runs delete at most 1000 old rows per day. Cutoff, default-disabled,
+batch-size and invalid-policy cases are tested. No production enablement.
+See docs/runbooks/audit-retention.md for activation and backlog handling.
 
 ### #81 — GET-route authentication coverage — IN PROGRESS (partial)
 Established findings: the health endpoint is intentionally public; protected

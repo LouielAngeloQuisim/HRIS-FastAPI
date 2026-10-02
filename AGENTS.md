@@ -28,12 +28,11 @@ section itself as that standing reminder.
 
 **Before claiming any change is complete, run `scripts/verify.sh` and show its
 output. This replaces the old per-command manual checklist.** It runs ruff,
-mypy (report-only), alembic drift-check, pytest against a throwaway
+mypy (hard gate), alembic drift-check, pytest against a throwaway
 postgres container, then frontend tsc/eslint (report-only)/vitest/build, and
 prints a PASS/FAIL summary. Exit 0 = all hard gates green; 1 = at least one
-failed. mypy and eslint counts are reported but do not yet gate (both currently
-report 0 errors on `origin/main`; remaining eslint output is 2 warnings — see
-docs/STATUS.md).
+failed. mypy is a hard gate. ESLint is report-only; the current baseline is
+0 errors and 2 warnings. See docs/STATUS.md.
 
 ### For any backend change (`backend/`):
 1. Write or update a pytest test covering the change, in the matching
@@ -88,17 +87,17 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 
 ## 2. Current Status
 
-### Backend — Phase 0-1 + Phase 2A/2B + Phase B3: 444 tests, green (verified 2026-09-28: `uv run pytest --collect-only -q` from `backend/` collects 444; CI backend job on origin/main bf2a479 reports `444 passed, 676 warnings in 17.79s`)
-- **Phase 0-1:** 25 of the repo's 43 `test_*.py` files under `backend/tests/` (verified 2026-09-24 via `find backend/tests -name "test_*.py" | wc -l`) live in: `employee/` (crud, crud_relations, dashboard, owner/category/lots, blocks/lots delete-guard, attachments, additional_records, indexes_constraints), `auth/` (flow, rate-limit), `rbac/` (require_permission, route_protection, role_escalation, seed), `foundation/` (scaffold, responses), `item/`, `user/` (crud, private, routes), `scripts/` (pre-start waits).
+### Backend - 707 tests green (verified 2026-10-02 by scripts/verify.sh)
+- **Backend inventory:** 51 test files under backend/tests; the domain groups below describe responsibilities, not the current total by phase.
 - **Phase 2A/2B — Attendance module** (`backend/app/attendance/`): full CRUD for `Shift` + `DailyTimeRecord`, plus `DTRAdjustment`. Routers under `/shifts`, `/daily-time-records`, `/dtr-adjustments`. Row-level filter on DTR list: non-superusers see only their own records; users with no linked EmployeeRecords see `[]`.
 - **Phase B3 — Leave & Holidays module** (`backend/app/leave/`): full CRUD for `LeavePolicy`, `EmployeeLeaveEnrollment`, `LeaveRequest`, `LeaveLedgerEntry`, `HolidayConfig`, `HolidayInstance`. 84 tests in `backend/tests/leave/`.
-- **Additional backend modules on `origin/main`** (phase trackers lag the code — treat the modules, not `docs/roadmap/*.json`, as truth): `payroll` (routers under `/payroll/*` incl. `runs/generate` gated by `payroll:add`), `notification`, `audit`, `reports`, `dashboard`. Full generated inventory: `docs/MAP.md` (225 endpoints in 39 groups across 12 domain packages).
+- **Additional backend modules on `origin/main`** (phase trackers lag the code — treat the modules, not `docs/roadmap/*.json`, as truth): `payroll` (routers under `/payroll/*` incl. `runs/generate` gated by `payroll:add`), `notification`, `audit`, `reports`, `dashboard`. Full generated inventory: `docs/MAP.md` (226 endpoints in 39 groups across 12 domain packages).
 - **23 Alembic migrations** (`backend/alembic/versions/`, verified 2026-09-24 via `ls backend/alembic/versions/*.py | wc -l`).
 - All 16 HRIS domain resource routers are implemented in the `employee` module and served via the `routers` list in `app/employee/routes.py`: **employees, divisions, departments, subdivisions, positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks** — plus `/dashboard`, `/rbac`, `/items`, `/users`, `/auth`, `/shifts`, `/daily-time-records`, `/dtr-adjustments`, `/leave/*`, notifications, audit, reports, payroll, and local-only `/private`.
 
-### Frontend — Phase 0-3: 79 test files in `frontendv3/src` (verified 2026-09-28 via `git ls-tree -r --name-only origin/main -- frontendv3/src | grep -cE '\.test\.(tsx|ts)$'` = 79; 66 of them under `src/features`; local equivalent: `find frontendv3/src \( -name '*.test.tsx' -o -name '*.test.ts' \) -not -path '*__screenshots__*' | wc -l` — the parentheses and the `__screenshots__` exclusion are required, because the old unparenthesized `-o` find counted 139 gitignored Vitest screenshot artifacts), 270 tests green (`npx vitest run --browser.headless` → `Test Files 79 passed (79) / Tests 270 passed (270)`, verified 2026-09-28 with `LD_LIBRARY_PATH` set per §6)
-- `vitest run --browser.headless` → **79 test files / 270 tests, all passing** (verified 2026-09-28).
-- CRUD-complete feature pages with tests: divisions, departments, subdivisions (create wizard with failure-resume), positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks, shifts (**UI only**), roles (admin + permission matrix), dashboard, employees (**read-only list + profile + CSV import**).
+### Frontend - 88 test files / 280 tests green (verified 2026-10-02)
+- Full Vitest run: **88 test files / 280 tests passing** (2026-10-02).
+- CRUD-complete feature pages with tests: divisions, departments, subdivisions (create wizard with failure-resume), positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks, shifts, roles (admin + permission matrix), dashboard, employees (**read-only list + profile + CSV import**).
 - §8.1–§8.13 coverage: permission gating, 409 delete-error flows, CSV import success/retry, subdivision wizard state + resume.
 - **Playwright E2E infrastructure:** `e2e/fixtures/`, `e2e/helpers/`, `e2e/pages/`, 24 page objects covering every domain; 25 specs across `e2e/organization/`, `e2e/projects/`, `e2e/hris/`, `e2e/system/`, `e2e/attendance/` (verified 2026-09-24 via `ls frontendv3/e2e/pages/*.ts | wc -l` = 24 and `find frontendv3/e2e -name "*.spec.ts" | wc -l` = 25) with stable `data-testid` selectors on buttons, dialogs, and form fields.
 
@@ -114,18 +113,19 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 ## 4. Tech Stack
 
 ### Backend (`backend/pyproject.toml`)
-- Python `>=3.10,<4.0`; prod image `python:3.10` (`backend/Dockerfile`); **local venv is Python 3.12.3** (repo-root `.venv`).
+- Python >=3.14,<4.0; production image and CI use Python 3.14. Local verification uses the interpreter available on the host; production-image builds were separately verified.
 - `fastapi[standard] >=0.114.2,<1`, `pydantic >2.0`, `pydantic-settings >=2.2.1`, `sqlmodel >=0.0.21`, `alembic >=1.12.1`, `psycopg[binary] >=3.1.13`, `pyjwt >=2.8.0`, `pwdlib[argon2,bcrypt] >=0.3.0`, `tenacity >=8.2.3`, `httpx >=0.25.1`, `emails >=0.6`, `jinja2 >=3.1.4`, `email-validator`, `sentry-sdk[fastapi] >=2.20.0`, `python-multipart >=0.0.7`.
 - Dev: pytest `>=7.4.3,<8`, mypy (strict), ruff, prek, coverage. **No coverage gate exists** (verified 2026-09-24: `grep -rn "fail-under\|coverage report" .github/workflows/` returns nothing and `backend/pyproject.toml` has no `fail_under`), contrary to the old claim of a CI-enforced 90%.
 
 ### Frontend (`frontendv3/package.json`, caret ranges)
+- Build runtime: Node 26; pnpm 11.17.0 installed explicitly because Node 26 does not bundle Corepack.
 - react `^19.2.5` / react-dom `^19.2.5`, typescript `~6.0.3`, vite `^8.0.8` (+ `@vitejs/plugin-react`), @tanstack/react-router `^1.168.22` (file-based), @tanstack/react-query `^5.99.0`, @tanstack/react-table `^8.21.3`, tailwindcss `^4.2.2` + `@tailwindcss/vite`, lucide-react `^1.8.0`, zod `^4.3.6`, react-hook-form `^7.72.1` + `@hookform/resolvers`, sonner `^2.0.7`, **axios `^1.15.0`**, zustand `^5.0.12`, recharts `^3.8.1`, date-fns, class-variance-authority, tailwind-merge, clsx, cmdk, input-otp, react-day-picker, react-top-loading-bar, tw-animate-css, Radix UI primitives (alert-dialog, avatar, checkbox, collapsible, dialog, direction, dropdown-menu, icons, label, popover, radio-group, scroll-area, select, separator, slot, switch, tabs, tooltip).
 - Dev: eslint `^10.2.1` + typescript-eslint + eslint-plugin-react-hooks + eslint-plugin-react-refresh, prettier `^3.8.3` (+ @trivago/prettier-plugin-sort-imports, prettier-plugin-tailwindcss), vitest `^4.1.4` (browser-playwright, coverage-v8, ui), playwright `1.62.1`, @faker-js/faker, @testing-library/react, knip, happy-dom, @tanstack/router-plugin + devtools.
 - **Auth:** custom JWT (see §5).
 - **Explicit corrections vs the old template AGENTS.md:** there is **no Biome** (lint is eslint, format is prettier), **no next-themes** (theme is a custom `ThemeProvider`), **no @hey-api/openapi-ts client** (hand-written axios client), and **`frontendv3/`** is the frontend (the tracked template `frontend/` folder was removed in PR #26; a root `frontend/` directory still exists on some dev hosts as an untracked residue of empty `blob-report/` + `test-results/` dirs — tracked file count 0; removal is roadmap #90).
 
 ### Infrastructure / CI-CD
-- PostgreSQL `18` (`postgres:18`), Traefik `3.6` (`compose.traefik.yml`), Nginx for frontend static serving (prod), GitHub Container Registry (GHCR) + GitHub Actions deployment. Compose split: `compose.yml` (base), `compose.override.yml` (dev), `compose.prod.yml` (prod), `compose.traefik.yml`.
+- PostgreSQL `18` (`postgres:18`), Traefik `3.7` (`compose.traefik.yml`), Nginx for frontend static serving (prod), GitHub Container Registry (GHCR) + GitHub Actions deployment. Compose split: `compose.yml` (base), `compose.override.yml` (dev), `compose.prod.yml` (prod), `compose.traefik.yml`.
 
 ## 5. Architecture Conventions
 
@@ -146,8 +146,9 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 - **Vitest browser mode** (`vitest run --browser.headless`, Playwright-backed). On this host, run once: `frontendv3/scripts/setup-playwright-libs.sh`, then export `LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"` before running tests.
 - Commands (from `frontendv3/`): full suite `npx vitest run --browser.headless`; single file `npx vitest run --browser.headless <path>`; lint `npx eslint .`; format `npx prettier --write .`; typecheck `npx tsc --noEmit`.
 - Test conventions: `renderWithClient` from `@/test-utils/providers`, `userEvent` from `vitest/browser`, hoisted `vi.mock` blocks (per-action `useCan` policy mock, `use*` hook mocks, axios `api.delete` mocks, sonner toast spies).
-- Baseline (verified 2026-09-28, re-measured 2026-09-29 on `origin/main` `f8b890d` via `scripts/verify.sh`): **79 frontend test files / 270 Vitest tests green, 444 backend tests green (`444 passed, 1 warning in 37.47s` locally; CI on bf2a479 reported `444 passed`), 23 Alembic migrations, tsc 0 errors, mypy 0 errors (97 source files), ruff clean, eslint 0 errors / 2 warnings** — the former 15 `@typescript-eslint/no-explicit-any` errors and the `RolePublic` unused import were fixed in PRs #41/#42; the 2 remaining warnings are both `react-hooks/incompatible-library` (React Compiler notices about react-hook-form `watch()`, not gating). Do not claim ESLint is warning-free.
-- Playwright E2E: 25 spec files (organization, projects, hris, system, attendance) across `e2e/auth.spec.ts`, `e2e/organization/divisions.spec.ts`, `e2e/attendance/daily-time-records.spec.ts`, `e2e/attendance/leave-requests.spec.ts`, `e2e/attendance/dtr-adjustments.spec.ts`. Verified pass count: specs written, structured for Playwright execution. Full execution requires a running backend and Playwright browser dependencies (`LD_LIBRARY_PATH` set per §6).
+- Baseline (verified 2026-10-02): **707 backend tests, 88 frontend files / 280 Vitest tests, 23 migrations with no drift, tsc 0 errors, mypy 0 errors (98 source files), ruff clean, ESLint 0 errors / 2 warnings**. ESLint warnings remain report-only.
+- Playwright E2E: **40 passing browser tests across 25 specs**, verified on a fresh disposable database without retries. The dedicated e2e workflow runs on PRs and main. See docs/plans/e2e-ci-completion.md for isolation guards and coverage limits. Never point the CI suite at production.
+
 
 ## 7. Lessons Learned (verified, no current regressions)
 
@@ -161,8 +162,8 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 
 The authoritative step-by-step procedures are the runbooks in `docs/runbooks/`: `docs/runbooks/deploy.md`, `docs/runbooks/rollback.md`, `docs/runbooks/migrations.md`, `docs/runbooks/backup-restore.md`. This section 8 is only a summary — follow the runbooks for any production operation.
 
-- Deploys happen **ONLY by merging a pull request to `main`** (never by direct push; `main` is protected by the `Main Branch Rules` ruleset: PR required, no deletion, no force-push, `backend`/`frontend` status checks required).
-- The deploy pipeline (see `.github/workflows/deploy.yml`) runs: `ci` → `build-and-push` → `deploy` (pre-deploy `pg_dump`, migrate via `scripts/prestart.sh` (`alembic upgrade head`), `docker compose -f compose.prod.yml up -d`, health-check wait until the backend reports `healthy`) → `verify` (curl the API health-check and the frontend until both return 200).
+- Deploys happen **ONLY by merging a pull request to `main`** (never by direct push; `main` is protected by the `Main Branch Rules` ruleset: PR required, no deletion, no force-push, `backend`/`frontend`/`e2e` status checks required).
+- The deploy pipeline (see `.github/workflows/deploy.yml`) runs: `ci` → `build-and-push` → `deploy` (pre-deploy `pg_dump`, migrate via `scripts/prestart.sh` (`alembic upgrade head`), `docker compose -f compose.prod.yml up -d`, health-check wait until backend, frontend, and Traefik report healthy) → `verify` (nine HTTP checks covering health, authentication, disabled documentation, HTML pages, and HTTPS redirects).
 - `hris-deploy deploy` (the restricted VM SSH command) only runs `compose pull` + `compose up -d`. It skips the dump, the migration, and the health-check wait. It must **NEVER** be used when a migration is pending, and is **not** a substitute for a PR merge. It is only safe for restarting already-running, already-migrated containers.
 - `hris-debug` remains read-only (`ps`, `logs`, `inspect`, `stats`, `df`, `free`) for checking status.
 

@@ -1,0 +1,83 @@
+name: Playwright E2E
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  e2e:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: e2e
+          POSTGRES_PASSWORD: e2e-placeholder
+          POSTGRES_DB: e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U e2e -d e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: true
+      # Independent browser sessions share the disposable server's login bucket.
+      LOGIN_RATE_LIMIT_ATTEMPTS: 1000
+      ENVIRONMENT: local
+      PROJECT_NAME: HRIS-E2E
+      SECRET_KEY: e2e-placeholder-not-a-real-secret
+      FIRST_SUPERUSER: admin@example.com
+      FIRST_SUPERUSER_PASSWORD: e2e-admin-placeholder
+      EMAILS_FROM_EMAIL: info@example.com
+      POSTGRES_SERVER: 127.0.0.1
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: e2e
+      POSTGRES_PASSWORD: e2e-placeholder
+      POSTGRES_DB: e2e
+      BACKEND_CORS_ORIGINS: '["http://127.0.0.1:5173"]'
+      FRONTEND_HOST: http://127.0.0.1:5173
+      E2E_BASE_URL: http://127.0.0.1:5173
+      E2E_API_URL: http://127.0.0.1:8000/api/v1
+      VITE_API_URL: http://127.0.0.1:8000
+      E2E_START_BACKEND: true
+      E2E_SEED_ALLOWED: true
+      E2E_ADMIN_EMAIL: admin@example.com
+      E2E_ADMIN_PASSWORD: e2e-admin-placeholder
+      E2E_USER_EMAIL: user@example.com
+      E2E_USER_PASSWORD: e2e-user-placeholder
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.17.0
+      - run: uv sync
+        working-directory: backend
+      - run: uv run bash scripts/prestart.sh
+        working-directory: backend
+      - run: uv run python scripts/seed_e2e.py
+        working-directory: backend
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontendv3
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: frontendv3
+      - run: pnpm exec playwright test
+        working-directory: frontendv3
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-failure-report
+          path: frontendv3/playwright-report/
+          retention-days: 7

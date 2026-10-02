@@ -26,6 +26,7 @@ import { useSubdivisions } from '@/lib/api/subdivisions'
 import type { PhasePublic, PhaseCreate, PhaseUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
+  subdivision_id: z.string().min(1, 'Select a parent record'),
   code: z.string().optional(),
   name: z.string().optional(),
   description: z.string().optional(),

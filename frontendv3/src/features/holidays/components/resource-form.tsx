@@ -36,7 +36,7 @@ const formSchema = z.object({
   code: z.string().min(1, 'Code is required'),
   name: z.string().min(1, 'Name is required'),
   month_day: z.string().min(1, 'Month/Day is required'),
-  type: z.enum(['regular', 'special', 'adobo']).default('regular'),
+  type: z.enum(['regular', 'special_non_working', 'special_working', 'company']).default('regular'),
   region_code: z.string().optional(),
   is_recurring: z.boolean().default(true),
 })
@@ -58,7 +58,7 @@ export function ResourceForm({ item, open, onClose }: Props) {
       code: item?.code ?? '',
       name: item?.name ?? '',
       month_day: item?.month_day ?? '',
-      type: 'regular',
+      type: formSchema.shape.type.parse(item?.type ?? 'regular'),
       region_code: item?.region_code ?? '',
       is_recurring: item?.is_recurring ?? true,
     },
@@ -117,14 +117,15 @@ export function ResourceForm({ item, open, onClose }: Props) {
               <FormField control={form.control} name="type" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Type</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value} data-testid="holiday-type-select">
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
                     <FormControl>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger data-testid="holiday-type-select"><SelectValue /></SelectTrigger>
                     </FormControl>
                     <SelectContent>
                       <SelectItem value="regular">Regular</SelectItem>
-                      <SelectItem value="special">Special</SelectItem>
-                      <SelectItem value="adobo">Adobo</SelectItem>
+                      <SelectItem value="special_non_working">Special Non-working</SelectItem>
+                      <SelectItem value="special_working">Special Working</SelectItem>
+                      <SelectItem value="company">Company</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />

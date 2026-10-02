@@ -26,6 +26,7 @@ import type { RolePublic, RoleCreate, RoleUpdate } from '@/lib/api/types'
 import { toast } from 'sonner'
 
 const formSchema = z.object({
+  code: z.string().min(1, 'Role code is required').max(32),
   name: z.string().min(1, 'Role name is required'),
 })
 
@@ -45,12 +46,13 @@ export function RoleForm({ open, role, onClose }: Props) {
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      code: role?.code ?? '',
       name: role?.name ?? '',
     },
   })
 
   useEffect(() => {
-    form.reset({ name: role?.name ?? '' })
+    form.reset({ code: role?.code ?? '', name: role?.name ?? '' })
   }, [role, form])
 
   const onSubmit = async (data: FormData) => {
@@ -81,6 +83,13 @@ export function RoleForm({ open, role, onClose }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form id="roles-form" onSubmit={form.handleSubmit(onSubmit)} className="flex-1 space-y-6 overflow-y-auto px-4">
+             <FormField control={form.control} name="code" render={({ field }) => (
+               <FormItem>
+                 <FormLabel>Code</FormLabel>
+                 <FormControl><Input {...field} disabled={isEdit} data-testid="role-code-input" /></FormControl>
+                 <FormMessage />
+               </FormItem>
+             )} />
              <FormField control={form.control} name="name" render={({ field }) => (
                <FormItem>
                  <FormLabel>Name</FormLabel>

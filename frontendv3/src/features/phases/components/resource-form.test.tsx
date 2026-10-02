@@ -26,7 +26,7 @@ vi.mock('@/context/permissions-provider', () => ({
 describe('Phases ResourceForm', () => {
   it('renders form and calls create mutation with correct payload', async () => {
     useSubdivisionsMock.mockReturnValue({
-      data: { data: [], count: 0 },
+      data: { data: [{ id: 'sub-1', name: 'Test Subdivision' }], count: 1 },
       isPending: false,
       isError: false,
       refetch: vi.fn(),
@@ -47,6 +47,9 @@ describe('Phases ResourceForm', () => {
     )
     expect(textInputs.length).toBeGreaterThanOrEqual(2)
 
+    await userEvent.type(screen.getByTestId('phase-code-input'), 'PHASE1')
+    await userEvent.click(screen.getByTestId('phase-subdivision-select'))
+    await userEvent.click(screen.getByRole('option', { name: 'Test Subdivision', exact: true }))
     await userEvent.type(textInputs[1] as HTMLElement, 'Phase 1')
     await userEvent.type(textInputs[2] as HTMLElement, 'Desc')
 
@@ -58,6 +61,8 @@ describe('Phases ResourceForm', () => {
 
     expect(createMock.mutateAsync).toHaveBeenCalled()
     const payload = createMock.mutateAsync.mock.calls[0][0]
+    expect(payload.subdivision_id).toBe('sub-1')
+    expect(payload.code).toBe('PHASE1')
     expect(payload.name).toBe('Phase 1')
     expect(payload.description).toBe('Desc')
   })

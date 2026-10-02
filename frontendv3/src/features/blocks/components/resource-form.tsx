@@ -26,6 +26,7 @@ import { usePhases } from '@/lib/api/phases'
 import type { BlocksPublic, BlocksCreate, BlocksUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
+  phase_id: z.string().min(1, 'Select a parent record'),
   name: z.string().optional(),
   description: z.string().optional(),
 })
@@ -59,11 +60,12 @@ export function ResourceForm({ item, onClose, open }: Props) {
   })
 
   const onSubmit = async (data: FormData) => {
+    const payload = { block_name: data.name, phase_id: data.phase_id }
     try {
       if (isEdit && item?.id) {
-        await updateMutation.mutateAsync({ id: item.id, data: data as unknown as BlocksUpdate })
+        await updateMutation.mutateAsync({ id: item.id, data: payload as unknown as BlocksUpdate })
       } else {
-        await createMutation.mutateAsync(data as unknown as BlocksCreate)
+        await createMutation.mutateAsync(payload as unknown as BlocksCreate)
       }
       onClose()
     } catch (_e) {

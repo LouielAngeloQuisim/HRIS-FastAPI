@@ -233,3 +233,51 @@ class TestIsHoliday:
         r = client.get(f"{API}/holidays/instances?leave_year=2026", headers=superuser_token_headers)
         instances = r.json()["data"]
         assert not any(i["config_id"] == str(cfg.id) for i in instances)
+
+
+def test_delete_holiday_hides_template_and_preserves_instances(
+    client, db, superuser_token_headers, holiday_config,
+):
+    from app.leave.models import HolidayInstance
+
+    instance = HolidayInstance(
+        config_id=holiday_config.id, observed_date="2026-01-01",
+        raw_date="2026-01-01", leave_year=2026,
+    )
+    db.add(instance)
+    db.commit()
+    db.refresh(instance)
+    instance_id = instance.id
+    config_id = holiday_config.id
+    response = client.delete(
+        f"{API}/holidays/{config_id}", headers=superuser_token_headers
+    )
+    assert response.status_code == 200
+    db.refresh(holiday_config)
+    assert holiday_config.is_deleted is True
+    assert holiday_config.deleted_at is not None
+    assert db.get(HolidayInstance, instance_id) is not None
+    listed = client.get(f"{API}/holidays/", headers=superuser_token_headers)
+    assert all(row["id"] != str(config_id) for row in listed.json()["data"])
+    assert client.delete(
+        f"{API}/holidays/{config_id}", headers=superuser_token_headers
+    ).status_code == 404
+
+
+def test_delete_holiday_requires_delete_permission(
+    client, normal_user_token_headers, holiday_config, db,
+):
+    config_id = holiday_config.id
+    assert client.delete(f"{API}/holidays/{config_id}").status_code == 401
+    assert client.delete(
+        f"{API}/holidays/{config_id}", headers=normal_user_token_headers
+    ).status_code == 403
+    db.refresh(holiday_config)
+    assert holiday_config.is_deleted is False
+
+
+def test_delete_missing_holiday_returns_404(client, superuser_token_headers):
+    response = client.delete(
+        f"{API}/holidays/{uuid.uuid4()}", headers=superuser_token_headers
+    )
+    assert response.status_code == 404

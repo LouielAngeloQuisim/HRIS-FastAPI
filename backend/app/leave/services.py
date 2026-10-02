@@ -661,6 +661,19 @@ def update_holiday_config(
     return cfg
 
 
+
+def delete_holiday_config(*, session: Session, config_id: uuid.UUID) -> None:
+    """Retire a template without deleting referenced historical instances."""
+    cfg = selectors.get_holiday_config(session=session, config_id=config_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="Holiday config not found")
+    cfg.is_deleted = True
+    cfg.deleted_at = datetime.now(timezone.utc)
+    cfg.updated_at = cfg.deleted_at
+    session.add(cfg)
+    session.commit()
+
+
 def create_holiday_instance(
     *, session: Session, config_id: uuid.UUID, date_val: date,
     raw_date_val: date | None, leave_year: int

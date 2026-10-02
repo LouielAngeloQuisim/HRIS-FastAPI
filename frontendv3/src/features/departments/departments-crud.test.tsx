@@ -32,6 +32,12 @@ vi.mock('@/lib/api/departments', () => ({
     isPending: false,
   }),
 }))
+vi.mock('@/lib/api/divisions', () => ({
+  useDivisions: () => ({
+    data: { data: [{ id: 'div-1', name: 'Test Division' }], count: 1 },
+    isPending: false,
+  }),
+}))
 vi.mock('@/context/permissions-provider', () => ({
   useCan: (...args: unknown[]) => h.useCanMock(...args),
 }))
@@ -72,7 +78,7 @@ describe('Department full CRUD flow (§8.3)', () => {
     h.useCanMock.mockReturnValue(true)
     h.apiDeleteMock.mockResolvedValue({ data: {} })
 
-    const { getByRole } = await renderWithClient(<DepartmentPage />)
+    const { getByRole, getByTestId } = await renderWithClient(<DepartmentPage />)
 
     await userEvent.click(getByRole('button', { name: /Add Department/i }))
     await expect
@@ -81,12 +87,14 @@ describe('Department full CRUD flow (§8.3)', () => {
 
     await userEvent.fill(getByRole('textbox', { name: /Code/i }), 'OPS')
     await userEvent.fill(getByRole('textbox', { name: /Name/i }), 'Operations')
+    await userEvent.click(getByTestId('department-division-select'))
+    await userEvent.click(getByRole('option', { name: 'Test Division', exact: true }))
 
     await userEvent.click(getByRole('button', { name: /^Create$/i }))
 
     await vi.waitFor(() => {
       expect(h.useCreateDeptMock).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 'OPS', name: 'Operations' })
+        expect.objectContaining({ code: 'OPS', name: 'Operations', division_id: 'div-1' })
       )
     })
     // Success path: the create drawer closes after the mutation resolves.

@@ -29,10 +29,10 @@ import type { EmployeeProjectsPublic, EmployeeProjectsCreate, EmployeeProjectsUp
 const formSchema = z.object({
   employee_id: z.string().optional(),
   project_id: z.string().optional(),
-  date: z.string().optional(),
-  rendered_hours: z.string().optional(),
+  date: z.string().optional().transform(value => value || undefined),
+  rendered_hours: z.string().optional().transform(value => value ? Number(value) : undefined),
   task: z.string().optional(),
-  is_assigned: z.string().optional(),
+  is_assigned: z.enum(['', 'true', 'false']).optional().transform(value => value ? value === 'true' : undefined),
 })
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FormData = any
@@ -66,9 +66,9 @@ export function ResourceForm({ item, onClose, open }: Props) {
       employee_id: item?.employee_id ?? '',
       project_id: item?.project_id ?? '',
       date: item?.date ?? '',
-      rendered_hours: item?.rendered_hours ?? '',
+      rendered_hours: item?.rendered_hours == null ? '' : String(item.rendered_hours),
       task: item?.task ?? '',
-      is_assigned: item?.is_assigned ?? '',
+      is_assigned: item?.is_assigned == null ? '' : String(item.is_assigned),
     },
   })
 

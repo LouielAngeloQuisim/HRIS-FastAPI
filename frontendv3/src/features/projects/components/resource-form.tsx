@@ -27,6 +27,7 @@ import { useSubdivisions } from '@/lib/api/subdivisions'
 import type { ProjectPublic, ProjectCreate, ProjectUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
+  project_type_id: z.string().optional().transform(value => value || undefined),
   code: z.string().optional(),
   name: z.string().optional(),
   description: z.string().optional(),

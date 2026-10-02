@@ -39,14 +39,9 @@
   [migrations](./runbooks/migrations.md),
   [backup/restore](./runbooks/backup-restore.md). Authoritative for production
   operations (AGENTS.md §8 is a summary only).
-- [`architecture/`](./architecture/README.md) — design rationale (currently a
-  stub section, awaiting content — roadmap Batch C).
-- [`decisions/`](./decisions/README.md) — one file per decision (stub; the
-  surviving invariants from the superseded SOURCE_OF_TRUTH.md §5 are candidates
-  for migration here).
-- [`modules/`](./modules/README.md) — per-domain current inventory (stub;
-  generated inventory currently lives in MAP.md).
-- [`plans/`](./plans/README.md) — active planning docs (stub).
-- [`testing/`](./testing/README.md) — test conventions (see also
-  `frontendv3/docs/testing-strategy.md`).
-- [`archive/`](./archive/README.md) — completed/historical plans (stub).
+- [architecture/](./architecture/README.md) - system boundaries and extension points.
+- [decisions/](./decisions/README.md) - owner decisions with consequences and evidence.
+- [modules/](./modules/README.md) - existing domains, known gaps and module checklist.
+- [plans/](./plans/README.md) - planning and implementation evidence.
+- [testing/](./testing/README.md) - full verification, browser CI and test conventions.
+- [archive/](./archive/README.md) - preserved historical sources and completed plans.

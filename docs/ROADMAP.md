@@ -62,7 +62,7 @@ and #57 respectively.)
 | #19 | DONE |
 | #20 | DONE |
 | #21 | DONE |
-| #22 | IN PROGRESS |
+| #22 | DONE |
 | #23 | DONE |
 | #24 | DONE |
 | #25 | DONE |
@@ -82,17 +82,17 @@ and #57 respectively.)
 | #39 | OPEN |
 | #40 | NEEDS RECONCILIATION |
 | #41 | SKIPPED / NOT APPLICABLE (not a repository concern) |
-| #42 | IN PROGRESS |
-| #43 | IN PROGRESS |
-| #44 | IN PROGRESS |
-| #45 | IN PROGRESS |
-| #46 | IN PROGRESS |
+| #42 | DONE |
+| #43 | DONE |
+| #44 | DONE |
+| #45 | DONE |
+| #46 | DONE |
 | #47 | DONE |
 | #48 | DONE |
 | #49 | DONE |
 | #50 | DONE |
 | #51 | DONE |
-| #52 | OPEN |
+| #52 | DONE (documented rollback limitation; history preserved) |
 | #53–#55 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
 | #56 | DONE |
 | #57 | DONE |
@@ -113,7 +113,7 @@ and #57 respectively.)
 | #75 | DONE |
 | #76 | DONE |
 | #77 | DONE |
-| #78 | NEEDS RECONCILIATION (investigated; documentation-only decision outstanding) |
+| #78 | DONE (history preserved by owner decision) |
 | #79 | DONE |
 | #80 | DONE |
 | #81 | IN PROGRESS (partial) |
@@ -153,19 +153,15 @@ time of the investigation.
 Evidence: PR #43; `frontendv3/Dockerfile` uses Corepack + pnpm 11.17.0,
 `pnpm install --frozen-lockfile`; production Docker build passed.
 
-### #22 — Dependabot backlog — IN PROGRESS
-Investigation (#22A/#22B) complete. 10 obsolete PRs closed as superseded
-(#3 #4 #5 #6 #7 #11 #13 #14 #16 #17; earlier superseded closes #12 #15 #19 #20 #21).
-Owner decision (preserved): every open Dependabot PR is reviewed INDIVIDUALLY —
-no automatic merges, and never merged based on CI alone for infrastructure/
-Dockerfile paths CI does not exercise. Remaining work: handling decisions for
-the currently open PRs #1, #2, #9, #18, #27, #28, #29, #30 (GitHub PR numbers,
-not roadmap tasks), each requiring the validation recorded in the handoff
-before merge. Re-listed 2026-09-30 via `gh pr list --state open` (the previous
-list predates the #47–#51 actions bumps; those are also open and individually
-pending: #47 setup-node 4→7, #48 ssh-action 1.0.3→1.2.5, #49 checkout 4→7,
-#50 setup-buildx 3→4, #51 pnpm/action-setup 4→6). Do not merge based on CI
-alone for #1, #2, #27 (infrastructure/Dockerfile paths CI does not exercise).
+### #22 - Dependabot backlog - DONE
+Owner chose runtime and deployment-action migrations on 2026-10-02.
+All thirteen remaining proposals were reviewed individually and replaced by
+PR #68, merged as 7e941373ae5bc290b5bacd297f9c044139dc8063.
+Final verification: 519 backend tests on Python 3.14, 270 frontend tests,
+zero mypy errors, no migration drift, both production Docker builds passed.
+Upgraded GitHub CI and deployment run 36980650229 succeeded.
+PRs #1/#2/#9/#18/#27/#28/#29/#30/#47/#48/#49/#50/#51 are confirmed CLOSED.
+See docs/plans/runtime-upgrades-2026-10-02.md for individual dispositions.
 
 ### #25 / #58 — Backend mypy and frontend ESLint error cleanup — DONE
 Evidence: PRs #37, #39, #40, #41. Current verified state on origin/main
@@ -236,27 +232,17 @@ do not print the values.
 ### #41 — Techrostrum pay dispute — SKIPPED / NOT APPLICABLE
 Explicitly unrelated to this repository.
 
-### #42 / #43 / #44 / #45 / #46 — Documentation / MAP work — IN PROGRESS
-Completed so far: MAP generator exists (PR #35: `scripts/gen-map.sh` +
-`docs/MAP.md`, drift check wired into verify.sh; report-only), MAP regenerated
-after the payroll permission fix (PR #38), MAP content verified in sync with
-origin/main@bf2a479 (Batch B.1, 2026-09-28). **Batch A is MERGED** (PR #53,
-`2c828e3`): generator provenance headers, migration anomaly reporting, and
-edge fixes are on origin/main — current `docs/MAP.md` carries the
-`Generated: 2026-09-28 / Source commit: bf2a479...` header and a
-"Migration anomalies (static findings, report-only)" section with 6 findings,
-and verify.sh's drift check reports IN-SYNC on `f8b890d` (re-measured
-2026-09-29). Batch B.1 (source-of-truth audit) is complete; Batch B.2 is
-merged (PR #54, `0c68537`); Batch B.3 / template residue round 1 is merged
-(PR #55, `f8b890d`) with round 2 merged in the final-cleanup Batch B1 PR
-(#56, `62f1372`). Remaining: Batch C operational docs (architecture/decisions/
-modules/plans/testing/archive are still stubs; re-verified 2026-09-30 on
-`a4f33d3`: each directory contains only a one-paragraph README stub), Batch D
-verification improvements (the stale report-only comments in verify.sh/ci.yml
-naming already-fixed gaps were corrected in final-cleanup Batch B2, merged as
-PR #57 `a4f33d3`).
+### #42 / #43 / #44 / #45 / #46 - Documentation / MAP work - DONE
+Existing generated MAP and workflow validation remain in place.
+The six Batch C stubs now contain architecture boundaries, recorded decisions,
+current module responsibilities and explicit feature gaps, plan conventions,
+real test/CI execution instructions, and a provenance-preserving archive index.
+No historical design documents were moved or rewritten.
+STATUS and AGENTS are refreshed from this finish pass's verification evidence.
 
-### #52 — Migration `b9748b3e7b5c` leaves orphaned PostgreSQL enum types after downgrade — OPEN
+### #52 — Migration `b9748b3e7b5c` leaves orphaned PostgreSQL enum types after downgrade — DONE (documented limitation)
+Owner decision on 2026-10-02: preserve the chain and document rollback limits.
+See docs/runbooks/migration-limitations.md and the migration-history decision.
 Confirmed: its `upgrade()` creates 8 enum types (`genderscope`, `holidaytype`,
 `leavecadence`, `leaveledgersource`, `leaverequesteventtype`, `leavestatus`,
 `maritalstatusscope`, `observeweekendas`); the `downgrade()` drops the tables
@@ -281,7 +267,7 @@ the limitation with evidence. Batch A (PR #53, merged as `2c828e3`) landed
 report-only generator detection of this class of anomaly — current `docs/MAP.md`
 lists 3 orphaned-enum downgrades (`7286295e0903`, `b9748b3e7b5c`,
 `d4b4a4d0b4a1`) — but does not fix the migrations; the remediation decision
-remains open. Migration files were deliberately NOT touched in this
+is resolved by documentation, not a migration rewrite. Migration files were deliberately NOT touched in this
 reconciliation; the failures above are recorded as reproduced evidence.
 
 ### #60 — Production runners on ubuntu-26.04 — DONE
@@ -326,13 +312,14 @@ PyMySQL remains required by scripts/etl_mysql_to_postgres.py and its tests;
 it is deliberately retained as ETL-only tooling. Full verification and image
 builds validate the reduced dependency graph in this dependency PR.
 
-### #78 — Three-migration salary-constraint history — NEEDS RECONCILIATION
+### #78 — Three-migration salary-constraint history — DONE
 Investigated (Batch A reconciliation): `f176e167c8e7` changed the employee
 salary unique constraint to (employee_id, effective_date); `54ff6e36652b`
 reverted it; `3f0e3e733925` (head) re-applied it. Net final schema state is
 correct and `alembic check` passes — no correctness bug, single head.
-Historical awkwardness only; do not rewrite history. Outstanding: a
-documentation decision.
+Owner decision on 2026-10-02: preserve history. The migration-history
+decision and migration-limitations runbook record the provenance and final
+schema; no historical migration was rewritten.
 
 ### #79 — Calculator test assertions — DONE
 `test_calculator.py` asserted with `pytest.approx(x, abs=0.01)` on

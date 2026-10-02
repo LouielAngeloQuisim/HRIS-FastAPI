@@ -1,3 +1,6 @@
+import { useDailyTimeRecords } from '@/lib/api/daily-time-records'
+import { SelectDropdown } from '@/components/select-dropdown'
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -30,7 +33,7 @@ const formSchema = z.object({
   adjusted_logout_date: z.string().min(1, 'Adjusted logout date is required'),
   reason: z.string().optional(),
   adjusted_date: z.string().optional(),
-})
+}).refine(data => data.adjusted_login_date < data.adjusted_logout_date, { path: ['adjusted_logout_date'], message: 'Logout must be after login' })
 
 type FormData = z.infer<typeof formSchema>
 
@@ -41,6 +44,7 @@ interface Props {
 
 export function DtrAdjustmentForm({ onClose, open }: Props) {
   const createMutation = useCreateDtrAdjustment()
+  const records = useDailyTimeRecords(1, 100)
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -54,12 +58,11 @@ export function DtrAdjustmentForm({ onClose, open }: Props) {
   })
 
   const onSubmit = async (data: FormData) => {
+    form.clearErrors('root.server')
     try {
-      await createMutation.mutateAsync(data as unknown as DtrAdjustmentCreate)
+      await createMutation.mutateAsync({ ...data, adjusted_date: data.adjusted_date || undefined, adjusted_login_date: new Date(data.adjusted_login_date + 'Z').toISOString(), adjusted_logout_date: new Date(data.adjusted_logout_date + 'Z').toISOString() } as DtrAdjustmentCreate)
       onClose()
-    } catch (_e) {
-      // _e is caught error
-    }
+    } catch (error) { form.setError('root.server', { message: saveErrorMessage(error) }) }
   }
 
   const loading = createMutation.isPending
@@ -75,23 +78,24 @@ export function DtrAdjustmentForm({ onClose, open }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form id='dtr-adjustment-form' onSubmit={form.handleSubmit(onSubmit)} className='flex-1 space-y-6 overflow-y-auto px-4'>
+            {form.formState.errors.root?.server?.message && <p role="alert">{form.formState.errors.root.server.message}</p>}
             <FormField control={form.control} name='daily_time_record_id' render={({ field }) => (
               <FormItem>
-                <FormLabel>Daily Time Record ID</FormLabel>
-                <FormControl><Input {...field} value={field.value ?? ''} data-testid="dtr-adjustment-dtr-id-input" /></FormControl>
+                <FormLabel>Daily Time Record</FormLabel>
+                <SelectDropdown defaultValue={field.value} onValueChange={field.onChange} placeholder="Select a time record" items={(records.data?.data ?? []).map(record => ({ value: record.id, label: record.employee_id.slice(0, 8) + ' - ' + record.login_date }))} isPending={records.isPending} data-testid="dtr-adjustment-dtr-select" />
                 <FormMessage />
               </FormItem>
             )} />
             <FormField control={form.control} name='adjusted_login_date' render={({ field }) => (
               <FormItem>
-                <FormLabel>Adjusted Login Date</FormLabel>
+                <FormLabel>Adjusted Login Date (UTC)</FormLabel>
                 <FormControl><Input type='datetime-local' {...field} value={field.value ?? ''} data-testid="dtr-adjustment-login-input" /></FormControl>
                 <FormMessage />
               </FormItem>
             )} />
             <FormField control={form.control} name='adjusted_logout_date' render={({ field }) => (
               <FormItem>
-                <FormLabel>Adjusted Logout Date</FormLabel>
+                <FormLabel>Adjusted Logout Date (UTC)</FormLabel>
                 <FormControl><Input type='datetime-local' {...field} value={field.value ?? ''} data-testid="dtr-adjustment-logout-input" /></FormControl>
                 <FormMessage />
               </FormItem>

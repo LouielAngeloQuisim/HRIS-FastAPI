@@ -1,3 +1,4 @@
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -29,7 +30,6 @@ const formSchema = z.object({
   subdivision_id: z.string().min(1, 'Select a parent record'),
   code: z.string().optional(),
   name: z.string().optional(),
-  description: z.string().optional(),
 })
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FormData = any
@@ -56,12 +56,12 @@ export function ResourceForm({ item, onClose, open }: Props) {
     defaultValues: {
       code: item?.code ?? '',
       name: item?.name ?? '',
-      description: '',
       subdivision_id: item?.subdivision_id ?? '',
     },
   })
 
   const onSubmit = async (data: FormData) => {
+    form.clearErrors('root.server')
     try {
       if (isEdit && item?.id) {
         await updateMutation.mutateAsync({ id: item.id, data: data as unknown as PhaseUpdate })
@@ -69,8 +69,8 @@ export function ResourceForm({ item, onClose, open }: Props) {
         await createMutation.mutateAsync(data as unknown as PhaseCreate)
       }
       onClose()
-    } catch (_e) {
-      // _e is caught error
+    } catch (error) {
+      form.setError('root.server', { message: saveErrorMessage(error) })
     }
   }
 
@@ -87,6 +87,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form id="phases-form" onSubmit={form.handleSubmit(onSubmit)} className="flex-1 space-y-6 overflow-y-auto px-4">
+            {form.formState.errors.root?.server?.message && <p role="alert" className="text-destructive">{String(form.formState.errors.root.server.message)}</p>}
             <>
               <FormField control={form.control} name="code" render={({ field }) => (
                 <FormItem>
@@ -99,13 +100,6 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Name</FormLabel>
                   <FormControl><Input {...field} value={field.value ?? ''} data-testid="phase-name-input" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="description" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="phase-description-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />

@@ -1,3 +1,5 @@
+vi.mock('@/lib/api/employees', () => ({ useEmployees: () => ({ data: { data: [] }, isPending: false }) }))
+vi.mock('@/lib/api/leave-policies', () => ({ useLeavePolicies: () => ({ data: { data: [] }, isPending: false }) }))
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
@@ -14,8 +16,8 @@ vi.mock('@/lib/api/leave-requests', () => ({
 describe('LeaveRequestForm', () => {
   it('renders form fields when open', async () => {
     const screen = await render(<LeaveRequestForm open={true} onClose={vi.fn()} />)
-    await expect.element(screen.getByLabelText(/Employee ID/i)).toBeInTheDocument()
-    await expect.element(screen.getByLabelText(/Policy ID/i)).toBeInTheDocument()
+    await expect.element(screen.getByLabelText(/Employee/i)).toBeInTheDocument()
+    await expect.element(screen.getByLabelText(/Policy/i)).toBeInTheDocument()
     await expect.element(screen.getByLabelText(/Date Start/i)).toBeInTheDocument()
     await expect.element(screen.getByLabelText(/Date End/i)).toBeInTheDocument()
   })

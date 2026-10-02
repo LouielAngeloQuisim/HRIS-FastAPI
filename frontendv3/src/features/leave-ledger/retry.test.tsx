@@ -1,3 +1,5 @@
+vi.mock('@/lib/api/leave-policies', () => ({ useLeavePolicies: () => ({ data: { data: [{ id: 'policy-1', code: 'VL', name: 'Vacation', is_active: true }] } }) }))
+vi.mock('@/lib/api/employees', () => ({ useEmployees: () => ({ data: { data: [{ id: 'emp-1', employee_code: 'EMP1', first_name: 'Test', last_name: 'Employee' }] }, isPending: false }) }))
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
@@ -37,6 +39,10 @@ describe('LeaveLedgerPage (retry)', () => {
     })
 
     const screen = await render(<LeaveLedgerPage />)
+    if (document.querySelector('#leave-ledger-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-ledger-employee')!, 'emp-1')
+      await userEvent.selectOptions(document.querySelector('#leave-ledger-policy')!, 'policy-1')
+    }
     await userEvent.click(screen.getByRole('button', { name: /try again/i }))
     expect(refetch).toHaveBeenCalled()
   })

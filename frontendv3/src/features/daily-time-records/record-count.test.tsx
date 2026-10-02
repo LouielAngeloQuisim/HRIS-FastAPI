@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render } from 'vitest-browser-react'
+import { renderWithClient as render } from '@/test-utils/providers'
 import DailyTimeRecordsPage from './index'
 
 const { refetch } = vi.hoisted(() => ({ refetch: vi.fn() }))
@@ -18,6 +18,8 @@ const { useDailyTimeRecordsMock, useApproveOvertimeMock, useRejectOvertimeMock }
   useRejectOvertimeMock: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }))
 vi.mock('@/lib/api/daily-time-records', () => ({
+  useDeleteDailyTimeRecord: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateDailyTimeRecord: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDailyTimeRecords: (...args: unknown[]) => useDailyTimeRecordsMock(...args),
   useApproveOvertime: () => useApproveOvertimeMock(),
   useRejectOvertime: () => useRejectOvertimeMock(),

@@ -23,10 +23,11 @@ describe('CSV import basic (§8.10)', () => {
   it('imports 2 valid rows with zero errors, posts each, and toasts success', async () => {
     apiPostMock.mockResolvedValue({ data: {} })
 
-    const { getByRole, getByText, getByPlaceholder } = await renderWithClient(
+    const { client, getByRole, getByText, getByPlaceholder } = await renderWithClient(
       <CsvImportWizard open={true} onOpenChange={() => {}} />
     )
 
+    const invalidation = vi.spyOn(client, 'invalidateQueries')
     // Paste CSV into the textarea (page-scoped, reaches the Dialog portal),
     // then trigger import.
     await userEvent.fill(getByPlaceholder(/employee_code/), CSV)
@@ -45,5 +46,6 @@ describe('CSV import basic (§8.10)', () => {
     expect(toastSuccessMock).toHaveBeenCalledWith('Successfully imported 2 employees')
     // No error toast.
     expect(toastErrorMock).not.toHaveBeenCalled()
+    expect(invalidation).toHaveBeenCalledWith({ queryKey: ['employees'] })
   })
 })

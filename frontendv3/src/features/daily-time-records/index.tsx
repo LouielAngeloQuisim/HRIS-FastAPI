@@ -1,6 +1,11 @@
+import { AttendanceCsvImportWizard } from '@/features/attendance/components/csv-import/attendance-csv-wizard'
+import { DailyTimeRecordForm } from './components/daily-time-record-form'
+import { ResourceDeleteDialog } from '@/components/resource-delete-dialog'
+import { saveErrorMessage } from '@/lib/api/save-error'
+import type { DailyTimeRecordPublic } from '@/lib/api/types'
 import { useState } from 'react'
 import { useCan } from '@/context/permissions-provider'
-import { useDailyTimeRecords, useApproveOvertime, useRejectOvertime } from '@/lib/api/daily-time-records'
+import { useDailyTimeRecords, useApproveOvertime, useRejectOvertime, useDeleteDailyTimeRecord } from '@/lib/api/daily-time-records'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 
@@ -9,6 +14,19 @@ export default function DailyTimeRecordsPage() {
   const pageSize = 50
   const canView = useCan('daily_time_record', 'view')
   const canEdit = useCan('daily_time_record', 'edit')
+  const canAdd = useCan('daily_time_record', 'add')
+  const canDelete = useCan('daily_time_record', 'delete')
+  const [importOpen, setImportOpen] = useState(false)
+  const [editing, setEditing] = useState<DailyTimeRecordPublic | null>(null)
+  const [deleting, setDeleting] = useState<DailyTimeRecordPublic | null>(null)
+  const [deleteError, setDeleteError] = useState<{ message: string } | null>(null)
+  const deleteMutation = useDeleteDailyTimeRecord()
+  const handleDelete = async () => {
+    if (!deleting) return
+    setDeleteError(null)
+    try { await deleteMutation.mutateAsync(deleting.id); setDeleting(null) }
+    catch (error) { setDeleteError({ message: saveErrorMessage(error) }) }
+  }
 
   const { data, isPending, isError, refetch } = useDailyTimeRecords(page, pageSize)
 
@@ -48,6 +66,7 @@ export default function DailyTimeRecordsPage() {
           <h1 className="text-2xl font-bold">Daily Time Records</h1>
           <p className="text-muted-foreground">{data?.count ?? 0} records</p>
         </div>
+        {canAdd && <Button onClick={() => setImportOpen(true)} data-testid="import-dtr-csv-button">Import CSV</Button>}
       </div>
       {isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
       {isError && (
@@ -70,7 +89,7 @@ export default function DailyTimeRecordsPage() {
                 <th className="p-2 text-right">OT (min)</th>
                 <th className="p-2 text-center">Absent</th>
                 <th className="p-2 text-left">Source</th>
-                {canEdit && <th className="p-2 text-right">Actions</th>}
+                {(canEdit || canDelete) && <th className="p-2 text-right">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -124,9 +143,10 @@ export default function DailyTimeRecordsPage() {
                     </td>
                     <td className="p-2 text-center">{item.is_absent ? 'Yes' : 'No'}</td>
                     <td className="p-2">{item.source ?? '—'}</td>
-                    {canEdit && (
+                    {(canEdit || canDelete) && (
                       <td className="p-2 text-right">
-                        <Button data-testid={`edit-daily-time-record-button-${item.id}`} variant="ghost" size="sm">Edit</Button>
+                        {canEdit && <Button data-testid={`edit-daily-time-record-button-${item.id}`} variant="ghost" size="sm" onClick={() => setEditing(item)}>Edit</Button>}
+                        {canDelete && <Button data-testid={`delete-daily-time-record-button-${item.id}`} variant="ghost" size="sm" onClick={() => { setDeleteError(null); setDeleting(item) }}>Delete</Button>}
                       </td>
                     )}
                   </tr>
@@ -136,6 +156,9 @@ export default function DailyTimeRecordsPage() {
           </table>
         </div>
       )}
+      {importOpen && <AttendanceCsvImportWizard open={importOpen} onOpenChange={setImportOpen} />}
+      {editing && <DailyTimeRecordForm key={editing.id} item={editing} open onClose={() => setEditing(null)} />}
+      <ResourceDeleteDialog open={Boolean(deleting)} onOpenChange={value => { if (!value) setDeleting(null) }} entityName="Daily Time Record" entityLabel={deleting?.login_date ?? ''} onConfirm={handleDelete} isPending={deleteMutation.isPending} conflictError={deleteError} />
     </div>
   )
 }

@@ -67,7 +67,7 @@ export default function EmployeeProjectsPage() {
                   <td className="p-2">{item.date ?? "—"}</td>
                   <td className="p-2">{item.rendered_hours ?? "—"}</td>
                   <td className="p-2">{item.task ?? "—"}</td>
-                  <td className="p-2">{item.is_assigned ?? "—"}</td>
+                  <td className="p-2">{item.is_assigned == null ? "Not set" : item.is_assigned ? "Yes" : "No"}</td>
                   <td className="p-2 text-right">
                      {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }} data-testid={`edit-employee-project-button-${item.id}`}>Edit</Button>}
                      {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive" data-testid={`delete-employee-project-button-${item.id}`}>Delete</Button>}

@@ -1,3 +1,4 @@
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -28,7 +29,7 @@ import type { LotsPublic, LotsCreate, LotsUpdate } from '@/lib/api/types'
 const formSchema = z.object({
   blocks_id: z.string().min(1, 'Select a parent record'),
   lot_number: z.string().optional(),
-  description: z.string().optional(),
+  lot_num: z.string().optional().refine(value => !value || Number.isInteger(Number(value)), 'Enter a whole lot number').transform(value => value ? Number(value) : null),
 })
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FormData = any
@@ -54,13 +55,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
     resolver: zodResolver(formSchema),
     defaultValues: {
       lot_number: item?.lot_name ?? '',
-      description: '',
+      lot_num: item?.lot_num == null ? '' : String(item.lot_num),
       blocks_id: item?.blocks_id ?? '',
     },
   })
 
   const onSubmit = async (data: FormData) => {
-    const payload = { lot_name: data.lot_number, blocks_id: data.blocks_id }
+    const payload = { lot_name: data.lot_number || null, lot_num: data.lot_num, blocks_id: data.blocks_id }
+    form.clearErrors('root.server')
     try {
       if (isEdit && item?.id) {
         await updateMutation.mutateAsync({ id: item.id, data: payload as unknown as LotsUpdate })
@@ -68,8 +70,8 @@ export function ResourceForm({ item, onClose, open }: Props) {
         await createMutation.mutateAsync(payload as unknown as LotsCreate)
       }
       onClose()
-    } catch (_e) {
-      // _e is caught error
+    } catch (error) {
+      form.setError('root.server', { message: saveErrorMessage(error) })
     }
   }
 
@@ -86,18 +88,19 @@ export function ResourceForm({ item, onClose, open }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form id="lots-form" onSubmit={form.handleSubmit(onSubmit)} className="flex-1 space-y-6 overflow-y-auto px-4">
+            {form.formState.errors.root?.server?.message && <p role="alert" className="text-destructive">{String(form.formState.errors.root.server.message)}</p>}
             <>
               <FormField control={form.control} name="lot_number" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Lot Number</FormLabel>
+                  <FormLabel>Lot Name</FormLabel>
                   <FormControl><Input {...field} value={field.value ?? ''} data-testid="lots-lot-number-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
-              <FormField control={form.control} name="description" render={({ field }) => (
+              <FormField control={form.control} name="lot_num" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Description</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="lots-description-input" /></FormControl>
+                  <FormLabel>Lot Number</FormLabel>
+                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="lots-numeric-number-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />

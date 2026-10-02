@@ -1,3 +1,4 @@
+import { useEmployees } from '@/lib/api/employees'
 import { useState } from 'react'
 import { useCan } from '@/context/permissions-provider'
 import { useLeaveCalendar } from '@/lib/api/leave-ledger'
@@ -7,7 +8,8 @@ export default function LeaveCalendarPage() {
   const today = new Date()
   const [fromDate, setFromDate] = useState(today.toISOString().split('T')[0])
   const [toDate, setToDate] = useState(today.toISOString().split('T')[0])
-  const [employeeId] = useState('00000000-0000-0000-0000-000000000000')
+  const [employeeId, setEmployeeId] = useState('')
+  const employees = useEmployees(1, 100)
   const canView = useCan('emp_leaves', 'view')
 
   const { data, isPending, isError, refetch } = useLeaveCalendar(employeeId, fromDate, toDate)
@@ -38,6 +40,7 @@ export default function LeaveCalendarPage() {
           <input
             type="date"
             className="border rounded px-2 py-1 text-sm"
+            aria-label="From Date"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
             data-testid="leave-calendar-from-date"
@@ -45,26 +48,35 @@ export default function LeaveCalendarPage() {
           <input
             type="date"
             className="border rounded px-2 py-1 text-sm"
+            aria-label="To Date"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
             data-testid="leave-calendar-to-date"
           />
-          <Button onClick={() => refetch()} data-testid="leave-calendar-apply-button">Apply</Button>
+          <Button disabled={!employeeId || fromDate > toDate} onClick={() => refetch()} data-testid="leave-calendar-apply-button">Apply</Button>
         </div>
       </div>
-      {isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
-      {isError && (
+      <div className="flex flex-wrap items-center gap-3">
+        <label htmlFor="leave-calendar-employee">Employee</label>
+        <select id="leave-calendar-employee" data-testid="leave-calendar-employee-select" className="rounded border bg-background p-2" value={employeeId} onChange={event => setEmployeeId(event.target.value)}>
+          <option value="">Select an employee</option>
+          {(employees.data?.data ?? []).map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} - {employee.first_name} {employee.last_name}</option>)}
+        </select>
+      </div>
+      {!employeeId && <p>Select an employee to view leave events.</p>}
+      {employeeId && isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {employeeId && isError && (
         <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-12 text-center">
           <p className="text-sm text-muted-foreground">Failed to load leave calendar.</p>
           <button type="button" onClick={() => refetch()} className="text-sm font-medium text-primary underline underline-offset-4">Try again</button>
         </div>
       )}
-      {data && data.length === 0 && (
+      {employeeId && data && data.length === 0 && (
         <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-12 text-center">
           <p className="text-sm text-muted-foreground">No leave events found for the selected range.</p>
         </div>
       )}
-      {data && data.length > 0 && (
+      {employeeId && data && data.length > 0 && (
         <div className="border rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

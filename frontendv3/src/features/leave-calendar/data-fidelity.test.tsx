@@ -1,3 +1,5 @@
+import { userEvent } from 'vitest/browser'
+vi.mock('@/lib/api/employees', () => ({ useEmployees: () => ({ data: { data: [{ id: 'emp-1', employee_code: 'EMP1', first_name: 'Test', last_name: 'Employee' }] }, isPending: false }) }))
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import LeaveCalendarPage from './index'
@@ -39,6 +41,9 @@ describe('LeaveCalendarPage (data fidelity)', () => {
     })
 
     const screen = await render(<LeaveCalendarPage />)
+    if (document.querySelector('#leave-calendar-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-calendar-employee')!, 'emp-1')
+    }
     await expect.element(screen.getByText('New Year')).toBeVisible()
     await expect.element(screen.getByText('Leave', { exact: true })).toBeVisible()
     await expect.element(screen.getByText('Leave 2')).toBeVisible()

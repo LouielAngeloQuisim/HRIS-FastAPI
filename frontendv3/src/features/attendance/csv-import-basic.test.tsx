@@ -23,10 +23,11 @@ describe('Attendance CSV import basic (§8.10)', () => {
   it('imports 2 valid rows with zero errors, posts each, and toasts success', async () => {
     apiPostMock.mockResolvedValue({ data: {} })
 
-    const { getByRole, getByText, getByPlaceholder } = await renderWithClient(
+    const { client, getByRole, getByText, getByPlaceholder } = await renderWithClient(
       <AttendanceCsvImportWizard open={true} onOpenChange={() => {}} />
     )
 
+    const invalidation = vi.spyOn(client, 'invalidateQueries')
     await userEvent.fill(getByPlaceholder(/employee_code/), CSV)
     await userEvent.click(getByRole('button', { name: /^Import 2 Records$/i }))
 
@@ -40,5 +41,6 @@ describe('Attendance CSV import basic (§8.10)', () => {
     await expect.element(getByText(/2 succeeded/)).toBeInTheDocument()
     expect(toastSuccessMock).toHaveBeenCalledWith('Successfully imported 2 time records')
     expect(toastErrorMock).not.toHaveBeenCalled()
+    expect(invalidation).toHaveBeenCalledWith({ queryKey: ['daily-time-records'] })
   })
 })

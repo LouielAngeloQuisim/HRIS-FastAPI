@@ -21,8 +21,8 @@ export class LeaveRequestsPage {
     this.newButton = page.locator('[data-testid="new-leave-request-button"]')
     this.statusFilter = page.locator('[data-testid="leave-request-status-filter"]')
     this.retryButton = page.locator('[data-testid="retry-button"]')
-    this.employeeIdInput = page.locator('[data-testid="leave-request-employee-id-input"]')
-    this.policyIdInput = page.locator('[data-testid="leave-request-policy-id-input"]')
+    this.employeeIdInput = page.locator('[data-testid="leave-request-employee-select"]')
+    this.policyIdInput = page.locator('[data-testid="leave-request-policy-select"]')
     this.dateStartInput = page.locator('[data-testid="leave-request-date-start-input"]')
     this.dateEndInput = page.locator('[data-testid="leave-request-date-end-input"]')
     this.reasonInput = page.locator('[data-testid="leave-request-reason-input"]')
@@ -39,11 +39,13 @@ export class LeaveRequestsPage {
   }
 
   async fillEmployeeId(id: string) {
-    await this.employeeIdInput.fill(id)
+    await this.employeeIdInput.click()
+    await this.page.getByRole('option', { name: id, exact: true }).click()
   }
 
   async fillPolicyId(id: string) {
-    await this.policyIdInput.fill(id)
+    await this.policyIdInput.click()
+    await this.page.getByRole('option', { name: id, exact: true }).click()
   }
 
   async fillDateStart(date: string) {

@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useState } from 'react'
 // @ts-expect-error - papaparse has no type declarations
 import Papa from 'papaparse'
@@ -31,6 +32,7 @@ interface RowResult {
 const DTR_REQUIRED_FIELDS = ['employee_code', 'login_date', 'logout_date']
 
 export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const queryClient = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
   const [csvText, setCsvText] = useState('')
   const [parsedRows, setParsedRows] = useState<CsvRow[]>([])
@@ -141,6 +143,9 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
       setProgress(Math.round(((i + 1) / total) * 100))
     }
 
+    if (newResults.some(row => row.status === 'success')) {
+      await queryClient.invalidateQueries({ queryKey: ['daily-time-records'] })
+    }
     setResults(newResults)
     setIsImporting(false)
 
@@ -152,7 +157,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     } else {
       toast.error(`Imported ${successCount} time records, ${errorCount} failed`)
     }
-  }, [parsedRows, validateRow])
+  }, [parsedRows, validateRow, queryClient])
 
   const handleClose = useCallback(() => {
     if (isImporting) return

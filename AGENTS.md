@@ -92,14 +92,14 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 - **Phase 2A/2B — Attendance module** (`backend/app/attendance/`): full CRUD for `Shift` + `DailyTimeRecord`, plus `DTRAdjustment`. Routers under `/shifts`, `/daily-time-records`, `/dtr-adjustments`. Row-level filter on DTR list: non-superusers see only their own records; users with no linked EmployeeRecords see `[]`.
 - **Phase B3 — Leave & Holidays module** (`backend/app/leave/`): full CRUD for `LeavePolicy`, `EmployeeLeaveEnrollment`, `LeaveRequest`, `LeaveLedgerEntry`, `HolidayConfig`, `HolidayInstance`. 84 tests in `backend/tests/leave/`.
 - **Additional backend modules on `origin/main`** (phase trackers lag the code — treat the modules, not `docs/roadmap/*.json`, as truth): `payroll` (routers under `/payroll/*` incl. `runs/generate` gated by `payroll:add`), `notification`, `audit`, `reports`, `dashboard`. Full generated inventory: `docs/MAP.md` (226 endpoints in 39 groups across 12 domain packages).
-- **23 Alembic migrations** (`backend/alembic/versions/`, verified 2026-09-24 via `ls backend/alembic/versions/*.py | wc -l`).
+- **23 Alembic migrations** (`backend/alembic/versions/`, verified 2026-10-02 via `ls backend/alembic/versions/*.py | wc -l`).
 - All 16 HRIS domain resource routers are implemented in the `employee` module and served via the `routers` list in `app/employee/routes.py`: **employees, divisions, departments, subdivisions, positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks** — plus `/dashboard`, `/rbac`, `/items`, `/users`, `/auth`, `/shifts`, `/daily-time-records`, `/dtr-adjustments`, `/leave/*`, notifications, audit, reports, payroll, and local-only `/private`.
 
-### Frontend - 88 test files / 280 tests green (verified 2026-10-02)
-- Full Vitest run: **88 test files / 280 tests passing** (2026-10-02).
+### Frontend - 92 test files / 291 tests green (verified 2026-10-02)
+- Full Vitest run: **92 test files / 291 tests passing** (2026-10-02).
 - CRUD-complete feature pages with tests: divisions, departments, subdivisions (create wizard with failure-resume), positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks, shifts, roles (admin + permission matrix), dashboard, employees (**read-only list + profile + CSV import**).
 - §8.1–§8.13 coverage: permission gating, 409 delete-error flows, CSV import success/retry, subdivision wizard state + resume.
-- **Playwright E2E infrastructure:** `e2e/fixtures/`, `e2e/helpers/`, `e2e/pages/`, 24 page objects covering every domain; 25 specs across `e2e/organization/`, `e2e/projects/`, `e2e/hris/`, `e2e/system/`, `e2e/attendance/` (verified 2026-09-24 via `ls frontendv3/e2e/pages/*.ts | wc -l` = 24 and `find frontendv3/e2e -name "*.spec.ts" | wc -l` = 25) with stable `data-testid` selectors on buttons, dialogs, and form fields.
+- **Playwright E2E infrastructure:** `e2e/fixtures/`, `e2e/helpers/`, `e2e/pages/`, 24 page objects covering every domain; 27 specs across `e2e/organization/`, `e2e/projects/`, `e2e/hris/`, `e2e/system/`, `e2e/attendance/` (verified 2026-10-02 via `ls frontendv3/e2e/pages/*.ts | wc -l` = 24 and `find frontendv3/e2e -name "*.spec.ts" | wc -l` = 27) with stable `data-testid` selectors on buttons, dialogs, and form fields.
 
 ## 3. Known Gaps
 
@@ -146,8 +146,8 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 - **Vitest browser mode** (`vitest run --browser.headless`, Playwright-backed). On this host, run once: `frontendv3/scripts/setup-playwright-libs.sh`, then export `LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"` before running tests.
 - Commands (from `frontendv3/`): full suite `npx vitest run --browser.headless`; single file `npx vitest run --browser.headless <path>`; lint `npx eslint .`; format `npx prettier --write .`; typecheck `npx tsc --noEmit`.
 - Test conventions: `renderWithClient` from `@/test-utils/providers`, `userEvent` from `vitest/browser`, hoisted `vi.mock` blocks (per-action `useCan` policy mock, `use*` hook mocks, axios `api.delete` mocks, sonner toast spies).
-- Baseline (verified 2026-10-02): **707 backend tests, 88 frontend files / 280 Vitest tests, 23 migrations with no drift, tsc 0 errors, mypy 0 errors (98 source files), ruff clean, ESLint 0 errors / 2 warnings**. ESLint warnings remain report-only.
-- Playwright E2E: **40 passing browser tests across 25 specs**, verified on a fresh disposable database without retries. The dedicated e2e workflow runs on PRs and main. See docs/plans/e2e-ci-completion.md for isolation guards and coverage limits. Never point the CI suite at production.
+- Baseline (verified 2026-10-02): **707 backend tests, 92 frontend files / 291 Vitest tests, 23 migrations with no drift, tsc 0 errors, mypy 0 errors (98 source files), ruff clean, ESLint 0 errors / 2 warnings**. ESLint warnings remain report-only.
+- Playwright E2E: **44 passing browser tests across 27 specs**, verified on a disposable database without retries. The dedicated e2e workflow runs on PRs and main. See docs/plans/e2e-ci-completion.md for isolation guards and coverage limits. Never point the CI suite at production.
 
 
 ## 7. Lessons Learned (verified, no current regressions)

@@ -1,3 +1,4 @@
+vi.mock('@/lib/api/employees', () => ({ useEmployees: () => ({ data: { data: [{ id: 'emp-1', employee_code: 'EMP1', first_name: 'Test', last_name: 'Employee' }] }, isPending: false }) }))
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
@@ -36,6 +37,9 @@ describe('LeaveCalendarPage', () => {
     })
 
     const screen = await render(<LeaveCalendarPage />)
+    if (document.querySelector('#leave-calendar-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-calendar-employee')!, 'emp-1')
+    }
     await expect.element(screen.getByText('Leave Calendar')).toBeVisible()
   })
 
@@ -48,6 +52,9 @@ describe('LeaveCalendarPage', () => {
     })
 
     const screen = await render(<LeaveCalendarPage />)
+    if (document.querySelector('#leave-calendar-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-calendar-employee')!, 'emp-1')
+    }
     await expect.element(screen.getByText('Failed to load leave calendar.')).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: /try again/i }))
     expect(refetch).toHaveBeenCalled()
@@ -62,6 +69,9 @@ describe('LeaveCalendarPage', () => {
     })
 
     const screen = await render(<LeaveCalendarPage />)
+    if (document.querySelector('#leave-calendar-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-calendar-employee')!, 'emp-1')
+    }
     await expect.element(screen.getByText('Loading...')).toBeVisible()
   })
 
@@ -74,6 +84,9 @@ describe('LeaveCalendarPage', () => {
     })
 
     const screen = await render(<LeaveCalendarPage />)
+    if (document.querySelector('#leave-calendar-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-calendar-employee')!, 'emp-1')
+    }
     await expect.element(screen.getByText('No leave events found for the selected range.')).toBeVisible()
   })
 
@@ -105,6 +118,9 @@ describe('LeaveCalendarPage', () => {
     })
 
     const screen = await render(<LeaveCalendarPage />)
+    if (document.querySelector('#leave-calendar-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-calendar-employee')!, 'emp-1')
+    }
     await expect.element(screen.getByText('New Year')).toBeVisible()
     await expect.element(screen.getByText('Annual Leave')).toBeVisible()
   })

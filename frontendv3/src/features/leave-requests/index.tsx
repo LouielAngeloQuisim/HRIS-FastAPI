@@ -145,7 +145,7 @@ export default function LeaveRequestsPage() {
           </table>
         </div>
       )}
-      <LeaveRequestForm open={open} onClose={() => setOpen(false)} />
+      {open && <LeaveRequestForm open={open} onClose={() => setOpen(false)} />}
     </div>
   )
 }

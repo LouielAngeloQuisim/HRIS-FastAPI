@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-02
-Source commit: 31f4c63df4f2562666faa2d7b63a6a80e9de0ddd
+Source commit: c16116508cf7f9e985a2d413e07e7168d389abcf
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
@@ -386,33 +386,33 @@ reliable in the source tree's single-line import style) with plumbing
 - `apps`: api `none`; flags: route
 - `attendance`: api `none`; flags: test
 - `auth`: api `auth`; flags: form, test
-- `blocks`: api `blocks`, `phases`; flags: route, form, test
-- `categories`: api `categories`; flags: route, form
+- `blocks`: api `blocks`, `phases`, `save-error`; flags: route, form, test
+- `categories`: api `blocks`, `categories`, `lots`, `models`, `owners`, `phases`, `projects`, `save-error`; flags: route, form, test
 - `chats`: api `none`; flags: route
-- `daily-time-records`: api `daily-time-records`; flags: route, test
+- `daily-time-records`: api `daily-time-records`, `save-error`; flags: route, form, test
 - `dashboard`: api `none`; flags: test
 - `departments`: api `departments`, `divisions`; flags: route, form, test
 - `divisions`: api `divisions`; flags: route, form, test
-- `dtr-adjustments`: api `dtr-adjustments`; flags: route, form, test
-- `emp-tasks`: api `emp-tasks`, `employee-projects`; flags: route, form, test
-- `employee-projects`: api `employee-projects`, `employees`, `projects`; flags: route, form, test
+- `dtr-adjustments`: api `daily-time-records`, `dtr-adjustments`, `save-error`; flags: route, form, test
+- `emp-tasks`: api `emp-tasks`, `employee-projects`, `save-error`; flags: route, form, test
+- `employee-projects`: api `employee-projects`, `employees`, `projects`, `save-error`; flags: route, form, test
 - `employees`: api `employees`; flags: route, test
 - `holidays`: api `holidays`; flags: route, form, test
-- `leave-calendar`: api `leave-ledger`; flags: route, test
-- `leave-ledger`: api `leave-ledger`; flags: route, test
-- `leave-requests`: api `leave-requests`; flags: route, form, test
-- `lots`: api `blocks`, `lots`; flags: route, form, test
+- `leave-calendar`: api `employees`, `leave-ledger`; flags: route, test
+- `leave-ledger`: api `employees`, `leave-ledger`, `leave-policies`; flags: route, test
+- `leave-requests`: api `employees`, `leave-policies`, `leave-requests`, `save-error`; flags: route, form, test
+- `lots`: api `blocks`, `lots`, `save-error`; flags: route, form, test
 - `model-types`: api `model-types`; flags: route, form
-- `models`: api `model-types`, `models`; flags: route, form
+- `models`: api `model-types`, `models`, `save-error`; flags: route, form, test
 - `owners`: api `owners`; flags: route, form, test
-- `phases`: api `phases`, `subdivisions`; flags: route, form, test
+- `phases`: api `phases`, `save-error`, `subdivisions`; flags: route, form, test
 - `positions`: api `departments`, `positions`; flags: route, form, test
 - `project-types`: api `project-types`; flags: route, form
 - `projects`: api `project-types`, `projects`, `subdivisions`; flags: route, form, test
 - `roles`: api `roles`; flags: route, form, test
 - `settings`: api `none`; flags: route, form
 - `shifts`: api `shifts`; flags: route, form
-- `subdivisions`: api `blocks`, `categories`, `lots`, `phases`, `projects`, `subdivisions`; flags: route, form, test
+- `subdivisions`: api `blocks`, `categories`, `lots`, `phases`, `project-types`, `projects`, `save-error`, `subdivisions`; flags: route, form, test
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 

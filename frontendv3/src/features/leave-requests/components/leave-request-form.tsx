@@ -1,3 +1,7 @@
+import { useEmployees } from '@/lib/api/employees'
+import { useLeavePolicies } from '@/lib/api/leave-policies'
+import { SelectDropdown } from '@/components/select-dropdown'
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -29,10 +33,10 @@ const formSchema = z.object({
   policy_id: z.string().min(1, 'Policy ID is required'),
   date_start: z.string().min(1, 'Start date is required'),
   date_end: z.string().min(1, 'End date is required'),
-  requested_hours: z.number().optional(),
+  requested_hours: z.number().positive('Requested hours must be positive').optional(),
   reason: z.string().optional(),
   document_ref: z.string().optional(),
-})
+}).refine(data => data.date_start <= data.date_end, { path: ['date_end'], message: 'End date must be on or after start date' })
 
 type FormData = z.infer<typeof formSchema>
 
@@ -43,6 +47,8 @@ interface Props {
 
 export function LeaveRequestForm({ onClose, open }: Props) {
   const createMutation = useSubmitLeaveRequest()
+  const employees = useEmployees(1, 100)
+  const policies = useLeavePolicies()
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -58,12 +64,11 @@ export function LeaveRequestForm({ onClose, open }: Props) {
   })
 
   const onSubmit = async (data: FormData) => {
+    form.clearErrors('root.server')
     try {
       await createMutation.mutateAsync(data as unknown as LeaveRequestCreate)
       onClose()
-    } catch (_e) {
-      // _e is caught error
-    }
+    } catch (error) { form.setError('root.server', { message: saveErrorMessage(error) }) }
   }
 
   const loading = createMutation.isPending
@@ -79,17 +84,18 @@ export function LeaveRequestForm({ onClose, open }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form id='leave-request-form' onSubmit={form.handleSubmit(onSubmit)} className='flex-1 space-y-6 overflow-y-auto px-4'>
+            {form.formState.errors.root?.server?.message && <p role="alert">{form.formState.errors.root.server.message}</p>}
               <FormField control={form.control} name='employee_id' render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Employee ID</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="leave-request-employee-id-input" /></FormControl>
+                  <FormLabel>Employee</FormLabel>
+                  <SelectDropdown defaultValue={field.value} onValueChange={field.onChange} placeholder="Select employee" items={(employees.data?.data ?? []).map(employee => ({ value: employee.id, label: employee.employee_code + ' - ' + employee.first_name + ' ' + employee.last_name }))} isPending={employees.isPending} data-testid="leave-request-employee-select" />
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name='policy_id' render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Policy ID</FormLabel>
-                  <FormControl><Input {...field} value={field.value ?? ''} data-testid="leave-request-policy-id-input" /></FormControl>
+                  <FormLabel>Policy</FormLabel>
+                  <SelectDropdown defaultValue={field.value} onValueChange={field.onChange} placeholder="Select policy" items={(policies.data?.data ?? []).filter(policy => policy.is_active).map(policy => ({ value: policy.id, label: policy.code + ' - ' + policy.name }))} isPending={policies.isPending} data-testid="leave-request-policy-select" />
                   <FormMessage />
                 </FormItem>
               )} />

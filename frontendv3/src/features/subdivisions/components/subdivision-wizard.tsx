@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { Button } from '@/components/ui/button'
@@ -18,25 +18,27 @@ import { usePhases } from '@/lib/api/phases'
 import { useBlocks } from '@/lib/api/blocks'
 import { useLots } from '@/lib/api/lots'
 import { useCreateCategory } from '@/lib/api/categories'
-import type { CategoryCreate, ProjectCreate } from '@/lib/api/types'
+import { useProjectTypes } from '@/lib/api/project-types'
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useCreateProject } from '@/lib/api/projects'
 import { useCan } from '@/context/permissions-provider'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Check } from 'lucide-react'
 
 const categorySchema = z.object({
-  name: z.string().min(1, 'Category name is required'),
+  name: z.string().min(1, 'Category code is required').max(32),
   description: z.string().optional().nullable(),
 })
 
 const projectSchema = z.object({
+  code: z.string().min(1, 'Project code is required').max(32),
   name: z.string().min(1, 'Project name is required'),
   description: z.string().optional().nullable(),
-  project_type_id: z.string().min(1, 'Project type is required'),
+  project_type_id: z.string().optional(),
   phase_id: z.string().min(1, 'Phase is required'),
 
-  block_id: z.string().min(1, 'Block is required'),
-  lot_id: z.string().min(1, 'Lot is required'),
+  block_id: z.string().optional(),
+  lot_id: z.string().optional(),
 })
 
 type CategoryForm = z.infer<typeof categorySchema>
@@ -47,16 +49,19 @@ type WizardStep = 'subdivision' | 'category' | 'project'
 export function SubdivisionWizard() {
   const [step, setStep] = useState<WizardStep>('subdivision')
   const [subdivisionId, setSubdivisionId] = useState('')
-  const [createdCategory, setCreatedCategory] = useState<{ id: string; code: string } | null>(null)
+  const [createdProject, setCreatedProject] = useState<{ id: string; name: string } | null>(null)
   const [projectError, setProjectError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const canView = useCan('subdivision', 'view')
+  const canCreateProject = useCan('project', 'add')
+  const canCreateCategory = useCan('category', 'add')
 
   const { data: subdivisionsData } = useSubdivisions(1, 100)
   const { data: phasesData } = usePhases(1, 100)
   const { data: blocksData } = useBlocks(1, 100)
   const { data: lotsData } = useLots(1, 100)
+  const projectTypes = useProjectTypes(1, 100)
   const createCategory = useCreateCategory()
   const createProject = useCreateProject()
 
@@ -68,6 +73,7 @@ export function SubdivisionWizard() {
   const projectForm = useForm<ProjectForm>({
     resolver: zodResolver(projectSchema),
     defaultValues: {
+      code: '',
       name: '',
       description: '',
       project_type_id: '',
@@ -78,14 +84,16 @@ export function SubdivisionWizard() {
   })
 
   const subdivisions = subdivisionsData?.data ?? []
-  const phases = phasesData?.data ?? []
+  const phases = (phasesData?.data ?? []).filter(phase => phase.subdivision_id === subdivisionId)
   const blocks = blocksData?.data ?? []
   const lots = lotsData?.data ?? []
 
-  // Filter blocks by selected phase
-  const filteredBlocks = blocks.filter(b => b.phase_id === projectForm.watch('phase_id'))
-  // Filter lots by selected block
-  const filteredLots = lots.filter(l => l.blocks_id === projectForm.watch('block_id'))
+  const selectedProjectType = useWatch({ control: projectForm.control, name: 'project_type_id' })
+  const selectedLot = useWatch({ control: projectForm.control, name: 'lot_id' })
+  const selectedPhase = useWatch({ control: projectForm.control, name: 'phase_id' })
+  const selectedBlock = useWatch({ control: projectForm.control, name: 'block_id' })
+  const filteredBlocks = blocks.filter(b => b.phase_id === selectedPhase)
+  const filteredLots = lots.filter(l => l.blocks_id === selectedBlock)
 
   const handleSubdivisionNext = () => {
     if (!subdivisionId) {
@@ -96,64 +104,42 @@ export function SubdivisionWizard() {
   }
 
   const handleCategoryNext = async () => {
-    const valid = await categoryForm.trigger()
-    if (!valid) return
-
-    setIsSubmitting(true)
-    try {
-      const categoryData = categoryForm.getValues()
-      const created = await createCategory.mutateAsync({
-        code: categoryData.name,
-        description: categoryData.description ?? null,
-      } as unknown as CategoryCreate)
-      const createdId = (created as { id?: string; code?: string })?.id ?? null
-      const createdCode = (created as { id?: string; code?: string })?.code ?? categoryData.name
-      setCreatedCategory(createdId ? { id: createdId, code: createdCode } : null)
-      toast.success('Category created successfully')
-      setProjectError(null)
-      setStep('project')
-    } catch {
-      toast.error('Failed to create category')
-    } finally {
-      setIsSubmitting(false)
-    }
+    if (await categoryForm.trigger()) { setProjectError(null); setStep('project') }
   }
 
   const handleProjectSubmit = async () => {
-    const valid = await projectForm.trigger()
-    if (!valid) return
-
+    if (!await projectForm.trigger()) return
     setIsSubmitting(true)
+    setProjectError(null)
     try {
-      const projectData = projectForm.getValues()
-      await createProject.mutateAsync({
-        name: projectData.name,
-        description: projectData.description ?? null,
-        project_type_id: projectData.project_type_id,
-        subdivision_id: subdivisionId,
-      } as unknown as ProjectCreate)
-      toast.success('Project created successfully')
-      // Reset wizard
+      const data = projectForm.getValues()
+      let project = createdProject
+      if (!project) {
+        project = await createProject.mutateAsync({
+          code: data.code, name: data.name, description: data.description ?? null,
+          project_type_id: data.project_type_id || null, subdivision_id: subdivisionId,
+        })
+        if (!project?.id) throw new Error('Project response did not contain its ID')
+        setCreatedProject(project)
+      }
+      const category = categoryForm.getValues()
+      await createCategory.mutateAsync({
+        code: category.name, description: category.description ?? null,
+        project_id: project.id, phase_id: data.phase_id,
+        blocks_id: data.block_id || null, lot_id: data.lot_id || null,
+      })
+      toast.success('Project and category created successfully')
       setStep('subdivision')
       setSubdivisionId('')
-      setCreatedCategory(null)
-      setProjectError(null)
+      setCreatedProject(null)
       categoryForm.reset()
       projectForm.reset()
-    } catch (err) {
-      const resp = (err as { response?: { data?: { error?: { message?: string }; detail?: string | string[] } } })?.response?.data
-      const msg =
-        resp?.error?.message ??
-        (Array.isArray(resp?.detail) ? resp?.detail[0] : resp?.detail) ??
-        'Failed to create project'
-      setProjectError(msg)
-      toast.error('Failed to create project')
-    } finally {
-      setIsSubmitting(false)
-    }
+    } catch (error) {
+      setProjectError(saveErrorMessage(error))
+    } finally { setIsSubmitting(false) }
   }
 
-  if (!canView) {
+  if (!canView || !canCreateProject || !canCreateCategory) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">You do not have permission to access the subdivision wizard.</p>
@@ -171,7 +157,7 @@ export function SubdivisionWizard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Subdivision Wizard</h1>
-        <p className="text-muted-foreground">Create a new project by selecting subdivision, adding category, and configuring project details.</p>
+        <p className="text-muted-foreground">Choose a subdivision, enter the category, then create its project. Nothing is saved until the final step.</p>
       </div>
 
       {/* Step indicator */}
@@ -204,7 +190,7 @@ export function SubdivisionWizard() {
           <div className="space-y-2">
             <Label>Select Subdivision</Label>
             <Select value={subdivisionId} onValueChange={setSubdivisionId}>
-              <SelectTrigger>
+              <SelectTrigger data-testid="wizard-subdivision-select">
                 <SelectValue placeholder="Select a subdivision" />
               </SelectTrigger>
               <SelectContent>
@@ -230,8 +216,8 @@ export function SubdivisionWizard() {
           <h3 className="text-lg font-medium">Category Details</h3>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Category Name</Label>
-              <Input {...categoryForm.register('name')} placeholder="Enter category name" />
+              <Label htmlFor="wizard-category-code">Category Code</Label>
+              <Input id="wizard-category-code" data-testid="wizard-category-code-input" {...categoryForm.register('name')} placeholder="Enter category name" />
               {categoryForm.formState.errors.name && (
                 <p className="text-sm text-destructive">{categoryForm.formState.errors.name.message}</p>
               )}
@@ -246,11 +232,11 @@ export function SubdivisionWizard() {
             </div>
           </div>
           <div className="flex justify-between">
-            <Button variant="outline" onClick={() => setStep('subdivision')}>
+            <Button variant="outline" onClick={() => setStep('subdivision')} disabled={Boolean(createdProject)}>
               <ChevronLeft className="mr-2 h-4 w-4" /> Back
             </Button>
             <Button onClick={handleCategoryNext} disabled={isSubmitting}>
-              {isSubmitting ? 'Creating...' : 'Create Category & Next'}
+              {isSubmitting ? 'Creating...' : 'Next'}
             </Button>
           </div>
         </div>
@@ -262,8 +248,13 @@ export function SubdivisionWizard() {
           <h3 className="text-lg font-medium">Project Details</h3>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2">
+              <Label htmlFor="wizard-project-code">Project Code</Label>
+              <Input id="wizard-project-code" data-testid="wizard-project-code-input" {...projectForm.register('code')} placeholder="Enter project code" disabled={Boolean(createdProject)} />
+              {projectForm.formState.errors.code && <p className="text-sm text-destructive">{projectForm.formState.errors.code.message}</p>}
+            </div>
+            <div className="space-y-2">
               <Label>Project Name</Label>
-              <Input {...projectForm.register('name')} placeholder="Enter project name" />
+              <Input data-testid="wizard-project-name-input" {...projectForm.register('name')} placeholder="Enter project name" disabled={Boolean(createdProject)} />
               {projectForm.formState.errors.name && (
                 <p className="text-sm text-destructive">{projectForm.formState.errors.name.message}</p>
               )}
@@ -272,6 +263,7 @@ export function SubdivisionWizard() {
               <Label>Description</Label>
               <Textarea
                 {...projectForm.register('description')}
+                disabled={Boolean(createdProject)}
                 placeholder="Enter project description"
                 rows={3}
               />
@@ -279,30 +271,30 @@ export function SubdivisionWizard() {
             <div className="space-y-2">
               <Label>Project Type</Label>
               <Select
-                value={projectForm.watch('project_type_id')}
-                onValueChange={(value) => projectForm.setValue('project_type_id', value)}
+                disabled={Boolean(createdProject)}
+                value={selectedProjectType}
+                onValueChange={(value) => projectForm.setValue('project_type_id', value === '__none__' ? '' : value)}
               >
-                <SelectTrigger>
+                <SelectTrigger data-testid="wizard-project-type-select">
                   <SelectValue placeholder="Select project type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="pt-1">Residential</SelectItem>
-                  <SelectItem value="pt-2">Commercial</SelectItem>
-                  <SelectItem value="pt-3">Industrial</SelectItem>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {(projectTypes.data?.data ?? []).map(type => <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label>Phase</Label>
               <Select
-                value={projectForm.watch('phase_id')}
+                value={selectedPhase}
                 onValueChange={(value) => {
                   projectForm.setValue('phase_id', value)
                   projectForm.setValue('block_id', '')
                   projectForm.setValue('lot_id', '')
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger data-testid="wizard-phase-select">
                   <SelectValue placeholder="Select phase" />
                 </SelectTrigger>
                 <SelectContent>
@@ -317,14 +309,14 @@ export function SubdivisionWizard() {
             <div className="space-y-2">
               <Label>Block</Label>
               <Select
-                value={projectForm.watch('block_id')}
+                value={selectedBlock}
                 onValueChange={(value) => {
                   projectForm.setValue('block_id', value)
                   projectForm.setValue('lot_id', '')
                 }}
-                disabled={!projectForm.watch('phase_id')}
+                disabled={!selectedPhase}
               >
-                <SelectTrigger>
+                <SelectTrigger data-testid="wizard-block-select">
                   <SelectValue placeholder="Select block" />
                 </SelectTrigger>
                 <SelectContent>
@@ -339,11 +331,11 @@ export function SubdivisionWizard() {
             <div className="space-y-2">
               <Label>Lot</Label>
               <Select
-                value={projectForm.watch('lot_id')}
+                value={selectedLot}
                 onValueChange={(value) => projectForm.setValue('lot_id', value)}
-                disabled={!projectForm.watch('block_id')}
+                disabled={!selectedBlock}
               >
-                <SelectTrigger>
+                <SelectTrigger data-testid="wizard-lot-select">
                   <SelectValue placeholder="Select lot" />
                 </SelectTrigger>
                 <SelectContent>
@@ -356,24 +348,19 @@ export function SubdivisionWizard() {
               </Select>
             </div>
           </div>
-          {createdCategory && projectError && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-4 space-y-2">
-              <p className="text-sm font-medium">Partial success — category step complete</p>
-              <p className="text-sm">
-                Category created: <span className="font-medium">{createdCategory.code}</span>
-              </p>
-              <p className="text-sm text-destructive">Project failed: {projectError}</p>
-              <Button variant="outline" onClick={handleProjectSubmit} disabled={isSubmitting}>
-                {isSubmitting ? 'Retrying...' : 'Retry Project'}
-              </Button>
+          {projectError && (
+            <div role="alert" className="rounded-md border p-4 space-y-2">
+              {createdProject && <p>Project created: {createdProject.name}. Category still needs to be saved.</p>}
+              <p className="text-destructive">{projectError}</p>
+              {createdProject && <Button variant="outline" onClick={handleProjectSubmit} disabled={isSubmitting}>Retry Category</Button>}
             </div>
           )}
           <div className="flex justify-between">
-            <Button variant="outline" onClick={() => setStep('category')}>
+            <Button variant="outline" onClick={() => setStep('category')} disabled={isSubmitting}>
               <ChevronLeft className="mr-2 h-4 w-4" /> Back
             </Button>
             <Button onClick={handleProjectSubmit} disabled={isSubmitting}>
-              {isSubmitting ? 'Creating...' : 'Create Project'}
+              {isSubmitting ? 'Creating...' : 'Create Project & Category'}
             </Button>
           </div>
         </div>

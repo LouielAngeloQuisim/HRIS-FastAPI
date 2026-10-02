@@ -1,94 +1,58 @@
 # Status (hand-maintained snapshot)
 
-Last updated: 2026-09-30 (post-#56/#57 reconciliation of merge-status wording; PRs #56 `62f1372` Batch B1 and #57 `a4f33d3` Batch B2 are merged, roadmap #85/#88/#90/#92/#93 DONE). The measurement baseline below remains `origin/main` at commit `f8b890d` (includes merged PRs #53 MAP-generator correctness, #54 docs reconciliation, #55 template-residue cleanup): PRs #56/#57 touched docs/CI only, no backend/frontend test or source changes (`git diff --stat f8b890d..a4f33d3 -- backend/tests` is empty), so the counts measured on 2026-09-29 via `scripts/verify.sh` (RESULT: PASS, exit 0) still describe main.
+Last updated: 2026-10-02. Baseline: the full E2E completion change, PR #70,
+verified locally with scripts/verify.sh and a separate fresh-database browser run.
+This file is hand-maintained; docs/MAP.md is generated. Refresh observed counts
+after changes rather than preserving dated baseline claims.
 
-Maintenance model: this file is **hand-maintained**, not generated — no STATUS
-generator exists in the repository (the old header claiming "generated, do not
-hand-edit" was false; see roadmap #29/#30). Update it by running the listed
-commands and recording the observed output. Keep the paired hand-written rules
-and baselines in AGENTS.md consistent with this file.
+## Verification
 
-Quick-reference snapshot of counts that change as code lands, each with the
-exact command used to measure it, so drift is easy to spot.
-
-## Backend
-
-| Metric | Value | Command |
+| Metric | Observed result | Evidence |
 | --- | --- | --- |
-| Alembic migrations | 23 (single head `3f0e3e733925`) | `ls backend/alembic/versions/*.py \| wc -l`; head via `cd backend && uv run alembic heads` |
-| Backend test files | 43 | `find backend/tests -name "test_*.py" \| wc -l` |
-| Tests collected | 444 | `cd backend && uv run pytest --collect-only -q` (needs a repo-root `.env`; `cp backend/env_sample.txt .env` works for collection only) |
-| Tests passing | 444 passed, 0 failed (GitHub Actions CI run 36427416823, `backend` job, log line `444 passed, 676 warnings in 17.79s`, 2026-09-28) | `scripts/verify.sh` [4/9] or `cd backend && uv run pytest tests/ -q` with DB up |
-| mypy (`app`) | 0 errors, 97 source files | `cd backend && uv run mypy app` |
-| ruff (`app`) | clean | `cd backend && uv run ruff check app` |
-| HRIS employee routers | 16 | `grep -c "_router = " backend/app/employee/routes.py` (file has no `include_router`/`sub_router` tokens); see AGENTS.md §5 for mechanism |
-| API endpoints / route groups | 225 / 39 | generated — see docs/MAP.md header (`bash scripts/gen-map.sh` to regenerate) |
-| Backend domain packages | 12 | generated — see docs/MAP.md |
+| Backend tests | 707 passed, 0 failed | scripts/verify.sh, 2026-10-02 |
+| Backend test files | 51 | Python pathlib rglob("test_*.py") under backend/tests |
+| mypy app | 0 errors, 98 source files | scripts/verify.sh |
+| Ruff | clean | scripts/verify.sh |
+| Alembic migrations | 23, single head 3f0e3e733925; no drift | migration inventory and scripts/verify.sh |
+| API endpoints / route groups | 226 / 39 | generated docs/MAP.md |
+| Domain packages | 12 | generated docs/MAP.md |
+| Vitest | 88 files / 280 tests passed | scripts/verify.sh |
+| Feature test files | 77 | pathlib inventory excluding screenshot artifacts |
+| Playwright | 40 passed, 25 specs, no retries | fresh disposable DB browser run |
+| TypeScript | 0 errors | scripts/verify.sh |
+| ESLint | 0 errors / 2 warnings, report-only | scripts/verify.sh |
+| Frontend build | passed | scripts/verify.sh |
+| Architecture map | in sync | scripts/verify.sh |
+| Overall gate | RESULT: PASS (exit 0) | scripts/verify.sh |
 
-Note: collection requires env vars (PROJECT_NAME, POSTGRES_*, FIRST_SUPERUSER*)
-from the repo-root `.env`; pytest otherwise exits with code 4.
+Verification uses placeholder credentials and disposable PostgreSQL.
+Do not read production .env files to collect tests or run CI against production.
+The browser suite is a separate dedicated CI job, not part of verify.sh.
 
-## Frontend (frontendv3)
+## Runtime and operations
 
-| Metric | Value | Command |
-| --- | --- | --- |
-| Vitest test files under `src` | 79 | `find frontendv3/src \( -name "*.test.tsx" -o -name "*.test.ts" \) -not -path "*__screenshots__*" \| wc -l` (parenthesized group + screenshot exclusion required; the old unparenthesized find over-counts gitignored Vitest artifacts) |
-| Vitest test files under `src/features` | 66 | same find, limited to `frontendv3/src/features` |
-| Vitest tests passing | 270 passed, 0 failed (2026-09-28) | from `frontendv3/` with `LD_LIBRARY_PATH` per AGENTS.md §6: `pnpm exec vitest run --browser.headless` |
-| Playwright E2E specs | 25 | `find frontendv3/e2e -name "*.spec.ts" \| wc -l` |
-| E2E page objects | 24 | `ls frontendv3/e2e/pages/*.ts \| wc -l` |
-| E2E execution status | specs exist; **not executed in CI** (open, roadmap #39) | `grep -n 'playwright test' .github/workflows/ci.yml` → no match |
-| tsc errors | 0 | `cd frontendv3 && pnpm exec tsc -b` |
-| eslint errors / warnings | 0 / 2 (the former 15 no-explicit-any errors were fixed in PR #41; the 2 warnings are both react-hooks/incompatible-library. The 3 unused eslint-disable directive warnings reported 2026-09-28 do NOT reproduce on f8b890d — re-measured with `pnpm exec eslint .`, cached and `--no-cache`) | `cd frontendv3 && pnpm exec eslint .` |
-| resource-delete-dialog files | 26 (25 feature-local + 1 shared) | `git ls-files \| grep -c resource-delete-dialog.tsx` |
-| Frontend features | 32 | generated — see docs/MAP.md |
+Production images and CI use Python 3.14, Node 26, and Traefik 3.7.
+Node 26 requires explicit pnpm installation. Reviewed Dependabot proposals
+and image-build evidence are recorded in docs/plans/runtime-upgrades-2026-10-02.md.
+Workflows: ci.yml, deploy.yml, e2e.yml. CI runners use ubuntu-26.04.
 
-## Architecture map (docs/MAP.md)
+Deployments require a PR merge, build immutable SHA-tagged images, take a
+backup, migrate, wait for container health, and run nine HTTP checks. Audit
+retention defaults to 90 days with deletion disabled until explicitly enabled.
+See docs/runbooks/ for deployment, recovery, and retention procedures.
 
-- **Merged/current:** MAP exists on origin/main, generated by
-  `scripts/gen-map.sh`, drift-checked (report-only) by `scripts/verify.sh`.
-  Batch A (PR #53, merged as `2c828e3`) landed the generator provenance
-  headers, migration anomaly reporting, and edge fixes. Current MAP.md on
-  origin/main carries the `Generated: 2026-09-28 / Source commit: bf2a479...`
-  provenance header and a "Migration anomalies (static findings, report-only)"
-  section listing 6 findings (3 of them orphaned-enum-type downgrades, roadmap
-  #52). `scripts/verify.sh` re-check: docs/MAP.md IN-SYNC with
-  origin/main@f8b890d (2026-09-29).
-- **Future work:** Batch C operational docs (architecture/decisions/modules/
-  plans/testing/archive are still one-paragraph stub READMEs, re-verified
-  2026-09-30 on `a4f33d3`). Batch D verification hardening is MERGED (final-
-  cleanup Batch B2, PR #57 `a4f33d3`: `ci-config-check` actionlint job in
-  ci.yml, corrected verify.sh report-only comments). Template-residue round 2
-  (roadmap #90) is MERGED in the final-cleanup batch B1 PR (#56 `62f1372`)
-  after round 1 merged as PR #55; `.copier/.copier-answers.yml` is deliberately
-  retained under roadmap #40/#88.
+No coverage percentage gate is configured. mypy is a hard gate; ESLint remains
+report-only. CodeQL alert counts and worktree lists are live external state:
+query them when needed rather than treating an old snapshot as current.
 
-## CI/CD
+## Coverage limits
 
-| Metric | Value | Command |
-| --- | --- | --- |
-| Workflow files | 2: `ci.yml`, `deploy.yml` | `ls .github/workflows/` |
-| CI runners | ubuntu-26.04 (roadmap #60 done via PRs #45/#46) | `grep -n 'runs-on' .github/workflows/*.yml` |
-| Coverage gate (`--fail-under`) | none | `grep -rn "fail-under\|coverage report" .github/workflows/` returns nothing; no `fail_under` in `backend/pyproject.toml` |
+Employee UI supports list/profile and CSV import, not a full manual CRUD form.
+Leave ledger selection is incomplete; the E2E check covers its shell only.
+Template apps/chats/tasks/users/settings are mock-backed demos. Existing
+production data is not a CI fixture. Operational documentation now covers
+architecture, decisions, modules, plans, testing, and archive provenance.
 
-## Security
-
-| Metric | Value | Command |
-| --- | --- | --- |
-| CodeQL alerts (open) | 0 | `gh api "repos/LouielAngeloQuisim/HRIS-FastAPI/code-scanning/alerts?state=open&per_page=100" --jq length` |
-| Secret-history scan | content-level scan NOT yet run (roadmap #40 open) | filename-level only so far |
-
-## Local worktrees
-
-Deliberately not embedded here — transient lists go stale within days (the
-previous 14-entry list from 2026-09-24 was wrong by 2026-09-28). Query live
-state instead:
-
-```
-git worktree list
-git worktree prune --dry-run --verbose   # preview stale registrations only
-```
-
-Prune decisions belong to roadmap #85 (DONE — the one stale registration
-`/tmp/kilo/notif-test-fix` from merged PR #52 was pruned 2026-09-30; dry run
-now silent); do not remove active worktrees.
+Historical migration downgrade anomalies remain deliberately preserved.
+See docs/runbooks/migration-limitations.md and the owner's recorded decision.
+Historical Symfony security work is excluded at the owner's request.

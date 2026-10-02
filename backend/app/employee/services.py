@@ -106,15 +106,36 @@ def store_attachment_file(*, employee_id: uuid.UUID, filename: str, content: byt
     Matches the design: files live on disk/object storage, only the path is
     stored on the DB row. The legacy bug of dumping files into the public web
     root is deliberately not reproduced.
+
+    Roadmap #95: content size and the generated stored filename are validated
+    up front, so oversized uploads are rejected (413) and over-long names (400)
+    never reach the filesystem. No partial file is ever written; nothing is
+    truncated.
     """
     from fastapi import HTTPException
 
     if not filename:
         raise HTTPException(status_code=400, detail="A filename is required")
+    if len(content) > settings.FILE_UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Attachment exceeds the maximum upload size of "
+                f"{settings.FILE_UPLOAD_MAX_BYTES} bytes"
+            ),
+        )
     safe_name = Path(filename).name  # strip any directory components
+    stored_name = f"{uuid.uuid4().hex}-{safe_name}"
+    if len(stored_name.encode()) > settings.FILE_UPLOAD_MAX_FILENAME_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Attachment filename is too long; the stored name must not "
+                f"exceed {settings.FILE_UPLOAD_MAX_FILENAME_LENGTH} bytes"
+            ),
+        )
     upload_dir = _ensure_upload_dir() / str(employee_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
-    stored_name = f"{uuid.uuid4().hex}-{safe_name}"
     target = upload_dir / stored_name
     try:
         target.write_bytes(content)

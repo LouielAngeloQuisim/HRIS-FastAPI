@@ -99,8 +99,8 @@ and #57 respectively.)
 | #58 | DONE |
 | #59 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
 | #60 | DONE |
-| #61 | OPEN |
-| #62 | OPEN |
+| #61 | DONE |
+| #62 | DONE |
 | #63 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
 | #64 | DONE |
 | #65 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
@@ -118,7 +118,7 @@ and #57 respectively.)
 | #80 | DONE |
 | #81 | IN PROGRESS (partial) |
 | #82 | DONE |
-| #83 | OPEN |
+| #83 | DONE |
 | #84 | DONE |
 | #85 | DONE |
 | #86 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
@@ -289,22 +289,17 @@ Evidence: PR #45 (Playwright 1.59.1 → 1.62.1) and PR #46 (deploy workflow
 runners `ubuntu-26.04`) merged; PR #44 obsolete/closed. CI passed on real
 ubuntu-26.04 runners.
 
-### #61 / #62 — Post-deploy verification depth; frontend/Traefik health checks — OPEN
-Confirmed on origin/main: deploy workflow `verify` job only curls the API
-health-check and the frontend root expecting HTTP 200; `compose.prod.yml`
-healthchecks exist for backend and db only (frontend and Traefik have none).
-Decide whether verification must also exercise auth/redirect/protected
-behavior and add missing healthchecks or document the gaps.
-Re-verified 2026-09-29 on `62f1372` (final-cleanup Batch B2 investigation):
-every healthcheck that IS defined is already consumed — db via `depends_on:
-condition: service_healthy` (compose.yml + compose.prod.yml), backend via
-the deploy job's `docker inspect -f '{{.State.Health.Status}}'` wait loop —
-so there is no "defined but unused" healthcheck to wire up mechanically.
-Anything further (frontend/Traefik healthchecks, deeper verify probes) is a
-new operational policy choice, not a fix.
-DECISION REQUIRED (owner): (a) deepen the `verify` job beyond HTTP 200,
-(b) add frontend/Traefik healthchecks, or (c) document the gaps and close.
-Batch B2 deliberately implements none of these.
+### #61 / #62 - Deployment verification and service health - DONE
+Implemented in this PR: native Traefik ping and frontend HTTP healthchecks,
+with the deploy job waiting for backend, frontend and Traefik to become healthy.
+The verify job runs scripts/verify-deployment.py: API health JSON, anonymous
+GET /users/me returning 401, hidden docs returning 404, frontend and sign-in
+application shells, and HTTP-to-HTTPS redirects for both hosts. Contract failure
+tests exercise broken authorization, docs exposure, frontend shell, redirects
+and health responses. These probes use no production credentials or writes.
+Successful authenticated business flows are covered in isolated E2E tests,
+not by logging into production.
+
 
 ### #67 — Payroll migration review — DONE
 Review found no destructive `upgrade()` operations in the payroll migration.
@@ -377,11 +372,12 @@ baseline). No authorization behavior was changed — the routes denied correctly
 when exercised. Static per-route enforcement remains covered by
 `tests/rbac/test_route_protection.py`.
 
-### #83 — OpenAPI JSON / docs / redoc public exposure — OPEN
-`backend/app/main.py` sets only `openapi_url`; FastAPI default `/docs` and
-`/redoc` remain served and no route_policy/Traefik restriction was found —
-publicly reachable. Owner decision required: document as intended or implement
-the smallest safe protection.
+### #83 - OpenAPI JSON / docs / redoc exposure - DONE
+PR #59 disabled docs outside local environments; PR #61 fixed their typing.
+Current production checks on 2026-10-02 returned HTTP 404 for /docs, /redoc,
+and /api/v1/openapi.json. The deployment verifier now continuously checks all
+three. API health and anonymous authentication probes returned 200 and 401.
+
 
 ### #84 — `.gitattributes` — DONE
 Present and tracked at repo root: `* text=auto` and `*.sh text eol=lf`.

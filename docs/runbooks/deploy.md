@@ -218,3 +218,16 @@ image: ghcr.io/louielangeloquisim/hris-fastapi/frontend:${IMAGE_TAG:-latest}
 
 The pipeline sets `IMAGE_TAG` to the full commit SHA (`${{ github.sha }}`), so
 production runs the exact commit that was built and pushed.
+
+## Extended checks (2026-10-02)
+
+The deployment job waits for backend, frontend and Traefik healthchecks.
+Traefik ping is internal on its unpublished port 8080. Frontend uses curl
+against local nginx. Public verification runs:
+
+    python3 scripts/verify-deployment.py
+
+It checks health JSON, unauthenticated /api/v1/users/me denial, hidden API
+documentation, frontend and sign-in HTML shells, and HTTPS redirects. It
+does not create production sessions or mutate production data. It retries
+transient failures and fails the workflow if any contract remains broken.

@@ -15,7 +15,7 @@ jobs:
   ci-config-check:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate CI configuration (roadmap #92)
         run: bash scripts/check-ci-config.sh
 
@@ -25,13 +25,13 @@ jobs:
       run:
         working-directory: frontendv3
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.17.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm exec tsc -b
@@ -75,8 +75,10 @@ jobs:
       ENVIRONMENT: local
       EMAILS_FROM_EMAIL: info@example.com
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.14'
       - run: uv sync
       - run: uv run bash scripts/prestart.sh
       - run: uv run python app/tests_pre_start.py

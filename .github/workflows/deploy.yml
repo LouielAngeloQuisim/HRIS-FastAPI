@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -48,7 +48,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build and push backend image
         uses: docker/build-push-action@v5
@@ -80,7 +80,7 @@ jobs:
       packages: read
     steps:
       - name: Deploy to VM via SSH
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
@@ -117,6 +117,6 @@ jobs:
     runs-on: ubuntu-26.04
     permissions: {}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify application, authorization, docs and HTTPS redirects
         run: python3 scripts/verify-deployment.py

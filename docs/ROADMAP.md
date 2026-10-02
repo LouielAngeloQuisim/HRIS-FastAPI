@@ -116,7 +116,7 @@ and #57 respectively.)
 | #78 | NEEDS RECONCILIATION (investigated; documentation-only decision outstanding) |
 | #79 | DONE |
 | #80 | DONE |
-| #81 | IN PROGRESS (partial) |
+| #81 | DONE |
 | #82 | DONE |
 | #83 | DONE |
 | #84 | DONE |
@@ -360,19 +360,15 @@ enabled runs delete at most 1000 old rows per day. Cutoff, default-disabled,
 batch-size and invalid-policy cases are tested. No production enablement.
 See docs/runbooks/audit-retention.md for activation and backlog handling.
 
-### #81 — GET-route authentication coverage — IN PROGRESS (partial)
-Established findings: the health endpoint is intentionally public; protected
-GET routes use `require_permission`/auth dependencies; complete automated
-route-by-route coverage verification remains incomplete. Preserve partial
-status. Update 2026-10-02: the four domains that had no live behavioral 403
-test (`positions`/`emp_settings`, `project-types`/`project_type`,
-`phases`/`phase`, `model-types`/`model_types` — module+action taken from
-`app/employee/routes.py`) are covered by new live-HTTP 403 tests in
-`backend/tests/employee/test_authorization_403_gaps.py` (8 tests, submitted
-in this PR pending merge; full suite 452 passed, 0 failed, on top of the 444
-baseline). No authorization behavior was changed — the routes denied correctly
-when exercised. Static per-route enforcement remains covered by
-`tests/rbac/test_route_protection.py`.
+### #81 - GET-route authentication coverage - DONE
+Behavioral HTTP tests now parameterize every registered production GET API
+route from the FastAPI inventory: 90 protected paths each reject missing and
+malformed bearer credentials with 401. The one intentionally public GET,
+health-check, returns 200 without credentials; local-only support is excluded.
+Existing static authentication/permission dependency checks and live module
+403 cases remain in place. New routes are included automatically.
+Verification on Python 3.14: scripts/verify.sh PASS, 701 backend tests,
+270 frontend tests, zero mypy errors and no migration drift.
 
 ### #83 - OpenAPI JSON / docs / redoc exposure - DONE
 PR #59 disabled docs outside local environments; PR #61 fixed their typing.

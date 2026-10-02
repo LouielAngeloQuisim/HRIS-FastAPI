@@ -99,8 +99,8 @@ and #57 respectively.)
 | #58 | DONE |
 | #59 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
 | #60 | DONE |
-| #61 | OPEN |
-| #62 | OPEN |
+| #61 | DONE |
+| #62 | DONE |
 | #63 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
 | #64 | DONE |
 | #65 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
@@ -112,13 +112,13 @@ and #57 respectively.)
 | #74 | DONE |
 | #75 | DONE |
 | #76 | DONE |
-| #77 | IN PROGRESS |
+| #77 | DONE |
 | #78 | NEEDS RECONCILIATION (investigated; documentation-only decision outstanding) |
 | #79 | DONE |
-| #80 | OPEN |
+| #80 | DONE |
 | #81 | IN PROGRESS (partial) |
 | #82 | DONE |
-| #83 | OPEN |
+| #83 | DONE |
 | #84 | DONE |
 | #85 | DONE |
 | #86 | NEEDS RECONCILIATION (wording/status not recorded in handoff) |
@@ -289,22 +289,17 @@ Evidence: PR #45 (Playwright 1.59.1 → 1.62.1) and PR #46 (deploy workflow
 runners `ubuntu-26.04`) merged; PR #44 obsolete/closed. CI passed on real
 ubuntu-26.04 runners.
 
-### #61 / #62 — Post-deploy verification depth; frontend/Traefik health checks — OPEN
-Confirmed on origin/main: deploy workflow `verify` job only curls the API
-health-check and the frontend root expecting HTTP 200; `compose.prod.yml`
-healthchecks exist for backend and db only (frontend and Traefik have none).
-Decide whether verification must also exercise auth/redirect/protected
-behavior and add missing healthchecks or document the gaps.
-Re-verified 2026-09-29 on `62f1372` (final-cleanup Batch B2 investigation):
-every healthcheck that IS defined is already consumed — db via `depends_on:
-condition: service_healthy` (compose.yml + compose.prod.yml), backend via
-the deploy job's `docker inspect -f '{{.State.Health.Status}}'` wait loop —
-so there is no "defined but unused" healthcheck to wire up mechanically.
-Anything further (frontend/Traefik healthchecks, deeper verify probes) is a
-new operational policy choice, not a fix.
-DECISION REQUIRED (owner): (a) deepen the `verify` job beyond HTTP 200,
-(b) add frontend/Traefik healthchecks, or (c) document the gaps and close.
-Batch B2 deliberately implements none of these.
+### #61 / #62 - Deployment verification and service health - DONE
+Implemented in this PR: native Traefik ping and frontend HTTP healthchecks,
+with the deploy job waiting for backend, frontend and Traefik to become healthy.
+The verify job runs scripts/verify-deployment.py: API health JSON, anonymous
+GET /users/me returning 401, hidden docs returning 404, frontend and sign-in
+application shells, and HTTP-to-HTTPS redirects for both hosts. Contract failure
+tests exercise broken authorization, docs exposure, frontend shell, redirects
+and health responses. These probes use no production credentials or writes.
+Successful authenticated business flows are covered in isolated E2E tests,
+not by logging into production.
+
 
 ### #67 — Payroll migration review — DONE
 Review found no destructive `upgrade()` operations in the payroll migration.
@@ -324,10 +319,12 @@ Merged via PR #32; now AGENTS.md §8 "Evidence requirement".
 `gh api .../code-scanning/alerts?state=open` returns `0` open alerts
 (verified 2026-09-28/29).
 
-### #77 — Unused dependencies (pymysql, reportlab) — IN PROGRESS
-`pymysql` is used by `backend/scripts/etl_mysql_to_postgres.py` (+ its test) —
-ETL-only, document. `reportlab` has zero usage in application `.py` files —
-decision outstanding on removal.
+### #77 - Unused dependencies - DONE
+Repository-wide backend reference checks found ReportLab and its type stubs
+only in dependency declarations. They are removed from the manifest and lock.
+PyMySQL remains required by scripts/etl_mysql_to_postgres.py and its tests;
+it is deliberately retained as ETL-only tooling. Full verification and image
+builds validate the reduced dependency graph in this dependency PR.
 
 ### #78 — Three-migration salary-constraint history — NEEDS RECONCILIATION
 Investigated (Batch A reconciliation): `f176e167c8e7` changed the employee
@@ -355,10 +352,13 @@ final one. No production calculator/route logic changed. Existing authentication
 for all five calculators and authenticated success are preserved. Verification
 evidence is recorded in the implementation PR.
 
-### #80 — Audit-log retention job — OPEN
-No retention/cleanup job exists in `backend/app/audit/`; a comment in
-`backend/app/config/settings.py` awaits it. Decide implementation or defer
-explicitly.
+### #80 - Audit retention job - DONE
+Implemented bounded daily retention in app.audit.retention and a dedicated
+Compose service. Owner chose 90 days on 2026-10-02 and explicitly required
+deletion to remain disabled until enabled. Default dry runs preserve data;
+enabled runs delete at most 1000 old rows per day. Cutoff, default-disabled,
+batch-size and invalid-policy cases are tested. No production enablement.
+See docs/runbooks/audit-retention.md for activation and backlog handling.
 
 ### #81 — GET-route authentication coverage — IN PROGRESS (partial)
 Established findings: the health endpoint is intentionally public; protected
@@ -374,11 +374,12 @@ baseline). No authorization behavior was changed — the routes denied correctly
 when exercised. Static per-route enforcement remains covered by
 `tests/rbac/test_route_protection.py`.
 
-### #83 — OpenAPI JSON / docs / redoc public exposure — OPEN
-`backend/app/main.py` sets only `openapi_url`; FastAPI default `/docs` and
-`/redoc` remain served and no route_policy/Traefik restriction was found —
-publicly reachable. Owner decision required: document as intended or implement
-the smallest safe protection.
+### #83 - OpenAPI JSON / docs / redoc exposure - DONE
+PR #59 disabled docs outside local environments; PR #61 fixed their typing.
+Current production checks on 2026-10-02 returned HTTP 404 for /docs, /redoc,
+and /api/v1/openapi.json. The deployment verifier now continuously checks all
+three. API health and anonymous authentication probes returned 200 and 401.
+
 
 ### #84 — `.gitattributes` — DONE
 Present and tracked at repo root: `* text=auto` and `*.sh text eol=lf`.

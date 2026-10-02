@@ -7,6 +7,7 @@ from pydantic import (
     AnyUrl,
     BeforeValidator,
     EmailStr,
+    Field,
     HttpUrl,
     PostgresDsn,
     computed_field,
@@ -143,6 +144,9 @@ class Settings(BaseSettings):
     # Off by default. Enable only after health-check exclusion and retention exist.
     AUDIT_DB_SINK: bool = False
     AUDIT_BODY_MAX_BYTES: int = 4096
+    AUDIT_RETENTION_ENABLED: bool = False
+    AUDIT_RETENTION_DAYS: int = Field(default=90, gt=0)
+    AUDIT_RETENTION_BATCH_SIZE: int = Field(default=1000, gt=0)
 
     # Uploaded 201-file documents are stored here (never in the public web root
     # or as DB blobs); only the resulting path is persisted on the record.

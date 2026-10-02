@@ -1,5 +1,5 @@
 # Stage 0: build the frontendv3 app
-FROM node:22-alpine AS build-stage
+FROM node:26-alpine AS build-stage
 
 WORKDIR /app
 
@@ -8,7 +8,7 @@ COPY frontendv3/pnpm-lock.yaml ./
 COPY frontendv3/pnpm-workspace.yaml ./
 COPY frontendv3/.npmrc ./
 
-RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
+RUN npm install --global pnpm@11.17.0
 
 RUN pnpm install --frozen-lockfile
 

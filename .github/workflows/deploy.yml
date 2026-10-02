@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -48,7 +48,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build and push backend image
         uses: docker/build-push-action@v5
@@ -80,7 +80,7 @@ jobs:
       packages: read
     steps:
       - name: Deploy to VM via SSH
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
@@ -98,10 +98,16 @@ jobs:
             ls -t "$HOME"/backups/pre-deploy-*.sql.gz | tail -n +8 | xargs -r rm --
             $C run --rm -T --no-deps backend bash scripts/prestart.sh
             $C up -d --remove-orphans
-            cid=$($C ps -q backend)
-            s=starting
-            for i in $(seq 1 36); do s=$(docker inspect -f '{{.State.Health.Status}}' "$cid"); [ "$s" = healthy ] && break; sleep 5; done
-            [ "$s" = healthy ] || { $C logs --tail 60 backend; exit 1; }
+            for service in backend frontend traefik; do
+              cid=$($C ps -q "$service")
+              s=starting
+              for i in $(seq 1 36); do
+                s=$(docker inspect -f '{{.State.Health.Status}}' "$cid")
+                [ "$s" = healthy ] && break
+                sleep 5
+              done
+              [ "$s" = healthy ] || { echo "$service failed health check"; exit 1; }
+            done
             [ -f "$HOME/.hris_deployed_tag" ] && cp "$HOME/.hris_deployed_tag" "$HOME/.hris_previous_tag" || true
             echo "$IMAGE_TAG" > "$HOME/.hris_deployed_tag"
             docker image prune -f
@@ -111,13 +117,6 @@ jobs:
     runs-on: ubuntu-26.04
     permissions: {}
     steps:
-      - name: Verify API and Frontend health
-        run: |
-          for i in $(seq 1 12); do
-            api_code=$(curl -s -o /dev/null -w '%{http_code}' https://api.hrisly.duckdns.org/api/v1/utils/health-check/)
-            fe_code=$(curl -s -o /dev/null -w '%{http_code}' https://dashboard.hrisly.duckdns.org/)
-            echo "Attempt $i: api=$api_code fe=$fe_code"
-            [ "$api_code" = "200" ] && [ "$fe_code" = "200" ] && exit 0
-            sleep 10
-          done
-          exit 1
+      - uses: actions/checkout@v7
+      - name: Verify application, authorization, docs and HTTPS redirects
+        run: python3 scripts/verify-deployment.py

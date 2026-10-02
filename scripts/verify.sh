@@ -3,8 +3,9 @@
 # scripts/verify.sh - single entry point for "does this actually work".
 #
 # Runs the real backend + frontend checks and prints a PASS/FAIL summary.
-# Exit code 0 only when every HARD-GATE check passed. mypy, eslint, and the
-# docs/MAP.md drift check are REPORT-ONLY (not promoted to hard gates): the
+# Exit code 0 only when every HARD-GATE check passed. mypy is a HARD GATE
+# (promoted per roadmap #96: baseline is 0 errors on origin/main since
+# PR #61). eslint and the docs/MAP.md drift check remain REPORT-ONLY: the
 # former known gaps were fixed (roadmap #25/#58 DONE - both report 0 errors
 # on origin/main), but promotion is a separate decision. See docs/STATUS.md.
 #
@@ -143,12 +144,19 @@ else
 fi
 
 # --------------------------------------------------------------- check 2/9
-section "[2/9] backend: mypy app (REPORT-ONLY)"
-MYPY_OUT="$( cd backend && uv run mypy app 2>&1 )" || true
+section "[2/9] backend: mypy app (HARD GATE)"
+MYPY_OUT="$( cd backend && uv run mypy app 2>&1 )"
+MYPY_RC=$?
 MYPY_COUNT="$(printf '%s\n' "$MYPY_OUT" | grep -cE 'error:' || true)"
 printf '%s\n' "$MYPY_OUT" | tail -n 3
-echo "mypy error count: ${MYPY_COUNT} (report-only: not gating)"
-record REPORT "backend/mypy" "${MYPY_COUNT} errors (report-only, not gating)"
+if [ "$MYPY_RC" -eq 0 ]; then
+  echo "mypy: clean (rc=0, ${MYPY_COUNT} errors)"
+  record PASS "backend/mypy" "${MYPY_COUNT} errors"
+else
+  echo "mypy: FAILED (rc=${MYPY_RC}, ${MYPY_COUNT} errors) - last 20 lines:"
+  printf '%s\n' "$MYPY_OUT" | tail -n 20
+  record FAIL "backend/mypy" "rc=${MYPY_RC}; ${MYPY_COUNT} errors (see output above)"
+fi
 
 # --------------------------------------------------------------- check 3/9
 section "[3/9] backend: alembic upgrade head + alembic check (HARD GATE)"

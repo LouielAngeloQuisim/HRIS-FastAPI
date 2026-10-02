@@ -112,7 +112,7 @@ and #57 respectively.)
 | #74 | DONE |
 | #75 | DONE |
 | #76 | DONE |
-| #77 | IN PROGRESS |
+| #77 | DONE |
 | #78 | NEEDS RECONCILIATION (investigated; documentation-only decision outstanding) |
 | #79 | DONE |
 | #80 | OPEN |
@@ -319,10 +319,12 @@ Merged via PR #32; now AGENTS.md §8 "Evidence requirement".
 `gh api .../code-scanning/alerts?state=open` returns `0` open alerts
 (verified 2026-09-28/29).
 
-### #77 — Unused dependencies (pymysql, reportlab) — IN PROGRESS
-`pymysql` is used by `backend/scripts/etl_mysql_to_postgres.py` (+ its test) —
-ETL-only, document. `reportlab` has zero usage in application `.py` files —
-decision outstanding on removal.
+### #77 - Unused dependencies - DONE
+Repository-wide backend reference checks found ReportLab and its type stubs
+only in dependency declarations. They are removed from the manifest and lock.
+PyMySQL remains required by scripts/etl_mysql_to_postgres.py and its tests;
+it is deliberately retained as ETL-only tooling. Full verification and image
+builds validate the reduced dependency graph in this dependency PR.
 
 ### #78 — Three-migration salary-constraint history — NEEDS RECONCILIATION
 Investigated (Batch A reconciliation): `f176e167c8e7` changed the employee

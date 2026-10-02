@@ -5,11 +5,11 @@ from fastapi.testclient import TestClient
 from pwdlib.hashers.bcrypt import BcryptHasher
 from sqlmodel import Session, select
 
-from app.config.settings import settings
 from app.common.security import get_password_hash, verify_password
+from app.config.settings import settings
 from app.user.models import User, UserCreate
 from app.user.selectors import get_user_by_email
-from app.user.services import create_user, update_user
+from app.user.services import create_user
 from app.utils import generate_password_reset_token
 from tests.utils.user import create_random_user, user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
@@ -327,6 +327,81 @@ def test_get_non_existing_user_permissions_error(
     assert body["error"]["type"] == "http_error"
 
 
+# --- Roadmap #95: GET /users/{user_id} authorization coverage ----------------
+
+
+def test_get_user_by_id_unauthenticated_401(client: TestClient, db: Session) -> None:
+    """No token -> 401 from the auth dependency, before any authorization logic."""
+    user = create_random_user(db)
+    r = client.get(f"{settings.API_V1_STR}/users/{user.id}")
+    assert r.status_code == 401
+    body = r.json()
+    assert body["detail"] == "Not authenticated"
+    assert body["error"]["type"] == "http_error"
+
+
+def test_get_user_by_id_self_exact_200(client: TestClient, db: Session) -> None:
+    """Authenticated non-superuser reading their OWN record -> exactly 200."""
+    username = random_email()
+    password = random_lower_string()
+    user = create_user(
+        session=db, user_create=UserCreate(email=username, password=password)
+    )
+
+    headers = user_authentication_headers(
+        client=client, email=username, password=password
+    )
+    r = client.get(f"{settings.API_V1_STR}/users/{user.id}", headers=headers)
+    assert r.status_code == 200
+    api_user = r.json()
+    assert api_user["id"] == str(user.id)
+    assert api_user["email"] == username
+    assert api_user["is_superuser"] is False
+
+
+def test_get_user_by_id_superuser_exact_200(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    """Superuser reading ANOTHER user's record -> exactly 200 with that user's id."""
+    user = create_random_user(db)
+    r = client.get(
+        f"{settings.API_V1_STR}/users/{user.id}", headers=superuser_token_headers
+    )
+    assert r.status_code == 200
+    api_user = r.json()
+    assert api_user["id"] == str(user.id)
+
+
+def test_get_user_by_id_normal_user_other_user_403_envelope(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    """Non-superuser reading another user's EXISTING record -> 403 with the
+    standard error envelope; no record data is leaked."""
+    user = create_random_user(db)
+    r = client.get(
+        f"{settings.API_V1_STR}/users/{user.id}", headers=normal_user_token_headers
+    )
+    assert r.status_code == 403
+    body = r.json()
+    assert body["success"] is False
+    assert body["detail"] == "The user doesn't have enough privileges"
+    assert body["error"]["type"] == "http_error"
+    assert "id" not in body
+    assert "email" not in body
+
+
+def test_get_user_by_id_normal_user_nonexistent_403_not_404(
+    client: TestClient, normal_user_token_headers: dict[str, str]
+) -> None:
+    """Authorization is enforced before existence for non-superusers: a random
+    id returns 403, never 404 (no user-enumeration oracle)."""
+    r = client.get(
+        f"{settings.API_V1_STR}/users/{uuid.uuid4()}", headers=normal_user_token_headers
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"] == "The user doesn't have enough privileges"
+
+
 def test_create_user_existing_username(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
@@ -513,7 +588,9 @@ def test_register_user_requires_admin(
 
     # Admin/superuser -> creates the user.
     r = client.post(
-        f"{settings.API_V1_STR}/users/signup", json=data, headers=superuser_token_headers
+        f"{settings.API_V1_STR}/users/signup",
+        json=data,
+        headers=superuser_token_headers,
     )
     assert r.status_code == 200
     created_user = r.json()

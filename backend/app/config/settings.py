@@ -147,6 +147,16 @@ class Settings(BaseSettings):
     # Uploaded 201-file documents are stored here (never in the public web root
     # or as DB blobs); only the resulting path is persisted on the record.
     FILE_UPLOAD_DIR: str = "/tmp/hris-uploads"
+    # Roadmap #95: caps enforced by store_attachment_file BEFORE any content
+    # is written to disk. 25 MB matches the legacy server-side default for
+    # employee-document uploads (analysis/07-frontend-design.md §3.12).
+    FILE_UPLOAD_MAX_BYTES: int = 25 * 1024 * 1024
+    # Maximum UTF-8 byte length of the stored filename component actually handed to the
+    # filesystem (32-char uuid hex + "-" + original basename). Keeps it within
+    # the 255-byte NAME_MAX limit shared filesystems enforce and within the
+    # VARCHAR(255) original_file_name column, so over-long names fail as a
+    # clean 4xx instead of an OSError-turned-500 at write time.
+    FILE_UPLOAD_MAX_FILENAME_LENGTH: int = 255
 
     SMTP_TLS: bool = True
     SMTP_SSL: bool = False

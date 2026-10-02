@@ -5,6 +5,11 @@ services:
       - 80:80
       - 443:443
     restart: always
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-public
@@ -35,6 +40,7 @@ services:
       - --accesslog
       - --log
       - --api
+      - --ping
     networks:
       - traefik-public
 
@@ -84,6 +90,11 @@ services:
   frontend:
     image: ghcr.io/louielangeloquisim/hris-fastapi/frontend:${IMAGE_TAG:-latest}
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - traefik-public
       - default

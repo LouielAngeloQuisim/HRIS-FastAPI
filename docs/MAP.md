@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
-Generated: 2026-09-28
-Source commit: bf2a479c7b0fdd07efffc49037e9d8be629ecb4d
+Generated: 2026-10-02
+Source commit: 31f4c63df4f2562666faa2d7b63a6a80e9de0ddd
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 225 endpoints in 39 groups
+## Backend routes (`/api/*`): 226 endpoints in 39 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -111,12 +111,13 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `GET /api/v1/employees/{obj_id}`  `[perms: emp_list:view]`
 - `PATCH /api/v1/employees/{obj_id}`  `[perms: emp_list:edit]`
 
-### `/api/v1/holidays` (5 routes)
+### `/api/v1/holidays` (6 routes)
 
 - `GET /api/v1/holidays/`  `[perms: holiday_config:view]`
 - `POST /api/v1/holidays/`  `[perms: holiday_config:add]`
 - `GET /api/v1/holidays/instances`  `[perms: holiday_config:view]`
 - `POST /api/v1/holidays/instances`  `[perms: holiday_config:add]`
+- `DELETE /api/v1/holidays/{config_id}`  `[perms: holiday_config:delete]`
 - `PATCH /api/v1/holidays/{config_id}`  `[perms: holiday_config:edit]`
 
 ### `/api/v1/items` (5 routes)
@@ -393,7 +394,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `departments`: api `departments`, `divisions`; flags: route, form, test
 - `divisions`: api `divisions`; flags: route, form, test
 - `dtr-adjustments`: api `dtr-adjustments`; flags: route, form, test
-- `emp-tasks`: api `emp-tasks`, `employee-projects`; flags: route, form
+- `emp-tasks`: api `emp-tasks`, `employee-projects`; flags: route, form, test
 - `employee-projects`: api `employee-projects`, `employees`, `projects`; flags: route, form, test
 - `employees`: api `employees`; flags: route, test
 - `holidays`: api `holidays`; flags: route, form, test
@@ -405,9 +406,9 @@ reliable in the source tree's single-line import style) with plumbing
 - `models`: api `model-types`, `models`; flags: route, form
 - `owners`: api `owners`; flags: route, form, test
 - `phases`: api `phases`, `subdivisions`; flags: route, form, test
-- `positions`: api `departments`, `positions`; flags: route, form
+- `positions`: api `departments`, `positions`; flags: route, form, test
 - `project-types`: api `project-types`; flags: route, form
-- `projects`: api `project-types`, `projects`, `subdivisions`; flags: route, form
+- `projects`: api `project-types`, `projects`, `subdivisions`; flags: route, form, test
 - `roles`: api `roles`; flags: route, form, test
 - `settings`: api `none`; flags: route, form
 - `shifts`: api `shifts`; flags: route, form

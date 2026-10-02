@@ -317,6 +317,19 @@ def update_holiday_config(
     return HolidayConfigPublic.model_validate(db_obj)
 
 
+
+@holiday_router.delete(
+    "/{config_id}",
+    response_model=Message,
+    dependencies=[Depends(require_permission("holiday_config", "delete"))],
+)
+def delete_holiday_config(
+    session: SessionDep, _current_user: CurrentUser, config_id: uuid.UUID
+) -> Message:
+    services.delete_holiday_config(session=session, config_id=config_id)
+    return Message(message="Holiday configuration deleted successfully")
+
+
 @holiday_router.get(
     "/instances",
     response_model=HolidayInstanceList,

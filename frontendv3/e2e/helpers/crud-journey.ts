@@ -34,7 +34,7 @@ export async function assertWrite(response: Response, status: number) {
 export async function crudJourney(page: Page, config: {
   route: string; prefix: string; add?: string; resource?: string;
   fields: Record<string, string>; editField: string; editValue: string;
-  prepare?: () => Promise<void>; expected?: Record<string, unknown>;
+  prepare?: () => Promise<void>; expected?: Record<string, unknown>; readList?: boolean;
 }) {
   const { route, prefix, fields, editField, editValue } = config
   const resource = config.resource || route
@@ -56,10 +56,11 @@ export async function crudJourney(page: Page, config: {
   await assertWrite(await updating, 200)
   await expect(page.getByTestId(prefix + '-submit-button')).not.toBeVisible()
   const token = (await page.context().cookies()).find(c => c.name === 'hris_at')!.value
-  const persisted = await page.request.get(apiUrl + '/' + resource + '/' + created.id, { headers: { Authorization: 'Bearer ' + token } })
+  const persisted = await page.request.get(apiUrl + '/' + resource + (config.readList ? '/?limit=100' : '/' + created.id), { headers: { Authorization: 'Bearer ' + token } })
   expect(persisted.status()).toBe(200)
   const savedBody = await persisted.json()
-  const saved = savedBody.data || savedBody
+  const saved = config.readList ? savedBody.data.find((row: { id: string }) => row.id === created.id) : (savedBody.data || savedBody)
+  expect(saved).toBeTruthy()
   expect(JSON.stringify(saved)).toContain(editValue)
   const unchanged = Object.fromEntries(Object.entries(config.expected || {}).filter(([key]) => !['name', 'title', 'block_name', 'lot_name', 'task', 'task_desc'].includes(key)))
   expect(saved).toMatchObject(unchanged)

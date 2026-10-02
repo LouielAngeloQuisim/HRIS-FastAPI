@@ -114,7 +114,7 @@ and #57 respectively.)
 | #76 | DONE |
 | #77 | IN PROGRESS |
 | #78 | NEEDS RECONCILIATION (investigated; documentation-only decision outstanding) |
-| #79 | OPEN |
+| #79 | DONE |
 | #80 | OPEN |
 | #81 | IN PROGRESS (partial) |
 | #82 | DONE |
@@ -337,10 +337,23 @@ correct and `alembic check` passes — no correctness bug, single head.
 Historical awkwardness only; do not rewrite history. Outstanding: a
 documentation decision.
 
-### #79 — Calculator test assertions — OPEN
-`test_calculator.py` asserts with `pytest.approx(x, abs=0.01)` on
-share/total fields and does not assert full response shapes or boundary rows.
-Tighten assertions (requires live-DB run).
+### #79 — Calculator test assertions — DONE
+`test_calculator.py` asserted with `pytest.approx(x, abs=0.01)` on
+share/total fields and did not assert full response shapes or boundary rows.
+Tighten assertions (requires live-DB run). Update 2026-10-02 (branch
+`test/payroll-calculator-assertions-v2`): `backend/tests/payroll/test_calculator.py`
+strengthened to assert exact two-decimal values (replacing `approx`),
+full response-key sets, employee+employer==total relationships, boundary rows
+(at/just-below/above each bracket min/max, clamp-to-min/max, half-even rounding),
+batch contributions with taxable==gross−employee-side, and validation-rejection
+422s against the application's real ErrorBody envelope (`error.message ==
+"Request validation failed"`) rather than FastAPI's default list shape. Contract
+findings pinned by the tests: bracket-list endpoints serialize Decimal columns
+as JSON strings (e.g. `"5.000"`, `"2.000"`) and ignore an `_effective_date` query;
+`calculate_bir_tax` adds `base_tax` on every traversed bracket row, not only the
+final one. No production calculator/route logic changed. Existing authentication tests
+for all five calculators and authenticated success are preserved. Verification
+evidence is recorded in the implementation PR.
 
 ### #80 — Audit-log retention job — OPEN
 No retention/cleanup job exists in `backend/app/audit/`; a comment in
@@ -351,7 +364,7 @@ explicitly.
 Established findings: the health endpoint is intentionally public; protected
 GET routes use `require_permission`/auth dependencies; complete automated
 route-by-route coverage verification remains incomplete. Preserve partial
-status. Update 2026-09-30: the four domains that had no live behavioral 403
+status. Update 2026-10-02: the four domains that had no live behavioral 403
 test (`positions`/`emp_settings`, `project-types`/`project_type`,
 `phases`/`phase`, `model-types`/`model_types` — module+action taken from
 `app/employee/routes.py`) are covered by new live-HTTP 403 tests in

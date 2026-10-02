@@ -15,7 +15,7 @@ jobs:
   ci-config-check:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate CI configuration (roadmap #92)
         run: bash scripts/check-ci-config.sh
 
@@ -25,7 +25,7 @@ jobs:
       run:
         working-directory: frontendv3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 11.17.0
@@ -75,7 +75,7 @@ jobs:
       ENVIRONMENT: local
       EMAILS_FROM_EMAIL: info@example.com
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: uv sync
       - run: uv run bash scripts/prestart.sh

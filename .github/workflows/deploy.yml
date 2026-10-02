@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -117,6 +117,6 @@ jobs:
     runs-on: ubuntu-26.04
     permissions: {}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify application, authorization, docs and HTTPS redirects
         run: python3 scripts/verify-deployment.py

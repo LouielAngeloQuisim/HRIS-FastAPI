@@ -162,7 +162,7 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 
 The authoritative step-by-step procedures are the runbooks in `docs/runbooks/`: `docs/runbooks/deploy.md`, `docs/runbooks/rollback.md`, `docs/runbooks/migrations.md`, `docs/runbooks/backup-restore.md`. This section 8 is only a summary — follow the runbooks for any production operation.
 
-- Deploys happen **ONLY by merging a pull request to `main`** (never by direct push; `main` is protected by the `Main Branch Rules` ruleset: PR required, no deletion, no force-push, `backend`/`frontend` status checks required).
+- Deploys happen **ONLY by merging a pull request to `main`** (never by direct push; `main` is protected by the `Main Branch Rules` ruleset: PR required, no deletion, no force-push, `backend`/`frontend`/`e2e` status checks required).
 - The deploy pipeline (see `.github/workflows/deploy.yml`) runs: `ci` → `build-and-push` → `deploy` (pre-deploy `pg_dump`, migrate via `scripts/prestart.sh` (`alembic upgrade head`), `docker compose -f compose.prod.yml up -d`, health-check wait until backend, frontend, and Traefik report healthy) → `verify` (nine HTTP checks covering health, authentication, disabled documentation, HTML pages, and HTTPS redirects).
 - `hris-deploy deploy` (the restricted VM SSH command) only runs `compose pull` + `compose up -d`. It skips the dump, the migration, and the health-check wait. It must **NEVER** be used when a migration is pending, and is **not** a substitute for a PR merge. It is only safe for restarting already-running, already-migrated containers.
 - `hris-debug` remains read-only (`ps`, `logs`, `inspect`, `stats`, `df`, `free`) for checking status.

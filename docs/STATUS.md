@@ -36,6 +36,7 @@ Node 26 requires explicit pnpm installation. Reviewed Dependabot proposals
 and image-build evidence are recorded in docs/plans/runtime-upgrades-2026-10-02.md.
 Workflows: ci.yml, deploy.yml, e2e.yml. CI runners use ubuntu-26.04.
 
+Main protection requires backend, frontend, and e2e checks.
 Deployments require a PR merge, build immutable SHA-tagged images, take a
 backup, migrate, wait for container health, and run nine HTTP checks. Audit
 retention defaults to 90 days with deletion disabled until explicitly enabled.

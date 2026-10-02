@@ -18,7 +18,7 @@ export class DtrAdjustmentsPage {
     this.rows = page.locator('table tbody tr, [role="row"]')
     this.newButton = page.locator('[data-testid="new-dtr-adjustment-button"]')
     this.retryButton = page.locator('[data-testid="retry-button"]')
-    this.dtrIdInput = page.locator('[data-testid="dtr-adjustment-dtr-id-input"]')
+    this.dtrIdInput = page.locator('[data-testid="dtr-adjustment-dtr-select"]')
     this.loginInput = page.locator('[data-testid="dtr-adjustment-login-input"]')
     this.logoutInput = page.locator('[data-testid="dtr-adjustment-logout-input"]')
     this.reasonInput = page.locator('[data-testid="dtr-adjustment-reason-input"]')
@@ -35,7 +35,8 @@ export class DtrAdjustmentsPage {
   }
 
   async fillDtrId(id: string) {
-    await this.dtrIdInput.fill(id)
+    await this.dtrIdInput.click()
+    await this.page.getByRole('option').filter({ hasText: id.slice(0, 8) }).click()
   }
 
   async fillAdjustedLogin(date: string) {

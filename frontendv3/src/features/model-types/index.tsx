@@ -61,7 +61,7 @@ export default function ModelTypesPage() {
                 <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
                   <td className="p-2">{item.name ?? "—"}</td>
                   <td className="p-2">{item.code ?? "—"}</td>
-                  <td className="p-2">{item.additional_options ?? "—"}</td>
+                  <td className="p-2">{item.additional_options == null ? "Not set" : item.additional_options ? "Yes" : "No"}</td>
                   <td className="p-2 text-right">
                      {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }} data-testid={`edit-model-type-button-${item.id}`}>Edit</Button>}
                      {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive" data-testid={`delete-model-type-button-${item.id}`}>Delete</Button>}

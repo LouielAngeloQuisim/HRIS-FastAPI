@@ -1,3 +1,4 @@
+vi.mock('@/lib/api/employees', () => ({ useEmployees: () => ({ data: { data: [{ id: 'emp-1', employee_code: 'EMP1', first_name: 'Test', last_name: 'Employee' }] }, isPending: false }) }))
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
@@ -36,6 +37,9 @@ describe('LeaveCalendarPage (date range)', () => {
     })
 
     const screen = await render(<LeaveCalendarPage />)
+    if (document.querySelector('#leave-calendar-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-calendar-employee')!, 'emp-1')
+    }
     const dateInputs = screen.container.querySelectorAll('input[type="date"]')
     expect(dateInputs.length).toBe(2)
   })
@@ -50,6 +54,9 @@ describe('LeaveCalendarPage (date range)', () => {
     })
 
     const screen = await render(<LeaveCalendarPage />)
+    if (document.querySelector('#leave-calendar-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-calendar-employee')!, 'emp-1')
+    }
     const applyButton = screen.getByRole('button', { name: /apply/i })
     await userEvent.click(applyButton)
     expect(refetch).toHaveBeenCalled()

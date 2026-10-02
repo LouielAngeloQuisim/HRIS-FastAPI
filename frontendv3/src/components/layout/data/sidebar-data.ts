@@ -91,6 +91,12 @@ export const sidebarData: SidebarData = {
       title: 'Projects',
       items: [
         {
+          title: 'Project Types',
+          url: '/project-types',
+          icon: FolderKanban,
+          permission: { module: 'project_type' },
+        },
+        {
           title: 'Projects',
           url: '/projects',
           icon: FolderKanban,

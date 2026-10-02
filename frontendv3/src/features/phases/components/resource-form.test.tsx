@@ -51,7 +51,7 @@ describe('Phases ResourceForm', () => {
     await userEvent.click(screen.getByTestId('phase-subdivision-select'))
     await userEvent.click(screen.getByRole('option', { name: 'Test Subdivision', exact: true }))
     await userEvent.type(textInputs[1] as HTMLElement, 'Phase 1')
-    await userEvent.type(textInputs[2] as HTMLElement, 'Desc')
+    await expect.element(screen.getByLabelText('Description')).not.toBeInTheDocument()
 
     const submitBtn = [...document.querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === 'Create'
@@ -64,7 +64,7 @@ describe('Phases ResourceForm', () => {
     expect(payload.subdivision_id).toBe('sub-1')
     expect(payload.code).toBe('PHASE1')
     expect(payload.name).toBe('Phase 1')
-    expect(payload.description).toBe('Desc')
+    expect(payload).not.toHaveProperty('description')
   })
 
   it('passes subdivision query to SelectDropdown for population', async () => {

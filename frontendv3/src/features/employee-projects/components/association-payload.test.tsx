@@ -20,3 +20,16 @@ it('submits numeric and false boolean values with selected parents', async () =>
   expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({"employee_id": "parent", "project_id": "parent", "rendered_hours": 8, "is_assigned": false, "task": "Planning"}))
   expect(onClose).toHaveBeenCalledOnce()
 })
+
+it('rejects fractional rendered hours before submitting', async () => {
+ mutateAsync.mockClear()
+ const screen = await render(<ResourceForm item={null} open onClose={vi.fn()} />)
+ await userEvent.fill(screen.getByTestId('employee-project-rendered-hours-input'), '2.5')
+ await userEvent.click(screen.getByTestId('employee-project-employee-select'))
+ await userEvent.click(screen.getByRole('option', { name: 'Parent Employee', exact: true }))
+ await userEvent.click(screen.getByTestId('employee-project-project-select'))
+ await userEvent.click(screen.getByRole('option', { name: 'Parent', exact: true }))
+ await userEvent.click(screen.getByTestId('employee-project-submit-button'))
+ await expect.element(screen.getByText('Enter non-negative whole hours')).toBeVisible()
+ expect(mutateAsync).not.toHaveBeenCalled()
+})

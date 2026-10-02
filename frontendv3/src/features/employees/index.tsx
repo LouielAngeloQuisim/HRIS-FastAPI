@@ -78,7 +78,7 @@ export function Employees() {
           />
         )}
       </Main>
-      <CsvImportWizard open={csvImportOpen} onOpenChange={setCsvImportOpen} />
+      {csvImportOpen && <CsvImportWizard open={csvImportOpen} onOpenChange={setCsvImportOpen} />}
     </EmployeesAuthGate>
   )
 }

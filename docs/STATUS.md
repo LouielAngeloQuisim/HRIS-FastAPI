@@ -1,7 +1,7 @@
 # Status (hand-maintained snapshot)
 
-Last updated: 2026-10-02. Baseline: the full E2E completion change, PR #70,
-verified locally with scripts/verify.sh and a separate fresh-database browser run.
+Last updated: 2026-10-02. Baseline: the production UI regression repair branch,
+verified locally with scripts/verify.sh and a separate disposable-database browser run.
 This file is hand-maintained; docs/MAP.md is generated. Refresh observed counts
 after changes rather than preserving dated baseline claims.
 
@@ -16,9 +16,9 @@ after changes rather than preserving dated baseline claims.
 | Alembic migrations | 23, single head 3f0e3e733925; no drift | migration inventory and scripts/verify.sh |
 | API endpoints / route groups | 226 / 39 | generated docs/MAP.md |
 | Domain packages | 12 | generated docs/MAP.md |
-| Vitest | 88 files / 280 tests passed | scripts/verify.sh |
-| Feature test files | 77 | pathlib inventory excluding screenshot artifacts |
-| Playwright | 40 passed, 25 specs, no retries | fresh disposable DB browser run |
+| Vitest | 92 files / 291 tests passed | scripts/verify.sh |
+| Feature test files | 86 | pathlib inventory excluding screenshot artifacts |
+| Playwright | 44 passed, 27 specs, no retries | disposable DB browser run |
 | TypeScript | 0 errors | scripts/verify.sh |
 | ESLint | 0 errors / 2 warnings, report-only | scripts/verify.sh |
 | Frontend build | passed | scripts/verify.sh |

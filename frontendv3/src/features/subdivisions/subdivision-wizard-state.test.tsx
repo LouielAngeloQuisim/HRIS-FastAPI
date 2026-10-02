@@ -1,3 +1,4 @@
+vi.mock('@/lib/api/project-types', () => ({ useProjectTypes: () => ({ data: { data: [] } }) }))
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'

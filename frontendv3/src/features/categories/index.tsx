@@ -69,7 +69,7 @@ export default function CategoryPage() {
                   <td className="p-2">{item.code ?? "—"}</td>
                   <td className="p-2">{item.description ?? "—"}</td>
                   <td className="p-2">{item.location ?? "—"}</td>
-                  <td className="p-2">{item.is_overhead ?? "—"}</td>
+                  <td className="p-2">{item.is_overhead == null ? "Not set" : item.is_overhead ? "Yes" : "No"}</td>
                   <td className="p-2">{item.project_id ?? "—"}</td>
                   <td className="p-2">{item.model_id ?? "—"}</td>
                   <td className="p-2">{item.phase_id ?? "—"}</td>
@@ -86,7 +86,7 @@ export default function CategoryPage() {
           </table>
         </div>
       )}
-      <ResourceForm key={(editing as { id?: string } | null)?.id ?? 'new'} item={editing} open={open} onClose={() => setOpen(false)} />
+      {open && <ResourceForm key={(editing as { id?: string } | null)?.id ?? 'new'} item={editing} open={open} onClose={() => setOpen(false)} />}
       <ResourceDeleteDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}

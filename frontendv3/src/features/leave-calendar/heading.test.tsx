@@ -1,3 +1,5 @@
+import { userEvent } from 'vitest/browser'
+vi.mock('@/lib/api/employees', () => ({ useEmployees: () => ({ data: { data: [{ id: 'emp-1', employee_code: 'EMP1', first_name: 'Test', last_name: 'Employee' }] }, isPending: false }) }))
 import { type Mock, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { type useLeaveCalendar } from '@/lib/api/leave-ledger'
@@ -36,6 +38,9 @@ describe('LeaveCalendarPage (header)', () => {
     })
 
     const screen = await render(<LeaveCalendarPage />)
+    if (document.querySelector('#leave-calendar-employee')) {
+      await userEvent.selectOptions(document.querySelector('#leave-calendar-employee')!, 'emp-1')
+    }
     await expect.element(screen.getByRole('heading', { name: 'Leave Calendar' })).toBeVisible()
   })
 })

@@ -1,3 +1,4 @@
+vi.mock('@/lib/api/daily-time-records', () => ({ useDailyTimeRecords: () => ({ data: { data: [] }, isPending: false }) }))
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
@@ -14,7 +15,7 @@ vi.mock('@/lib/api/dtr-adjustments', () => ({
 describe('DtrAdjustmentForm', () => {
   it('renders form fields when open', async () => {
     const screen = await render(<DtrAdjustmentForm open={true} onClose={vi.fn()} />)
-    await expect.element(screen.getByLabelText(/Daily Time Record ID/i)).toBeInTheDocument()
+    await expect.element(screen.getByLabelText(/Daily Time Record/i)).toBeInTheDocument()
     await expect.element(screen.getByLabelText(/Adjusted Login Date/i)).toBeInTheDocument()
     await expect.element(screen.getByLabelText(/Adjusted Logout Date/i)).toBeInTheDocument()
   })

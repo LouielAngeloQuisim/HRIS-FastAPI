@@ -1,11 +1,15 @@
+import { useLeavePolicies } from '@/lib/api/leave-policies'
+import { useEmployees } from '@/lib/api/employees'
 import { useState } from 'react'
 import { useCan } from '@/context/permissions-provider'
 import { useLeaveLedger } from '@/lib/api/leave-ledger'
 import { Button } from '@/components/ui/button'
 
 export default function LeaveLedgerPage() {
-  const [employeeId] = useState('00000000-0000-0000-0000-000000000000')
-  const [policyId] = useState<string | undefined>(undefined)
+  const [employeeId, setEmployeeId] = useState('')
+  const employees = useEmployees(1, 100)
+  const [policyId, setPolicyId] = useState('')
+  const policies = useLeavePolicies()
   const [leaveYear, setLeaveYear] = useState(new Date().getFullYear())
   const canView = useCan('emp_leaves', 'view')
 
@@ -30,23 +34,38 @@ export default function LeaveLedgerPage() {
         </div>
         <div className="flex gap-2">
           <input
+            aria-label="Leave Year"
             type="number"
             className="border rounded px-2 py-1 text-sm w-24"
             value={leaveYear}
             onChange={(e) => setLeaveYear(Number(e.target.value))}
             data-testid="leave-ledger-year-input"
           />
-          <Button onClick={() => refetch()} data-testid="leave-ledger-refresh-button">Refresh</Button>
+          <Button disabled={!employeeId || !policyId} onClick={() => refetch()} data-testid="leave-ledger-refresh-button">Refresh</Button>
         </div>
       </div>
-      {isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
-      {isError && (
+      <div className="flex flex-wrap items-center gap-3">
+        <label htmlFor="leave-ledger-employee">Employee</label>
+        <select id="leave-ledger-employee" data-testid="leave-ledger-employee-select" className="rounded border bg-background p-2" value={employeeId} onChange={event => setEmployeeId(event.target.value)}>
+          <option value="">Select an employee</option>
+          {(employees.data?.data ?? []).map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} - {employee.first_name} {employee.last_name}</option>)}
+        </select>
+        <label htmlFor="leave-ledger-policy">Policy</label>
+        <select id="leave-ledger-policy" data-testid="leave-ledger-policy-select" className="rounded border bg-background p-2" value={policyId} onChange={event => setPolicyId(event.target.value)}>
+          <option value="">Select a policy</option>
+          {(policies.data?.data ?? []).filter(policy => policy.is_active).map(policy => <option key={policy.id} value={policy.id}>{policy.code} - {policy.name}</option>)}
+        </select>
+      </div>
+      {!employeeId && <p>Select an employee to view their leave ledger.</p>}
+      {employeeId && !policyId && <p>Select a leave policy to view its ledger.</p>}
+      {employeeId && policyId && isPending && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {employeeId && policyId && isError && (
         <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-12 text-center">
           <p className="text-sm text-muted-foreground">Failed to load leave ledger.</p>
           <button type="button" onClick={() => refetch()} className="text-sm font-medium text-primary underline underline-offset-4">Try again</button>
         </div>
       )}
-      {!isPending && !isError && (!data || data.data.length === 0) && (
+      {employeeId && policyId && !isPending && !isError && (!data || data.data.length === 0) && (
         <div className="border rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -64,7 +83,7 @@ export default function LeaveLedgerPage() {
           </table>
         </div>
       )}
-      {data && data.data.length > 0 && (
+      {employeeId && policyId && data && data.data.length > 0 && (
         <div className="border rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

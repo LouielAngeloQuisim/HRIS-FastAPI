@@ -131,7 +131,7 @@ export default function DtrAdjustmentsPage() {
           </table>
         </div>
       )}
-      <DtrAdjustmentForm open={open} onClose={() => setOpen(false)} />
+      {open && <DtrAdjustmentForm open={open} onClose={() => setOpen(false)} />}
     </div>
   )
 }

@@ -47,3 +47,19 @@ export function useRejectOvertime() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['daily-time-records'] }),
   })
 }
+
+export function useUpdateDailyTimeRecord() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { login_date: string; logout_date: string } }) => api.patch<DailyTimeRecordPublic>('/daily-time-records/' + id, data).then(response => response.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['daily-time-records'] }),
+  })
+}
+
+export function useDeleteDailyTimeRecord() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.delete('/daily-time-records/' + id).then(response => response.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['daily-time-records'] }),
+  })
+}

@@ -1,3 +1,4 @@
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -28,7 +29,7 @@ import type { EmpTaskPublic, EmpTaskCreate, EmpTaskUpdate } from '@/lib/api/type
 const formSchema = z.object({
   emp_project_id: z.string().optional(),
   task_desc: z.string().optional(),
-  rendered_hours: z.string().optional().transform(value => value ? Number(value) : undefined),
+  rendered_hours: z.string().optional().refine(value => !value || (Number.isInteger(Number(value)) && Number(value) >= 0), 'Enter non-negative whole hours').transform(value => value ? Number(value) : undefined),
   assigned_hours: z.string().optional().transform(value => value ? Number(value) : undefined),
   date: z.string().optional().transform(value => value || undefined),
   approved: z.enum(['', 'true', 'false']).optional().transform(value => value ? value === 'true' : undefined),
@@ -68,6 +69,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
   })
 
   const onSubmit = async (data: FormData) => {
+    form.clearErrors('root.server')
     try {
       if (isEdit && item?.id) {
         await updateMutation.mutateAsync({ id: item.id, data: data as unknown as EmpTaskUpdate })
@@ -75,8 +77,8 @@ export function ResourceForm({ item, onClose, open }: Props) {
         await createMutation.mutateAsync(data as unknown as EmpTaskCreate)
       }
       onClose()
-    } catch (_e) {
-      // _e is caught error
+    } catch (error) {
+      form.setError('root.server', { message: saveErrorMessage(error) })
     }
   }
 
@@ -93,6 +95,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form id="emp-tasks-form" onSubmit={form.handleSubmit(onSubmit)} className="flex-1 space-y-6 overflow-y-auto px-4">
+            {form.formState.errors.root?.server?.message && <p role="alert" className="text-destructive">{String(form.formState.errors.root.server.message)}</p>}
             <>
               <FormField control={form.control} name="emp_project_id" render={({ field }) => (
                 <FormItem>

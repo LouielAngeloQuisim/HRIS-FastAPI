@@ -26,6 +26,7 @@ import { useBlocks } from '@/lib/api/blocks'
 import type { LotsPublic, LotsCreate, LotsUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
+  blocks_id: z.string().min(1, 'Select a parent record'),
   lot_number: z.string().optional(),
   description: z.string().optional(),
 })
@@ -59,11 +60,12 @@ export function ResourceForm({ item, onClose, open }: Props) {
   })
 
   const onSubmit = async (data: FormData) => {
+    const payload = { lot_name: data.lot_number, blocks_id: data.blocks_id }
     try {
       if (isEdit && item?.id) {
-        await updateMutation.mutateAsync({ id: item.id, data: data as unknown as LotsUpdate })
+        await updateMutation.mutateAsync({ id: item.id, data: payload as unknown as LotsUpdate })
       } else {
-        await createMutation.mutateAsync(data as unknown as LotsCreate)
+        await createMutation.mutateAsync(payload as unknown as LotsCreate)
       }
       onClose()
     } catch (_e) {

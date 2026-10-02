@@ -28,11 +28,11 @@ import type { EmpTaskPublic, EmpTaskCreate, EmpTaskUpdate } from '@/lib/api/type
 const formSchema = z.object({
   emp_project_id: z.string().optional(),
   task_desc: z.string().optional(),
-  rendered_hours: z.string().optional(),
-  assigned_hours: z.string().optional(),
-  date: z.string().optional(),
-  approved: z.string().optional(),
-  is_adjusted: z.string().optional(),
+  rendered_hours: z.string().optional().transform(value => value ? Number(value) : undefined),
+  assigned_hours: z.string().optional().transform(value => value ? Number(value) : undefined),
+  date: z.string().optional().transform(value => value || undefined),
+  approved: z.enum(['', 'true', 'false']).optional().transform(value => value ? value === 'true' : undefined),
+  is_adjusted: z.enum(['', 'true', 'false']).optional().transform(value => value ? value === 'true' : undefined),
 })
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FormData = any
@@ -59,11 +59,11 @@ export function ResourceForm({ item, onClose, open }: Props) {
     defaultValues: {
       emp_project_id: item?.emp_project_id ?? '',
       task_desc: item?.task_desc ?? '',
-      rendered_hours: item?.rendered_hours ?? '',
-      assigned_hours: item?.assigned_hours ?? '',
+      rendered_hours: item?.rendered_hours == null ? '' : String(item.rendered_hours),
+      assigned_hours: item?.assigned_hours == null ? '' : String(item.assigned_hours),
       date: item?.date ?? '',
-      approved: item?.approved ?? '',
-      is_adjusted: item?.is_adjusted ?? '',
+      approved: item?.approved == null ? '' : String(item.approved),
+      is_adjusted: item?.is_adjusted == null ? '' : String(item.is_adjusted),
     },
   })
 

@@ -16,9 +16,12 @@ test.describe('Daily Time Records E2E', () => {
   test('should retry on error', async ({ page }) => {
     const dtr = new DailyTimeRecordsPage(page)
     await dtr.goto()
-    const retryBtn = page.locator('[data-testid="retry-button"]')
-    if (await retryBtn.count() > 0) {
-      await dtr.clickRetry()
-    }
+    await page.route('**/api/v1/daily-time-records?**', route => route.fulfill({ status: 500, json: { error: { message: 'Injected test failure' } } }))
+    await page.reload()
+    await expect(page.getByText('Failed to load daily time records.')).toBeVisible({ timeout: 15000 })
+    await page.unroute('**/api/v1/daily-time-records?**')
+    await page.getByRole('button', { name: 'Try again', exact: true }).click()
+    await expect(page.getByText('Failed to load daily time records.')).not.toBeVisible({ timeout: 10000 })
+    await expect(page.locator('table')).toBeVisible()
   })
 })

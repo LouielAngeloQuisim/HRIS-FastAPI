@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures'
+import { createParent, waitForWrite, assertWrite } from '../helpers/crud-journey'
 import { DtrAdjustmentsPage } from '../pages/dtr-adjustments.page'
 
 test.describe('DTR Adjustments E2E', () => {
@@ -17,11 +18,18 @@ test.describe('DTR Adjustments E2E', () => {
     const adjustments = new DtrAdjustmentsPage(page)
     await adjustments.goto()
     await adjustments.clickNew()
-    await adjustments.fillDtrId('E2E-DTR-001')
+    const unique = Date.now().toString(36)
+    const employee = await createParent(page, 'employees', { employee_code: 'E' + unique, first_name: 'E2E', last_name: 'Adjustment', birthdate: '1990-01-01' })
+    const dtr = await createParent(page, 'daily-time-records', { employee_id: employee.id, login_date: '2026-09-15T08:00:00', logout_date: '2026-09-15T17:00:00' })
+    await adjustments.fillDtrId(dtr.id)
+    await page.getByTestId('dtr-adjustment-date-input').fill('2026-09-15')
     await adjustments.fillAdjustedLogin('2026-09-15T08:00')
     await adjustments.fillAdjustedLogout('2026-09-15T17:00')
     await adjustments.fillReason('E2E test adjustment')
+    const submitted = waitForWrite(page, 'dtr-adjustments', 'POST')
     await adjustments.submit()
-    await expect(page.locator('[data-testid="dtr-adjustment-submit-button"]')).toHaveText('Submit Adjustment', { timeout: 10000 })
+    const created = await assertWrite(await submitted, 201)
+    expect(created.daily_time_record_id).toBe(dtr.id)
+    await expect(page.getByTestId('dtr-adjustment-submit-button')).not.toBeVisible()
   })
 })

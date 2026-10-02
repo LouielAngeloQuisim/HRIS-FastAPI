@@ -4,13 +4,13 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:5173'
 const API_URL = process.env.E2E_API_URL || 'http://localhost:8000/api/v1'
 
 const TEST_ADMIN = {
-  email: 'lacquisim@gmail.com',
-  password: 'password',
+  email: (process.env.E2E_ADMIN_EMAIL || 'admin@example.com'),
+  password: (process.env.E2E_ADMIN_PASSWORD || 'e2e-admin-placeholder'),
 }
 
 const TEST_USER = {
-  email: 'user@example.com',
-  password: 'changethis',
+  email: process.env.E2E_USER_EMAIL || 'user@example.com',
+  password: process.env.E2E_USER_PASSWORD || 'e2e-user-placeholder',
 }
 
 test.describe('Authentication E2E Tests', () => {

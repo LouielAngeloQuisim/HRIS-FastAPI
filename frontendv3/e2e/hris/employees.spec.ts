@@ -17,15 +17,18 @@ test.describe('Employees E2E', () => {
     const employees = new EmployeesPage(page)
     await employees.goto()
     await employees.clickCsvImport()
-    await expect(page.locator('[data-testid="csv-import-wizard"]')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('dialog', { name: 'Import Employees from CSV' })).toBeVisible({ timeout: 5000 })
   })
 
   test('should retry on error', async ({ page }) => {
     const employees = new EmployeesPage(page)
     await employees.goto()
-    const retryBtn = page.locator('[data-testid="retry-button"]')
-    if (await retryBtn.count() > 0) {
-      await employees.clickRetry()
-    }
+    await page.route('**/api/v1/employees?**', route => route.fulfill({ status: 500, json: { error: { message: 'Injected test failure' } } }))
+    await page.reload()
+    await expect(page.getByText('Failed to load employees.')).toBeVisible({ timeout: 15000 })
+    await page.unroute('**/api/v1/employees?**')
+    await page.getByRole('button', { name: 'Try again', exact: true }).click()
+    await expect(page.getByText('Failed to load employees.')).not.toBeVisible({ timeout: 10000 })
+    await expect(page.locator('table')).toBeVisible()
   })
 })

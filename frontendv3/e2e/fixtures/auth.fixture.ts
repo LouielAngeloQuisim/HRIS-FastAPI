@@ -21,7 +21,7 @@ export async function injectAuthFixtures(page: Page): Promise<AuthFixtures> {
   }
 
   return {
-    loginAsAdmin: () => login('lacquisim@gmail.com', 'password'),
+    loginAsAdmin: () => login((process.env.E2E_ADMIN_EMAIL || 'admin@example.com'), (process.env.E2E_ADMIN_PASSWORD || 'e2e-admin-placeholder')),
     loginAsUser: (email, password) => login(email, password),
     logout: async () => {
       const refreshToken = (await page.context().cookies())

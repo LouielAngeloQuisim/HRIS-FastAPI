@@ -79,7 +79,7 @@ and #57 respectively.)
 | #36 | DEFERRED / REMOVED FROM ACTIVE SCOPE |
 | #37 | DEFERRED / REMOVED FROM ACTIVE SCOPE |
 | #38 | DEFERRED / REMOVED FROM ACTIVE SCOPE |
-| #39 | OPEN |
+| #39 | DONE |
 | #40 | NEEDS RECONCILIATION |
 | #41 | SKIPPED / NOT APPLICABLE (not a repository concern) |
 | #42 | IN PROGRESS |
@@ -218,12 +218,13 @@ task #32. Do not conflate PR numbers with task numbers.)
 ### #34–#38 — Nightly automation / restore-drill tasks — DEFERRED / REMOVED FROM ACTIVE SCOPE
 Explicit owner decision. Do not implement. Do not renumber anything after them.
 
-### #39 — Fresh Playwright E2E setup — OPEN
-PR #45 (merged) made Playwright-based Vitest browser tests pass on
-ubuntu-26.04 CI. However the 25 Playwright E2E specs under `frontendv3/e2e/`
-are still not executed anywhere in CI (no `playwright test` invocation in
-`.github/workflows/ci.yml`). Decide: run E2E in CI or scope-close with a
-documented decision.
+### #39 - Fresh Playwright E2E setup - DONE
+The dedicated E2E workflow runs all 25 specs on pull requests and main
+against an isolated PostgreSQL database, with Python 3.14 and Node 26.
+Verified 2026-10-02: 40 browser tests passed on a fresh database;
+scripts/verify.sh passed with 707 backend tests, 280 frontend tests,
+zero mypy errors, and no migration drift. CRUD journeys assert persistence
+and deletion. See docs/plans/e2e-ci-completion.md for coverage and limits.
 
 ### #40 — Secrets committed to Git history — NEEDS RECONCILIATION
 Filename-level scan found no tracked secret-bearing files (`.env` is

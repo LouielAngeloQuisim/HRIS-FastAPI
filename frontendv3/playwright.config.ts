@@ -35,10 +35,18 @@ export default defineConfig({
     //   use: { ...devices['Desktop Safari'] },
     // },
   ],
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120000,
-  },
+  webServer: process.env.E2E_EXTERNAL_SERVERS === 'true' ? undefined : [
+    ...(process.env.E2E_START_BACKEND === 'true' ? [{
+      command: 'uv run --directory ../backend uvicorn app.main:app --host 127.0.0.1 --port 8000',
+      url: 'http://127.0.0.1:8000/api/v1/utils/health-check/',
+      reuseExistingServer: false,
+      timeout: 120000,
+    }] : []),
+    {
+      command: 'pnpm dev --host 127.0.0.1',
+      url: process.env.E2E_BASE_URL || 'http://localhost:5173',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+    },
+  ],
 })

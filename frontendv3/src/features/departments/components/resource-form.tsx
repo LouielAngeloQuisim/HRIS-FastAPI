@@ -26,6 +26,7 @@ import { useDivisions } from '@/lib/api/divisions'
 import type { DepartmentPublic, DepartmentCreate, DepartmentUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
+  division_id: z.string().min(1, 'Select a parent record'),
   code: z.string().optional(),
   name: z.string().optional(),
   description: z.string().optional(),

@@ -26,6 +26,7 @@ import { useDepartments } from '@/lib/api/departments'
 import type { PositionPublic, PositionCreate, PositionUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
+  department_id: z.string().optional().transform(value => value || undefined),
   code: z.string().optional(),
   title: z.string().optional(),
   description: z.string().optional(),

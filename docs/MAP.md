@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-03
-Source commit: 4959547ed24e3850aa8731e40200c19732e20235
+Source commit: be66143665418dea6e5ef3fbddc77e6124d577d3
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 226 endpoints in 39 groups
+## Backend routes (`/api/*`): 227 endpoints in 39 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -35,10 +35,11 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `GET /api/v1/categories/{obj_id}`  `[perms: category:view]`
 - `PATCH /api/v1/categories/{obj_id}`  `[perms: category:edit]`
 
-### `/api/v1/daily-time-records` (7 routes)
+### `/api/v1/daily-time-records` (8 routes)
 
 - `GET /api/v1/daily-time-records/`  `[perms: daily_time_record:view]`
 - `POST /api/v1/daily-time-records/`  `[perms: daily_time_record:add]`
+- `POST /api/v1/daily-time-records/reconcile-imports`  `[perms: daily_time_record:add]`
 - `DELETE /api/v1/daily-time-records/{obj_id}`  `[perms: daily_time_record:delete]`
 - `GET /api/v1/daily-time-records/{obj_id}`  `[perms: daily_time_record:view]`
 - `PATCH /api/v1/daily-time-records/{obj_id}`  `[perms: daily_time_record:edit]`
@@ -419,7 +420,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 23 revisions, single head `3f0e3e733925`
+## Migration chain (oldest -> newest): 24 revisions, single head `7ab12cd44e91`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -447,6 +448,7 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 21. `a1b2c3d4e5f6` - add pre_payday_check to notificationtype enum
 22. `54ff6e36652b` - add_payroll_tables
 23. `3f0e3e733925` - change employee_salary unique constraint to include effective_date
+24. `7ab12cd44e91` - add partial unique index for DTR import idempotency (QA-01)
 
 ### Migration anomalies (static findings, report-only)
 

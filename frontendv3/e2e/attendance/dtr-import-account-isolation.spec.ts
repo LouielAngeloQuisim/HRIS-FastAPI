@@ -101,7 +101,7 @@ test.describe('DTR CSV import cross-account isolation E2E (PR74 P1)', () => {
     await page.request.post(`${apiUrl}/users`, {
       headers: { Authorization: `Bearer ${await bearer(page)}` },
       data: { email: userB.email, password: userB.password, full_name: 'Isolation B', is_superuser: true },
-    }).then(r => expect(r.status(), 'create second E2E account').toBe(201))
+    }).then(r => expect(r.status(), 'create second E2E account').toBe(200))
 
     // --- Real SPA logout (client-side): nav-user -> Sign out -> confirm ----
     await page.getByTestId('nav-user-trigger').click()

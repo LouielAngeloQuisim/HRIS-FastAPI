@@ -8,7 +8,13 @@ const { apiPostMock, toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),
   toastErrorMock: vi.fn(),
 }))
-vi.mock('@/lib/api/client', () => ({ api: { post: (...a: unknown[]) => apiPostMock(...a) } }))
+vi.mock('@/lib/api/client', () => ({
+  api: { post: (...a: unknown[]) => apiPostMock(...a) },
+  // auth-store hydrate() reads these at import time; no session in this test.
+  getAccessToken: () => undefined,
+  getRefreshToken: () => undefined,
+  clearTokens: () => {},
+}))
 vi.mock('sonner', () => ({
   toast: { success: (...a: unknown[]) => toastSuccessMock(...a), error: (...a: unknown[]) => toastErrorMock(...a) },
 }))

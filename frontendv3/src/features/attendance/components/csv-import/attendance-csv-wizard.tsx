@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 // @ts-expect-error - papaparse has no type declarations
 import Papa from 'papaparse'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api/client'
+import { useAuthStore } from '@/stores/auth-store'
 import { toast } from 'sonner'
 import { AlertTriangle, CheckCircle2, Upload, XCircle } from 'lucide-react'
 
@@ -46,13 +47,58 @@ interface RecoverableBatch {
   results: RowResult[]
 }
 
-// Single-slot in-memory store (never persisted to disk, never holds more than
-// the CSV the user already has in the textarea). QA-01 blocker: closing the
-// dialog while rows are UNKNOWN must NOT discard their identities — a reopen
-// restores the exact batch so Reconcile matches committed rows by their real
-// keys and a retry reuses them (server-side dedupe makes any re-attempt
-// duplicate-safe).
-let recoverableSlot: RecoverableBatch | null = null
+// The server bounds one reconcile request at 200 (employee, key) pairs
+// (backend RECONCILE_MAX_KEYS, schemas.py) and rejects a larger WHOLE payload
+// with 422 — which would leave every unresolved row stuck. The wizard
+// therefore chunks proactively below that bound (PR74 review P2); the
+// server-side limit remains the authoritative contract.
+const RECONCILE_CHUNK_SIZE = 200
+
+// Owner-bound single-slot in-memory store (never persisted to disk, never
+// holds more than the CSV the user already has in the textarea). QA-01
+// blocker: closing the dialog while rows are UNKNOWN must NOT discard their
+// identities — a reopen restores the exact batch so Reconcile matches
+// committed rows by their real keys and a retry reuses them (server-side
+// dedupe makes any re-attempt duplicate-safe).
+//
+// PR74 review P1: that batch (employee CSV + identity keys + verdicts) is
+// sensitive HR data of the account that created it, so it is bound to an
+// OWNER key derived from the authenticated store:
+//   - signed-in user id when hydrated (stable across token rotation; the
+//     401 interceptor refreshes cookies, never the store identity), else
+//   - the access token captured at sign-in (a fresh login always mints a
+//     new one), else
+//   - '' = identity unknown (page reloaded without re-login): a slot may
+//     only match a slot with the same unknown identity, which within one
+//     browser page session can only ever be the same person — any account
+//     switch necessarily hydrates a different owner.
+// Enforcement is two-layered:
+//   1. A store subscription drops the slot the moment the owner key changes
+//      (logout/reset, re-login, account switch) — invalidated, not transferred.
+//   2. Restore requires an EXACT owner match at mount; a foreign slot is
+//      cleared on the spot and no batch is handed over.
+// Same user, same session: close/reopen keeps the same owner key, so the
+// QA-01 recovery is fully preserved.
+let recoverableSlot: { owner: string; batch: RecoverableBatch } | null = null
+
+/** Current authenticated-session owner key; '' = identity unknown. */
+function currentOwner(): string {
+  const { user, accessToken } = useAuthStore.getState().auth
+  if (user?.id) return `u:${user.id}`
+  if (accessToken) return `t:${accessToken}`
+  return ''
+}
+
+let lastOwner = currentOwner()
+useAuthStore.subscribe(() => {
+  const owner = currentOwner()
+  if (owner !== lastOwner) {
+    lastOwner = owner
+    // Identity changed (logout, account switch, re-login): the previous
+    // session's unresolved batch is invalidated — never transferred.
+    recoverableSlot = null
+  }
+})
 
 /** Test-only: reset the cross-close store between renders. */
 export function __resetRecoverableSlotForTests() {
@@ -69,7 +115,15 @@ type ReconcileVerdict = 'committed' | 'deleted' | 'not_found' | 'unresolved'
 
 export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const queryClient = useQueryClient()
-  const restored = useState(() => recoverableSlot)[0]
+  // Owner captured at mount (state, not a ref — this stays stable for the
+  // lifetime of the mounted wizard). The slot is restored ONLY when its
+  // owner matches exactly; a foreign slot is never handed over. All async
+  // handlers re-check the live owner before touching shared state or the
+  // slot (PR74 review P1).
+  const [owner] = useState(currentOwner)
+  const restored = useState(() =>
+    recoverableSlot && recoverableSlot.owner === owner ? recoverableSlot.batch : null
+  )[0]
   const [file, setFile] = useState<File | null>(null)
   const [csvText, setCsvText] = useState(() => restored?.csvText ?? '')
   const [parsedRows, setParsedRows] = useState<CsvRow[]>(() => restored?.rows ?? [])
@@ -79,6 +133,13 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
   const [isImporting, setIsImporting] = useState(false)
   const [isReconciling, setIsReconciling] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [abandoned, setAbandoned] = useState(false)
+
+  // Defense in depth: a slot owned by a DIFFERENT session is dropped on the
+  // spot — it can never be restored, reconciled or retried by this account.
+  useEffect(() => {
+    if (recoverableSlot && recoverableSlot.owner !== owner) recoverableSlot = null
+  }, [owner])
 
   const requiredFields = useMemo(() => DTR_REQUIRED_FIELDS, [])
 
@@ -183,12 +244,34 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
 
   const unknownCount = results.filter(r => r.status === 'unknown').length
 
+  // Live identity check for every async path (PR74 review P1): once the
+  // signed-in account no longer matches this wizard's owner, the instance is
+  // abandoned — no result commits, no slot writes, no UI state to leak.
+  const identityLive = useCallback(() => !abandoned && currentOwner() === owner, [abandoned, owner])
+
+  const abandonInstance = useCallback(() => {
+    // Identity changed mid-operation: wipe the sensitive batch from THIS
+    // wizard. The module slot is already dropped by the store subscription.
+    setAbandoned(true)
+    setFile(null)
+    setCsvText('')
+    setParsedRows([])
+    setHeaders([])
+    setBatchId('')
+    setResults([])
+    setProgress(0)
+    setIsImporting(false)
+    setIsReconciling(false)
+    toast.error('Signed-in account changed — this import was abandoned. Unresolved rows were not restored.')
+  }, [])
+
   const handleImport = useCallback(async () => {
     if (parsedRows.length === 0) {
       toast.error('No data to import')
       return
     }
     if (unknownCount > 0) return // guarded in the UI; defense in depth
+    if (!identityLive()) { abandonInstance(); return }
 
     setIsImporting(true)
 
@@ -200,6 +283,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     let done = 0
 
     for (const i of pendingIndices) {
+      if (!identityLive()) { abandonInstance(); return }
       const row = parsedRows[i]
       const key = current[i].key
       const validationError = validateRow(row)
@@ -245,6 +329,11 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
       setProgress(Math.round((done / total) * 100))
     }
 
+    // Final identity check before committing any results: if the account
+    // changed mid-import, verdicts from the previous account's session are
+    // never rendered and never stored for restore.
+    if (!identityLive()) { abandonInstance(); return }
+
     if (current.some(row => row.status === 'success')) {
       await queryClient.invalidateQueries({ queryKey: ['daily-time-records'] })
     }
@@ -262,31 +351,58 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     } else {
       toast.error(`Imported ${successCount} time records, ${errorCount} failed`)
     }
-  }, [parsedRows, results, pendingIndices, unknownCount, validateRow, queryClient, keyForRow])
+  }, [parsedRows, results, pendingIndices, unknownCount, validateRow, queryClient, keyForRow, identityLive, abandonInstance])
 
   // Deliberate resolution of 'unknown' rows (QA-01): ask the server for a
   // verdict on each (employee, identity-key) PAIR via the bounded authorized
   // reconcile endpoint — never scan pages of unrelated rows, never match a
   // natural key, never treat "not in my visible scope" as "not committed".
+  //
+  // PR74 review P2: the endpoint accepts at most RECONCILE_MAX_KEYS (200)
+  // pairs per request; oversized payloads are rejected whole (422), which
+  // would strand every row. Requests are therefore split into sequential
+  // chunks of <= 200. A transport failure on a chunk keeps every verdict
+  // already collected (those rows settle), leaves the failed chunk's rows —
+  // and any later chunks — UNKNOWN with retry blocked, and the next
+  // Reconcile attempt re-verifies exactly those remaining pairs (server-side
+  // verdicts are idempotent reads).
   const handleReconcile = useCallback(async () => {
     const unknowns = results.filter(r => r.status === 'unknown')
     if (unknowns.length === 0 || isReconciling) return
+    if (!identityLive()) { abandonInstance(); return }
 
     setIsReconciling(true)
     const verdicts = new Map<string, { status: ReconcileVerdict; record_id?: string }>()
-    try {
-      const pairs = unknowns.map((r) => ({
-        employee_code: r.data.employee_code,
-        source_ref: r.key,
-      }))
-      const { data } = await api.post('/daily-time-records/reconcile-imports', { keys: pairs })
-      for (const result of data.results) {
-        verdicts.set(`${result.employee_code}\u0000${result.source_ref}`, {
-          status: result.status,
-          record_id: result.record_id,
-        })
+    const pairs = unknowns.map((r) => ({
+      employee_code: r.data.employee_code,
+      source_ref: r.key,
+    }))
+    let chunkFailed = false
+    for (let start = 0; start < pairs.length; start += RECONCILE_CHUNK_SIZE) {
+      if (!identityLive()) { abandonInstance(); return }
+      const chunk = pairs.slice(start, start + RECONCILE_CHUNK_SIZE)
+      try {
+        const { data } = await api.post('/daily-time-records/reconcile-imports', { keys: chunk })
+        for (const result of data.results) {
+          verdicts.set(`${result.employee_code}\u0000${result.source_ref}`, {
+            status: result.status,
+            record_id: result.record_id,
+          })
+        }
+      } catch {
+        // Partial failure: stop issuing chunks, but KEEP and apply every
+        // verdict already collected — settled rows unlock, the rest stay
+        // UNKNOWN with retry blocked, and the next attempt re-verifies only
+        // those remaining pairs. Nothing is stranded by a failed chunk.
+        chunkFailed = true
+        break
       }
-    } catch {
+    }
+    if (!identityLive()) { abandonInstance(); return }
+
+    if (chunkFailed && verdicts.size === 0) {
+      // First chunk died with nothing settled: identical to the previous
+      // whole-batch failure behavior — all rows stay UNKNOWN, retry blocked.
       toast.error('Could not reach the reconciliation service — rows stay Unknown. Try Reconcile again.')
       setIsReconciling(false)
       return
@@ -341,7 +457,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     if (retired > 0) toast.error(`${retired} row(s) were deleted deliberately - not resurrected`)
     if (kept > 0) toast.error(`${kept} row(s) could not be verified - retry stays blocked`)
     if (freed > 0 && kept === 0) toast.info('Reconciled: rows can now be retried safely.')
-  }, [results, isReconciling, queryClient])
+  }, [results, isReconciling, queryClient, identityLive, abandonInstance])
 
   // Explicit, warned abandonment of unresolved identities (their committed
   // rows, if any, stay in the database; only this client forgets the keys).
@@ -357,9 +473,15 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     // Preserve unresolved batches across close/reopen (QA-01 blocker 3):
     // identities survive in-memory so a reopen reconciles/retries with the
     // SAME keys instead of starting a duplicate-safe-blind fresh batch.
-    if (hasUnresolved(results) && parsedRows.length > 0) {
-      recoverableSlot = { batchId, csvText, headers, rows: parsedRows, results }
-    } else {
+    // The slot stays BOUND TO THIS OWNER — a stale (identity-changed)
+    // instance never writes or clears the shared slot at all (PR74 P1).
+    const live = identityLive()
+    if (live && hasUnresolved(results) && parsedRows.length > 0) {
+      recoverableSlot = {
+        owner,
+        batch: { batchId, csvText, headers, rows: parsedRows, results },
+      }
+    } else if (live) {
       recoverableSlot = null
       setTimeout(() => {
         setFile(null)
@@ -372,7 +494,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
       }, 200)
     }
     onOpenChange(false)
-  }, [isImporting, results, parsedRows, batchId, csvText, headers, onOpenChange])
+  }, [isImporting, results, parsedRows, batchId, csvText, headers, onOpenChange, identityLive, owner])
 
   const successCount = results.filter(r => r.status === 'success').length
   const errorCount = results.filter(r => r.status === 'error').length

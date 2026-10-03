@@ -13,6 +13,11 @@ const { apiPostMock, toastSuccessMock, toastErrorMock, toastWarningMock, toastIn
 }))
 vi.mock('@/lib/api/client', () => ({
   api: { post: (...a: unknown[]) => apiPostMock(...a) },
+  // auth-store hydrate() reads these at import time; identity is driven via
+  // the real store's actions in the owner-scoping tests.
+  getAccessToken: () => undefined,
+  getRefreshToken: () => undefined,
+  clearTokens: () => {},
 }))
 vi.mock('sonner', () => ({
   toast: {

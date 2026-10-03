@@ -1,0 +1,3 @@
+# Payroll UI restoration
+
+Restore recovered payroll execution/runs and BIR/SSS/PhilHealth/Pag-IBIG pages in an isolated branch from main 4959547. Adapt clients to current backend routes and response shapes; preserve existing application fixes and permissions. Restore relevant component tests and add real API-contract coverage and an isolated E2E journey. Verify full scripts/verify.sh and CI before PR merge/deployment, then manually inspect production via browser and record remaining workflow gaps in docs/bugs. Do not alter statutory rates or run actual payouts. Historical shared files require selective merging, not replacement. Reuse existing isolated QA database where compatible; gate-managed disposable containers must remain isolated and cleaned.

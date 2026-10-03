@@ -164,6 +164,17 @@ export const sidebarData: SidebarData = {
       ],
     },
     {
+      title: 'Payroll',
+      items: [
+        { title: 'Payroll', url: '/payroll', icon: FolderKanban, permission: { module: 'payroll' } },
+        { title: 'Payroll Runs', url: '/payroll-runs', icon: FolderKanban, permission: { module: 'payroll' } },
+        { title: 'SSS Config', url: '/payroll-config/sss', icon: FolderKanban, permission: { module: 'sss_config' } },
+        { title: 'PhilHealth Config', url: '/payroll-config/philhealth', icon: FolderKanban, permission: { module: 'philhealth_config' } },
+        { title: 'Pag-IBIG Config', url: '/payroll-config/pagibig', icon: FolderKanban, permission: { module: 'pagibig_config' } },
+        { title: 'BIR Config', url: '/payroll-config/bir', icon: FolderKanban, permission: { module: 'bir_config' } },
+      ],
+    },
+    {
       title: 'Administration',
       items: [
         {

@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
-Generated: 2026-10-02
-Source commit: c16116508cf7f9e985a2d413e07e7168d389abcf
+Generated: 2026-10-03
+Source commit: 4959547ed24e3850aa8731e40200c19732e20235
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
@@ -375,7 +375,7 @@ is omitted here, as are `config` (engine/settings) and `email-templates`.
 - `reports`: routes.py
 - `user`: models.py, schemas.py, routes/, services.py, selectors.py
 
-## Frontend features (`frontendv3/src/features/`): 32 features
+## Frontend features (`frontendv3/src/features/`): 35 features
 
 API columns are modules imported from `@/lib/api/*` (grep-based, per-verified
 reliable in the source tree's single-line import style) with plumbing
@@ -405,6 +405,9 @@ reliable in the source tree's single-line import style) with plumbing
 - `model-types`: api `model-types`; flags: route, form
 - `models`: api `model-types`, `models`, `save-error`; flags: route, form, test
 - `owners`: api `owners`; flags: route, form, test
+- `payroll`: api `departments`, `employees`, `payroll`, `save-error`; flags: route, test
+- `payroll-config`: api `auth`, `payroll-config`; flags: route, form, test
+- `payroll-runs`: api `payroll`; flags: route, test
 - `phases`: api `phases`, `save-error`, `subdivisions`; flags: route, form, test
 - `positions`: api `departments`, `positions`; flags: route, form, test
 - `project-types`: api `project-types`; flags: route, form
@@ -469,13 +472,14 @@ basename. Does not replace reading the actual imports for a given feature.
 - `attendance` <-> `attendance`
 - `auth` <-> `auth`
 - `dashboard` <-> `dashboard`
+- `payroll` <-> `payroll`
 
-Backend domains with no same-named frontend feature: `audit`, `employee`, `item`, `leave`, `notification`, `payroll`, `rbac`, `reports`, `user`
+Backend domains with no same-named frontend feature: `audit`, `employee`, `item`, `leave`, `notification`, `rbac`, `reports`, `user`
 (A name mismatch here does not mean the domain is unused: `app/employee/` serves
 routers for ~16 resources that each have their own frontend feature, and
 `attendance`/`leave`/`rbac` back multiple differently-named feature screens.)
 
-Frontend features with no same-named backend domain: `apps`, `blocks`, `categories`, `chats`, `daily-time-records`, `departments`, `divisions`, `dtr-adjustments`, `emp-tasks`, `employee-projects`, `employees`, `holidays`, `leave-calendar`, `leave-ledger`, `leave-requests`, `lots`, `model-types`, `models`, `owners`, `phases`, `positions`, `project-types`, `projects`, `roles`, `settings`, `shifts`, `subdivisions`, `tasks`, `users`
+Frontend features with no same-named backend domain: `apps`, `blocks`, `categories`, `chats`, `daily-time-records`, `departments`, `divisions`, `dtr-adjustments`, `emp-tasks`, `employee-projects`, `employees`, `holidays`, `leave-calendar`, `leave-ledger`, `leave-requests`, `lots`, `model-types`, `models`, `owners`, `payroll-config`, `payroll-runs`, `phases`, `positions`, `project-types`, `projects`, `roles`, `settings`, `shifts`, `subdivisions`, `tasks`, `users`
 (Many map to a differently-named backend domain, e.g. all `leave-*`/`holidays`
 features hit `app/leave/`, and the CRUD screens under `app/employee/`;
 `apps`/`chats`/`tasks`/`settings`/`users` are unwired template-demo features.)

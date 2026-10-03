@@ -582,3 +582,237 @@ export interface ErrorResponse {
   error: ErrorBody
   request_id: string | null
 }
+
+// --- Payroll Config -----------------------------------------------------------
+export interface SSSBracketPublic {
+  id: string
+  msc_min: string
+  msc_max: string
+  employer_ss: string
+  employer_ec: string
+  employer_mpf: string
+  employee_ss: string
+  employee_mpf: string
+  effective_date: string
+  is_active: boolean
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface SSSBracketCreate {
+  msc_min: number
+  msc_max: number
+  employer_ss: number
+  employer_ec: number
+  employer_mpf: number
+  employee_ss: number
+  employee_mpf: number
+  effective_date: string
+  is_active?: boolean
+}
+
+export interface SSSBracketUpdate {
+  msc_min?: number
+  msc_max?: number
+  employer_ss?: number
+  employer_ec?: number
+  employer_mpf?: number
+  employee_ss?: number
+  employee_mpf?: number
+  effective_date?: string
+  is_active?: boolean
+}
+
+export interface SSSBracketList {
+  data: SSSBracketPublic[]
+  count: number
+}
+
+export interface PhilHealthBracketPublic {
+  id: string
+  salary_min: string
+  salary_max: string
+  rate: string
+  employer_share: string
+  employee_share: string
+  effective_date: string
+  is_active: boolean
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface PhilHealthBracketCreate {
+  salary_min: number
+  salary_max: number
+  rate: number
+  employer_share: number
+  employee_share: number
+  effective_date: string
+  is_active?: boolean
+}
+
+export interface PhilHealthBracketUpdate {
+  salary_min?: number
+  salary_max?: number
+  rate?: number
+  employer_share?: number
+  employee_share?: number
+  effective_date?: string
+  is_active?: boolean
+}
+
+export interface PhilHealthBracketList {
+  data: PhilHealthBracketPublic[]
+  count: number
+}
+
+export interface PagIBIGBracketPublic {
+  id: string
+  salary_min: string
+  salary_max: string
+  employee_rate: string
+  employer_rate: string
+  effective_date: string
+  is_active: boolean
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface PagIBIGBracketCreate {
+  salary_min: number
+  salary_max: number
+  employee_rate: number
+  employer_rate: number
+  effective_date: string
+  is_active?: boolean
+}
+
+export interface PagIBIGBracketUpdate {
+  salary_min?: number
+  salary_max?: number
+  employee_rate?: number
+  employer_rate?: number
+  effective_date?: string
+  is_active?: boolean
+}
+
+export interface PagIBIGBracketList {
+  data: PagIBIGBracketPublic[]
+  count: number
+}
+
+export interface BIRBracketPublic {
+  id: string
+  period: string
+  bracket_min: string
+  bracket_max: string | null
+  base_tax: string
+  excess_rate: string
+  effective_date: string
+  is_active: boolean
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface BIRBracketCreate {
+  period: string
+  bracket_min: number
+  bracket_max?: number | null
+  base_tax: number
+  excess_rate: number
+  effective_date: string
+  is_active?: boolean
+}
+
+export interface BIRBracketUpdate {
+  period?: string
+  bracket_min?: number
+  bracket_max?: number | null
+  base_tax?: number
+  excess_rate?: number
+  effective_date?: string
+  is_active?: boolean
+}
+
+export interface BIRBracketList {
+  data: BIRBracketPublic[]
+  count: number
+}
+
+
+// --- Payroll ---------------------------------------------------------------------
+export type CutoffType = 'daily' | 'weekly' | 'semi_monthly' | 'monthly'
+export type PayType = 'monthly' | 'daily' | 'hourly'
+export type PayrollRunStatus = 'draft' | 'approved' | 'paid' | 'void'
+export type PayrollAdjustmentType = 'regular' | 'supplemental' | 'post_run_correction'
+export type LoanType = 'salary' | 'ssls' | 'pagibig' | 'other'
+
+export interface PayrollRunPublic {
+  id: string
+  cutoff_type: CutoffType
+  date_from: string
+  date_to: string
+  status: PayrollRunStatus
+  adjustment_type: PayrollAdjustmentType
+  created_by: string | null
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+  total_gross_pay: string
+  total_deductions: string
+  total_net_pay: string
+}
+
+export interface PayrollEntryPublic {
+  id: string
+  payroll_run_id: string
+  employee_id: string
+  basic_rate: string
+  rate_date_from: string
+  rate_date_to: string
+  earnings: Record<string, unknown> | null
+  deductions: Record<string, unknown> | null
+  gross_pay: string
+  total_deductions: string
+  net_pay: string
+  overtime_pay: string
+  thirteenth_month: string
+  non_taxable_income: string
+  taxable_income: string
+  created_at: string | null
+}
+
+export interface PayrollRunDetail extends PayrollRunPublic {
+  entries: PayrollEntryPublic[]
+}
+
+export interface PayrollRunList {
+  data: PayrollRunPublic[]
+  count: number
+}
+
+export interface PayrollEntryPreview {
+  employee_id: string
+  basic_rate: string
+  rate_date_from: string
+  rate_date_to: string
+  earnings: Record<string, unknown> | null
+  deductions: Record<string, unknown> | null
+  gross_pay: string
+  total_deductions: string
+  net_pay: string
+  overtime_pay: string
+  thirteenth_month: string
+  non_taxable_income: string
+  taxable_income: string
+  warnings?: { code: string; message: string }[]
+}
+
+export interface PayrollRunPreview {
+  run: PayrollRunPublic
+  entries: PayrollEntryPreview[]
+}

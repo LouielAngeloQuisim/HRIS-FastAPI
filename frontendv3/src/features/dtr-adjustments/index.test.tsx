@@ -62,7 +62,7 @@ describe('DtrAdjustmentsPage', () => {
     expect(refetch).toHaveBeenCalled()
   })
 
-  it('shows approve/reject buttons for pending adjustments', async () => {
+  it('shows approve/reject buttons for PENDING adjustments (QA-03: API sends UPPERCASE)', async () => {
     useDtrAdjustmentsMock.mockReturnValue({
       data: {
         data: [{
@@ -74,7 +74,7 @@ describe('DtrAdjustmentsPage', () => {
           adjusted_login_date: '2026-01-01T08:30:00',
           adjusted_logout_date: '2026-01-01T17:30:00',
           reason: 'Clock in late',
-          status: 'pending',
+          status: 'PENDING',
           adjusted_date: null,
           created_by: 'user-1',
           approved_by: null,
@@ -92,5 +92,42 @@ describe('DtrAdjustmentsPage', () => {
     const screen = await render(<DtrAdjustmentsPage />)
     await expect.element(screen.getByRole('button', { name: 'Approve' })).toBeVisible()
     await expect.element(screen.getByRole('button', { name: 'Reject' })).toBeVisible()
+  })
+
+  it('hides approve/reject for APPROVED and REJECTED rows and colors statuses (QA-03)', async () => {
+    const row = (id: string, status: string) => ({
+      id,
+      daily_time_record_id: 'dtr-' + id,
+      employee_id: 'emp-1',
+      original_login_date: '2026-01-01T08:00:00',
+      original_logout_date: '2026-01-01T17:00:00',
+      adjusted_login_date: '2026-01-01T08:30:00',
+      adjusted_logout_date: '2026-01-01T17:30:00',
+      reason: 'r',
+      status,
+      adjusted_date: null,
+      created_by: 'user-1',
+      approved_by: 'user-2',
+      is_deleted: false,
+      created_at: null,
+      updated_at: null,
+    })
+    useDtrAdjustmentsMock.mockReturnValue({
+      data: {
+        data: [row('adj-ok', 'APPROVED'), row('adj-no', 'REJECTED')],
+        count: 2,
+      },
+      isPending: false,
+      isError: false,
+      refetch,
+    })
+
+    const screen = await render(<DtrAdjustmentsPage />)
+    await expect.element(screen.getByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+    await expect.element(screen.getByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
+    const approved = await screen.getByText('APPROVED').element()
+    expect(approved.className).toContain('bg-green-100')
+    const rejected = await screen.getByText('REJECTED').element()
+    expect(rejected.className).toContain('bg-red-100')
   })
 })

@@ -89,9 +89,9 @@ export default function DtrAdjustmentsPage() {
                     <td className="p-2">{item.adjusted_logout_date ? new Date(item.adjusted_logout_date).toLocaleString() : '—'}</td>
                     <td className="p-2">
                       <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${
-                        item.status === 'approved' ? 'bg-green-100 text-green-800' :
-                        item.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        item.status === 'rejected' ? 'bg-red-100 text-red-800' : ''
+                        item.status === 'APPROVED' ? 'bg-green-100 text-green-800' :
+                        item.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                        item.status === 'REJECTED' ? 'bg-red-100 text-red-800' : ''
                       }`}>
                         {item.status}
                       </span>
@@ -99,7 +99,7 @@ export default function DtrAdjustmentsPage() {
                     <td className="p-2 max-w-xs truncate">{item.reason ?? '—'}</td>
                     {canEdit && (
                       <td className="p-2 text-right">
-                        {item.status === 'pending' && (
+                        {item.status === 'PENDING' && (
                           <div className="flex gap-1 justify-end">
                              <Button
                                data-testid={`approve-dtr-adjustment-button-${item.id}`}

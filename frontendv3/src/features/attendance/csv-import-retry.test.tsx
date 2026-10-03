@@ -8,7 +8,13 @@ const { apiPostMock, toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),
   toastErrorMock: vi.fn(),
 }))
-vi.mock('@/lib/api/client', () => ({ api: { post: (...a: unknown[]) => apiPostMock(...a) } }))
+vi.mock('@/lib/api/client', () => ({
+  api: { post: (...a: unknown[]) => apiPostMock(...a) },
+  // auth-store hydrate() reads these at import time; no session in this test.
+  getAccessToken: () => undefined,
+  getRefreshToken: () => undefined,
+  clearTokens: () => {},
+}))
 vi.mock('sonner', () => ({
   toast: { success: (...a: unknown[]) => toastSuccessMock(...a), error: (...a: unknown[]) => toastErrorMock(...a) },
 }))
@@ -22,7 +28,10 @@ const CSV = [
 describe('Attendance CSV import retry (§8.11)', () => {
   it('continues past a failed row, reports partial results, and uses the error toast', async () => {
     apiPostMock.mockResolvedValueOnce({ data: {} })
-    apiPostMock.mockRejectedValueOnce({ response: { status: 500, data: { message: 'boom' } } })
+    // 422 = definite validation rejection (outcome known: not committed).
+    // 5xx is deliberately NOT used here: it is ambiguous and marks the row
+    // UNKNOWN (see csv-import-idempotency tests).
+    apiPostMock.mockRejectedValueOnce({ response: { status: 422, data: { detail: 'boom' } } })
 
     const { getByRole, getByText, getByPlaceholder } = await renderWithClient(
       <AttendanceCsvImportWizard open={true} onOpenChange={() => {}} />

@@ -7,7 +7,13 @@ import { AttendanceCsvImportWizard } from './components/csv-import/attendance-cs
 const { apiPostMock, toastErrorMock } = vi.hoisted(() => ({
   apiPostMock: vi.fn(), toastErrorMock: vi.fn(),
 }))
-vi.mock('@/lib/api/client', () => ({ api: { post: (...a: unknown[]) => apiPostMock(...a) } }))
+vi.mock('@/lib/api/client', () => ({
+  api: { post: (...a: unknown[]) => apiPostMock(...a) },
+  // auth-store hydrate() reads these at import time; no session in this test.
+  getAccessToken: () => undefined,
+  getRefreshToken: () => undefined,
+  clearTokens: () => {},
+}))
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: (...a: unknown[]) => toastErrorMock(...a) },
 }))
@@ -31,7 +37,9 @@ function WizardHarness() {
 
 describe('Attendance CSV wizard resume / clean slate on reopen (§8.13)', () => {
   it('resets to an empty, unimported state after close + reopen', async () => {
-    apiPostMock.mockRejectedValue({ response: { status: 500, data: { message: 'boom' } } })
+    // 422 definite rejection (not committed): close/reopen gives a clean
+    // slate. UNKNOWN rows are different — they persist by design (QA-01).
+    apiPostMock.mockRejectedValue({ response: { status: 422, data: { detail: 'boom' } } })
 
     const { getByRole, getByText, getByPlaceholder } = await renderWithClient(<WizardHarness />)
 

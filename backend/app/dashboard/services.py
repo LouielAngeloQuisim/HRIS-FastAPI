@@ -6,10 +6,14 @@ employees); those bugs are not reproduced here (design §1.6 / Q10).
 """
 
 
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
 from sqlmodel import Session, col, func, select
 from sqlmodel.sql.expression import SelectOfScalar
 
 from app.attendance.adjustment_models import DtrAdjustment
+from app.attendance.models import DailyTimeRecord
 from app.common.types import AuditedSQLModel
 from app.dashboard.schemas import DashboardStats
 from app.employee.models import (
@@ -24,6 +28,8 @@ from app.employee.models import (
 )
 from app.leave.models import LeaveRequest
 from app.payroll.models import PayrollEntry, PayrollRun
+
+MANILA = ZoneInfo("Asia/Manila")
 
 # Counted tables keyed by (model, label) for the shared counter helper.
 _COUNTED: list[tuple[type[AuditedSQLModel], str]] = [
@@ -47,16 +53,45 @@ def _count_active(session: Session, model: type[AuditedSQLModel]) -> int:
     return session.exec(statement).one()
 
 
-def _dtr_records_daily_count(session: Session) -> int:
-    """Count distinct employees with >=1 worker log today.
+def manila_day_window(now: datetime) -> tuple[datetime, datetime]:
+    """[start, end) UTC instants covering the Asia/Manila calendar day containing `now`.
 
-    The worker_logs table is Phase 2 territory and does not exist yet, so this
-    returns 0 with a clear note. When the table lands, compute DISTINCT
-    employee_id over worker logs within the Asia/Manila day window
-    (legacy counted raw log rows across a broken UTC/server-local boundary).
+    Pure and explicit so the midnight boundary is unit-testable without a
+    clock: the legacy bug counted raw rows across a broken UTC/server-local
+    boundary (design §1.6 / Q10), so the window is anchored to Manila
+    midnight (UTC+08:00, no DST) and converted to UTC — never server-local.
     """
-    del session  # unused until Phase 2
-    return 0
+    local = now.astimezone(MANILA)
+    start_local = datetime(local.year, local.month, local.day, tzinfo=MANILA)
+    end_local = start_local + timedelta(days=1)
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
+
+def count_daily_attendance(session: Session, now: datetime) -> int:
+    """Distinct employees with >=1 real punch (login) in the Manila day containing `now`.
+
+    DISTINCT employee_id fixes the legacy double-count of multi-punch
+    employees; only active rows count (deleted punches removed — QA-08),
+    absence placeholders (no login) are excluded.
+    """
+    start, end = manila_day_window(now)
+    statement: SelectOfScalar[int] = (
+        select(func.count(func.distinct(DailyTimeRecord.employee_id)))
+        .select_from(DailyTimeRecord)
+        .where(
+            col(DailyTimeRecord.is_deleted) == False,  # noqa: E712
+            col(DailyTimeRecord.is_absent) == False,  # noqa: E712
+            col(DailyTimeRecord.login_date).is_not(None),
+            col(DailyTimeRecord.login_date) >= start,
+            col(DailyTimeRecord.login_date) < end,
+        )
+    )
+    return session.exec(statement).one()
+
+
+def _dtr_records_daily_count(session: Session) -> int:
+    """KPI: employees present today (Asia/Manila), counted server-side."""
+    return count_daily_attendance(session, datetime.now(timezone.utc))
 
 
 def build_dashboard_stats(*, session: Session) -> DashboardStats:
@@ -74,7 +109,10 @@ def build_dashboard_stats(*, session: Session) -> DashboardStats:
     stats.pending_dtr_adjustments = session.exec(
         select(func.count()).select_from(DtrAdjustment).where(
             DtrAdjustment.is_deleted == False,  # noqa: E712
-            DtrAdjustment.status == "pending",
+            # DTR adjustment statuses are UPPERCASE (PENDING/APPROVED/REJECTED)
+            # in the backend state machine — unlike leave statuses, which are
+            # lowercase. Comparing against "pending" always returned 0 (QA-03).
+            DtrAdjustment.status == "PENDING",
         )
     ).one()
 

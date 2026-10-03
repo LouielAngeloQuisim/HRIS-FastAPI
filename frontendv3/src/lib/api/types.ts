@@ -407,7 +407,7 @@ export interface DailyTimeRecordPublic {
   updated_at: string | null
 }
 export interface DailyTimeRecordList { data: DailyTimeRecordPublic[]; count: number }
-export interface DailyTimeRecordCreate { employee_id?: string; shift_id?: string | null; login_date: string; logout_date?: string | null }
+export interface DailyTimeRecordCreate { employee_id?: string; employee_code?: string; shift_id?: string | null; shift_code?: string; login_date: string; logout_date?: string | null; source_ref?: string | null }
 export interface DailyTimeRecordUpdate { login_date?: string; logout_date?: string; shift_id?: string | null }
 
 

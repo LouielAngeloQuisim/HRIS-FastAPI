@@ -83,6 +83,43 @@ def get_dtr_by_employee_and_login(
     ).first()
 
 
+def get_dtr_by_employee_and_source_ref(
+    *, session: Session, employee_id: uuid.UUID, source_ref: str
+) -> DailyTimeRecord | None:
+    """Idempotency lookup for bulk import retries (QA-01).
+
+    Matches only the opaque per-import-row identity written by the importer
+    that created the row — never a natural key (employee+login), so an
+    unrelated pre-existing punch is never mistaken for this request's
+    committed row. Only ACTIVE rows replay: a soft-deleted punch is handled
+    by the deleted-key guard in create_dtr (409), not by an automatic
+    re-insert or resurrection.
+    """
+    return session.exec(
+        select(DailyTimeRecord).where(
+            DailyTimeRecord.employee_id == employee_id,
+            DailyTimeRecord.source_ref == source_ref,
+            DailyTimeRecord.is_deleted == False,  # noqa: E712
+        )
+    ).first()
+
+
+def get_deleted_dtr_by_employee_and_source_ref(
+    *, session: Session, employee_id: uuid.UUID, source_ref: str
+) -> DailyTimeRecord | None:
+    """Deleted-key guard lookup (QA-01): an active row for this key already replayed
+    or 409'd first; this catches keys whose committed row was deliberately soft-
+    deleted so an automatic retry cannot silently resurrect it.
+    """
+    return session.exec(
+        select(DailyTimeRecord).where(
+            DailyTimeRecord.employee_id == employee_id,
+            DailyTimeRecord.source_ref == source_ref,
+            DailyTimeRecord.is_deleted == True,  # noqa: E712
+        )
+    ).first()
+
+
 def get_shift_by_code(*, session: Session, code: str) -> Shift | None:
     return session.exec(
         select(Shift).where(Shift.code == code, Shift.is_deleted == False)  # noqa: E712

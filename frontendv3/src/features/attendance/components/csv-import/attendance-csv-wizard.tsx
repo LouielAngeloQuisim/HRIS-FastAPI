@@ -17,31 +17,75 @@ import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
-import { CheckCircle2, Upload, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Upload, XCircle } from 'lucide-react'
 
 type CsvRow = Record<string, string>
-type ImportStatus = 'pending' | 'success' | 'error'
+// 'error'   = definite server verdict that the row was NOT committed (4xx) —
+//             safe to correct + retry.
+// 'unknown' = outcome unknown: no server verdict at all (transport failure),
+//             OR an ambiguous 5xx that may have been raised after commit.
+//             Blind retry stays blocked until deliberate Reconcile.
+type ImportStatus = 'pending' | 'success' | 'error' | 'unknown'
 
 interface RowResult {
   row: number
   data: CsvRow
+  // Stable opaque identity for this import row, kept across retry,
+  // reconciliation AND close/reopen: `dtr-import-<batch>-r<index>`. Never a
+  // natural key, never re-derived from content.
+  key: string
   status: ImportStatus
   error?: string
 }
 
+interface RecoverableBatch {
+  batchId: string
+  csvText: string
+  headers: string[]
+  rows: CsvRow[]
+  results: RowResult[]
+}
+
+// Single-slot in-memory store (never persisted to disk, never holds more than
+// the CSV the user already has in the textarea). QA-01 blocker: closing the
+// dialog while rows are UNKNOWN must NOT discard their identities — a reopen
+// restores the exact batch so Reconcile matches committed rows by their real
+// keys and a retry reuses them (server-side dedupe makes any re-attempt
+// duplicate-safe).
+let recoverableSlot: RecoverableBatch | null = null
+
+/** Test-only: reset the cross-close store between renders. */
+export function __resetRecoverableSlotForTests() {
+  recoverableSlot = null
+}
+
 const DTR_REQUIRED_FIELDS = ['employee_code', 'login_date', 'logout_date']
+
+function hasUnresolved(results: RowResult[]): boolean {
+  return results.some((r) => r.status === 'unknown')
+}
+
+type ReconcileVerdict = 'committed' | 'deleted' | 'not_found' | 'unresolved'
 
 export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const queryClient = useQueryClient()
+  const restored = useState(() => recoverableSlot)[0]
   const [file, setFile] = useState<File | null>(null)
-  const [csvText, setCsvText] = useState('')
-  const [parsedRows, setParsedRows] = useState<CsvRow[]>([])
-  const [headers, setHeaders] = useState<string[]>([])
-  const [results, setResults] = useState<RowResult[]>([])
+  const [csvText, setCsvText] = useState(() => restored?.csvText ?? '')
+  const [parsedRows, setParsedRows] = useState<CsvRow[]>(() => restored?.rows ?? [])
+  const [headers, setHeaders] = useState<string[]>(() => restored?.headers ?? [])
+  const [batchId, setBatchId] = useState(() => restored?.batchId ?? '')
+  const [results, setResults] = useState<RowResult[]>(() => restored?.results ?? [])
   const [isImporting, setIsImporting] = useState(false)
+  const [isReconciling, setIsReconciling] = useState(false)
   const [progress, setProgress] = useState(0)
 
   const requiredFields = useMemo(() => DTR_REQUIRED_FIELDS, [])
+
+  const keyForRow = useCallback(
+    (index: number) => `dtr-import-${batchId}-r${index}`,
+    [batchId],
+  )
 
   const parseCsv = useCallback((text: string) => {
     const parsed = Papa.parse<CsvRow>(text, {
@@ -60,11 +104,21 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
 
     setParsedRows(rows)
     setHeaders(cols)
+    setBatchId(Math.random().toString(36).slice(2, 10))
     setResults([])
     setProgress(0)
   }, [])
 
+  // Editing the CSV while unresolved identities exist would silently drop
+  // them (and their committed rows). Blocked until Reconcile or Discard.
+  const editingBlocked = hasUnresolved(results)
+
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (editingBlocked) {
+      toast.error('Reconcile or discard unresolved rows before replacing the CSV — editing now would abandon import identities that may already be committed.')
+      e.target.value = ''
+      return
+    }
     const selectedFile = e.target.files?.[0]
     if (!selectedFile) return
 
@@ -81,9 +135,13 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
       parseCsv(text)
     }
     reader.readAsText(selectedFile)
-  }, [parseCsv])
+  }, [parseCsv, editingBlocked])
 
   const handleTextareaChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (editingBlocked) {
+      toast.error('Reconcile or discard unresolved rows before editing the CSV — changes now would abandon import identities that may already be committed.')
+      return
+    }
     setCsvText(e.target.value)
     setFile(null)
     if (e.target.value.trim()) {
@@ -91,15 +149,17 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     } else {
       setParsedRows([])
       setHeaders([])
+      setBatchId('')
       setResults([])
     }
-  }, [parseCsv])
+  }, [parseCsv, editingBlocked])
 
-  const mapColumns = (row: CsvRow) => ({
+  const mapColumns = (row: CsvRow, sourceRef: string) => ({
     employee_code: row.employee_code,
     login_date: row.login_date,
     logout_date: row.logout_date,
     shift_code: row.shift_code || undefined,
+    source_ref: sourceRef,
   })
 
   const validateRow = useCallback((row: CsvRow): string | null => {
@@ -110,67 +170,209 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     return null
   }, [requiredFields])
 
+  // Rows a (re)attempt targets: first run = every row; after a run = only the
+  // rows that did not reach 'success'. Keys stay stable so the server can
+  // dedupe a retry whose predecessor actually committed.
+  const pendingIndices = useMemo(
+    () =>
+      parsedRows
+        .map((_, i) => i)
+        .filter((i) => results.length === 0 || results[i]?.status !== 'success'),
+    [parsedRows, results],
+  )
+
+  const unknownCount = results.filter(r => r.status === 'unknown').length
+
   const handleImport = useCallback(async () => {
     if (parsedRows.length === 0) {
       toast.error('No data to import')
       return
     }
+    if (unknownCount > 0) return // guarded in the UI; defense in depth
 
     setIsImporting(true)
-    setResults([])
-    setProgress(0)
 
-    const newResults: RowResult[] = []
-    const total = parsedRows.length
+    const current: RowResult[] = results.length
+      ? results.map((r) => ({ ...r }))
+      : parsedRows.map((row, i) => ({ row: i + 2, data: row, key: keyForRow(i), status: 'pending' as ImportStatus }))
 
-    for (let i = 0; i < parsedRows.length; i++) {
+    const total = pendingIndices.length
+    let done = 0
+
+    for (const i of pendingIndices) {
       const row = parsedRows[i]
-      const error = validateRow(row)
+      const key = current[i].key
+      const validationError = validateRow(row)
 
-      if (error) {
-        newResults.push({ row: i + 2, data: row, status: 'error', error })
+      if (validationError) {
+        current[i] = { ...current[i], status: 'error', error: validationError }
       } else {
         try {
-          const mapped = mapColumns(row)
+          const mapped = mapColumns(row, key)
+          // 201 = first create; 200 = idempotent replay of a committed row.
           await api.post('/daily-time-records', mapped)
-          newResults.push({ row: i + 2, data: row, status: 'success' })
+          current[i] = { ...current[i], status: 'success', error: undefined }
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'Unknown error'
-          newResults.push({ row: i + 2, data: row, status: 'error', error: message })
+          const response = (err as { response?: { status?: number; data?: { detail?: string; error?: { message?: string } } } })?.response
+          const status = response?.status
+          if (status !== undefined && status >= 400 && status < 500) {
+            // Definite server rejection: validation/permission/conflict — the
+            // row was NOT committed; safe to correct and retry (the retry
+            // keeps the same key — duplicate-safe regardless).
+            const message = response?.data?.error?.message ?? response?.data?.detail ?? `Server responded ${status}`
+            current[i] = { ...current[i], status: 'error', error: message }
+          } else if (status !== undefined && status >= 500) {
+            // Ambiguous: the server MAY have committed before failing to
+            // answer. Never assume non-commit just because an error body
+            // exists — treat like a lost response.
+            current[i] = {
+              ...current[i],
+              status: 'unknown',
+              error: `Server error ${status} — outcome unknown (may be recorded). Use Reconcile before retrying.`,
+            }
+          } else {
+            // Transport failure / timeout: no server verdict at all.
+            current[i] = {
+              ...current[i],
+              status: 'unknown',
+              error: 'No response received — record may exist. Use Reconcile before retrying.',
+            }
+          }
         }
       }
 
-      setProgress(Math.round(((i + 1) / total) * 100))
+      done += 1
+      setProgress(Math.round((done / total) * 100))
     }
 
-    if (newResults.some(row => row.status === 'success')) {
+    if (current.some(row => row.status === 'success')) {
       await queryClient.invalidateQueries({ queryKey: ['daily-time-records'] })
     }
-    setResults(newResults)
+    setResults(current)
     setIsImporting(false)
 
-    const successCount = newResults.filter(r => r.status === 'success').length
-    const errorCount = newResults.filter(r => r.status === 'error').length
+    const successCount = current.filter(r => r.status === 'success').length
+    const errorCount = current.filter(r => r.status === 'error').length
+    const unresolved = current.filter(r => r.status === 'unknown').length
 
-    if (errorCount === 0) {
+    if (unresolved > 0) {
+      toast.error(`Imported ${successCount} time records, ${errorCount} failed, ${unresolved} awaiting reconciliation`)
+    } else if (errorCount === 0) {
       toast.success(`Successfully imported ${successCount} time records`)
     } else {
       toast.error(`Imported ${successCount} time records, ${errorCount} failed`)
     }
-  }, [parsedRows, validateRow, queryClient])
+  }, [parsedRows, results, pendingIndices, unknownCount, validateRow, queryClient, keyForRow])
+
+  // Deliberate resolution of 'unknown' rows (QA-01): ask the server for a
+  // verdict on each (employee, identity-key) PAIR via the bounded authorized
+  // reconcile endpoint — never scan pages of unrelated rows, never match a
+  // natural key, never treat "not in my visible scope" as "not committed".
+  const handleReconcile = useCallback(async () => {
+    const unknowns = results.filter(r => r.status === 'unknown')
+    if (unknowns.length === 0 || isReconciling) return
+
+    setIsReconciling(true)
+    const verdicts = new Map<string, { status: ReconcileVerdict; record_id?: string }>()
+    try {
+      const pairs = unknowns.map((r) => ({
+        employee_code: r.data.employee_code,
+        source_ref: r.key,
+      }))
+      const { data } = await api.post('/daily-time-records/reconcile-imports', { keys: pairs })
+      for (const result of data.results) {
+        verdicts.set(`${result.employee_code}\u0000${result.source_ref}`, {
+          status: result.status,
+          record_id: result.record_id,
+        })
+      }
+    } catch {
+      toast.error('Could not reach the reconciliation service — rows stay Unknown. Try Reconcile again.')
+      setIsReconciling(false)
+      return
+    }
+
+    let matched = 0
+    let retired = 0
+    let freed = 0
+    let kept = 0
+    const next = results.map((r) => {
+      if (r.status !== 'unknown') return r
+      const v = verdicts.get(`${r.data.employee_code}\u0000${r.key}`)
+      switch (v?.status) {
+        case 'committed':
+          matched += 1
+          return { ...r, status: 'success' as ImportStatus, error: undefined }
+        case 'deleted':
+          // Deliberately deleted after commit: the identity is retired — no
+          // automatic replay, a fresh explicit import must use a new batch.
+          retired += 1
+          return {
+            ...r,
+            status: 'error' as ImportStatus,
+            error: 'Record was committed and then deleted deliberately — this import row is retired. Re-import deliberately if intended.',
+          }
+        case 'not_found':
+          // Absent within the caller's visible scope at reconcile time. A
+          // late commit is still possible, but the retry reuses this SAME
+          // key and the race-safe create path dedupes it — so retry is safe.
+          freed += 1
+          return {
+            ...r,
+            status: 'error' as ImportStatus,
+            error: 'No committed record found within visible scope - retry is safe (the same key dedupes a late commit).',
+          }
+        default:
+          // 'unresolved' (out of visibility) or a missing verdict row: NOT
+          // proof of anything. Stay unknown, retry stays blocked.
+          kept += 1
+          return {
+            ...r,
+            error: 'No definite verdict (outside visible scope) - stays Unknown; retry remains blocked.',
+          }
+      }
+    })
+
+    await queryClient.invalidateQueries({ queryKey: ['daily-time-records'] })
+    setResults(next)
+    setIsReconciling(false)
+
+    if (matched > 0) toast.success(`Reconciled: ${matched} row(s) already recorded by this import`)
+    if (retired > 0) toast.error(`${retired} row(s) were deleted deliberately - not resurrected`)
+    if (kept > 0) toast.error(`${kept} row(s) could not be verified - retry stays blocked`)
+    if (freed > 0 && kept === 0) toast.info('Reconciled: rows can now be retried safely.')
+  }, [results, isReconciling, queryClient])
+
+  // Explicit, warned abandonment of unresolved identities (their committed
+  // rows, if any, stay in the database; only this client forgets the keys).
+  const handleDiscard = useCallback(() => {
+    setResults((prev) => prev.map((r) => (r.status === 'unknown'
+      ? { ...r, status: 'error' as ImportStatus, error: 'Discarded unresolved identity - any late commit remains recorded and must be handled as a duplicate.' }
+      : r)))
+    toast.warning('Unresolved import identities discarded. Any row that actually committed is still in the system.')
+  }, [])
 
   const handleClose = useCallback(() => {
     if (isImporting) return
+    // Preserve unresolved batches across close/reopen (QA-01 blocker 3):
+    // identities survive in-memory so a reopen reconciles/retries with the
+    // SAME keys instead of starting a duplicate-safe-blind fresh batch.
+    if (hasUnresolved(results) && parsedRows.length > 0) {
+      recoverableSlot = { batchId, csvText, headers, rows: parsedRows, results }
+    } else {
+      recoverableSlot = null
+      setTimeout(() => {
+        setFile(null)
+        setCsvText('')
+        setParsedRows([])
+        setHeaders([])
+        setBatchId('')
+        setResults([])
+        setProgress(0)
+      }, 200)
+    }
     onOpenChange(false)
-    setTimeout(() => {
-      setFile(null)
-      setCsvText('')
-      setParsedRows([])
-      setHeaders([])
-      setResults([])
-      setProgress(0)
-    }, 200)
-  }, [isImporting, onOpenChange])
+  }, [isImporting, results, parsedRows, batchId, csvText, headers, onOpenChange])
 
   const successCount = results.filter(r => r.status === 'success').length
   const errorCount = results.filter(r => r.status === 'error').length
@@ -186,6 +388,11 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
         </DialogHeader>
 
         <div className="space-y-4">
+          {restored && unknownCount > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200" data-testid="csv-import-restored-banner">
+              A previous import batch was restored with unresolved rows. Reconcile or discard them before editing the CSV or importing again — their keys are preserved so retries can never duplicate committed rows.
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Upload CSV File</Label>
             <div className="flex items-center gap-2">
@@ -193,7 +400,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
                 type="file"
                 accept=".csv"
                 onChange={handleFileChange}
-                disabled={isImporting}
+                disabled={isImporting || editingBlocked}
                 className="cursor-pointer"
               />
               {file && (
@@ -212,7 +419,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
               onChange={handleTextareaChange}
               placeholder="employee_code,login_date,logout_date,shift_code&#10;EMP001,2026-08-04T08:00:00Z,2026-08-04T17:00:00Z,DAY"
               rows={6}
-              disabled={isImporting}
+              disabled={isImporting || editingBlocked}
             />
           </div>
 
@@ -266,7 +473,19 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
                     <XCircle className="h-4 w-4" /> {errorCount} failed
                   </span>
                 )}
+                {unknownCount > 0 && (
+                  <span className="flex items-center gap-1 text-amber-600" data-testid="csv-import-unknown-count">
+                    <AlertTriangle className="h-4 w-4" /> {unknownCount} unknown
+                  </span>
+                )}
               </div>
+              {unknownCount > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Reconcile asks the server for a verdict on each unresolved (employee, import-key) pair —
+                  committed rows are recognized by their exact identity keys, unverifiable rows stay Unknown
+                  and retry stays blocked. Unresolved identities are also preserved if you close this dialog.
+                </p>
+              )}
               <div className="max-h-48 overflow-y-auto rounded-md border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
@@ -280,9 +499,11 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
                     {results.map((result, i) => (
                       <tr key={i} className="border-t">
                         <td className="p-2">{result.row}</td>
-                        <td className="p-2">
+                        <td className="p-2" data-testid={`csv-row-status-${result.row}`}>
                           {result.status === 'success' ? (
                             <span className="flex items-center gap-1 text-green-600"><CheckCircle2 className="h-4 w-4" /> Success</span>
+                          ) : result.status === 'unknown' ? (
+                            <span className="flex items-center gap-1 text-amber-600"><AlertTriangle className="h-4 w-4" /> Unknown</span>
                           ) : (
                             <span className="flex items-center gap-1 text-destructive"><XCircle className="h-4 w-4" /> Failed</span>
                           )}
@@ -298,12 +519,46 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleClose} disabled={isImporting}>
+          {unknownCount > 0 && !isImporting && (
+            <>
+              <Button
+                variant="secondary"
+                onClick={handleReconcile}
+                disabled={isReconciling}
+                data-testid="csv-import-reconcile-button"
+              >
+                {isReconciling ? 'Reconciling...' : 'Reconcile'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleDiscard}
+                disabled={isReconciling}
+                className="text-destructive"
+                data-testid="csv-import-discard-button"
+              >
+                Discard
+              </Button>
+            </>
+          )}
+          <Button variant="outline" onClick={handleClose} disabled={isImporting} data-testid="csv-import-close-button">
             Close
           </Button>
-          <Button onClick={handleImport} disabled={isImporting || parsedRows.length === 0}>
+          <Button
+            onClick={handleImport}
+            disabled={
+              isImporting ||
+              parsedRows.length === 0 ||
+              unknownCount > 0 ||
+              (results.length > 0 && pendingIndices.length === 0)
+            }
+            data-testid="csv-import-submit-button"
+          >
             <Upload className="mr-2 h-4 w-4" />
-            {isImporting ? 'Importing...' : `Import ${parsedRows.length} Records`}
+            {isImporting
+              ? 'Importing...'
+              : results.length === 0
+                ? `Import ${parsedRows.length} Records`
+                : `Retry ${pendingIndices.length} Records`}
           </Button>
         </DialogFooter>
       </DialogContent>

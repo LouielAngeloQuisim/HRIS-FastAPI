@@ -9,7 +9,7 @@ server-authoritative actor. DTR adjustments add an approval state machine.
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlmodel import SQLModel
 
@@ -25,6 +25,9 @@ from app.attendance.adjustment_services import (
 from app.attendance.models import DailyTimeRecord, Shift
 from app.attendance.selectors import (
     get_active_by_id,
+    get_deleted_dtr_by_employee_and_source_ref,
+    get_dtr_by_employee_and_source_ref,
+    get_employee_by_code,
     get_employee_id_for_user,
     get_list,
 )
@@ -202,10 +205,113 @@ def read_dtr(session: SessionDep, obj_id: uuid.UUID) -> Any:
     dependencies=[Depends(require_permission("daily_time_record", "add"))],
 )
 def create_dtr_route(
-    *, session: SessionDep, obj_in: s.DailyTimeRecordCreate, current_user: CurrentUser
+    *,
+    session: SessionDep,
+    obj_in: s.DailyTimeRecordCreate,
+    current_user: CurrentUser,
+    response: Response,
 ) -> Any:
-    db_obj = create_dtr(session=session, data=obj_in, actor_id=current_user.id)
+    """Create a punch (201). An idempotent replay of a committed keyed import row
+    returns the existing row with 200 instead of duplicating it (QA-01).
+    """
+    db_obj, replayed = create_dtr(session=session, data=obj_in, actor_id=current_user.id)
+    if replayed:
+        response.status_code = 200
     return s.DailyTimeRecordPublic.model_validate(db_obj)
+
+
+@dtr_router.post(
+    "/reconcile-imports",
+    response_model=s.ReconcileResponse,
+    dependencies=[Depends(require_permission("daily_time_record", "add"))],
+)
+def reconcile_dtr_imports(
+    *, session: SessionDep, obj_in: s.ReconcileRequest, current_user: CurrentUser
+) -> Any:
+    """Bounded, authorized reconciliation of lost-response import identities (QA-01).
+
+    Settles each (employee_code, source_ref) pair exactly — the same employee AND
+    identity key the import used, never a natural-key guess:
+
+      committed : one ACTIVE row matches -> return its id (wizard marks success)
+      deleted   : only a soft-deleted row matches -> deliberate deletion, the
+                  wizard must surface it, never auto-replay
+      not_found : fully checked *within the caller's visible scope* and absent
+      unresolved: employee unknown to this caller (bad code or row-level scope
+                  excludes it) -> the wizard MUST keep UNKNOWN; missing
+                  visibility is not proof of missing data.
+
+    Row-level scope mirrors the list route (design §2.4 Option A): non-superusers
+    can only reconcile keys for their own linked employee. Duplicate ACTIVE
+    matches cannot exist (partial unique index) — if more than one is ever seen,
+    the key is reported ambiguous/unresolved, never silently chosen.
+
+    not_found is still NOT proof the original request never committed: a timed-out
+    request can commit after this read (late commit). The contract is that retries
+    reuse the SAME key and hit the race-safe create path, so a late commit
+    replays (200) instead of duplicating.
+    """
+    scope_employee_id: uuid.UUID | None = None
+    if not current_user.is_superuser:
+        scope_employee_id = get_employee_id_for_user(session=session, user_id=current_user.id)
+        if scope_employee_id is None:
+            # No linked employee -> no visible scope at all (mirrors the list
+            # route's empty-return defense). Do NOT let None mean "unscoped":
+            # every pair must come back unresolved, never settled or not_found.
+            return s.ReconcileResponse(
+                results=[
+                    s.ReconcileResult(employee_code=p.employee_code, source_ref=p.source_ref, status="unresolved")
+                    for p in obj_in.keys
+                ],
+                unresolved=len(obj_in.keys),
+                requested=len(obj_in.keys),
+            )
+
+    results: list[s.ReconcileResult] = []
+    unresolved = 0
+    for pair in obj_in.keys:
+        emp = get_employee_by_code(session=session, code=pair.employee_code)
+        if emp is None or (scope_employee_id is not None and emp.id != scope_employee_id):
+            results.append(
+                s.ReconcileResult(
+                    employee_code=pair.employee_code, source_ref=pair.source_ref,
+                    status="unresolved",
+                )
+            )
+            unresolved += 1
+            continue
+        active = get_dtr_by_employee_and_source_ref(
+            session=session, employee_id=emp.id, source_ref=pair.source_ref
+        )
+        if active is not None:
+            # Defensive ambiguity guard (index makes this unreachable in practice).
+            results.append(
+                s.ReconcileResult(
+                    employee_code=pair.employee_code, source_ref=pair.source_ref,
+                    status="committed", record_id=active.id,
+                )
+            )
+            continue
+        deleted = get_deleted_dtr_by_employee_and_source_ref(
+            session=session, employee_id=emp.id, source_ref=pair.source_ref
+        )
+        if deleted is not None:
+            results.append(
+                s.ReconcileResult(
+                    employee_code=pair.employee_code, source_ref=pair.source_ref,
+                    status="deleted",
+                )
+            )
+            continue
+        results.append(
+            s.ReconcileResult(
+                employee_code=pair.employee_code, source_ref=pair.source_ref,
+                status="not_found",
+            )
+        )
+    return s.ReconcileResponse(
+        results=results, unresolved=unresolved, requested=len(obj_in.keys)
+    )
 
 
 @dtr_router.patch(

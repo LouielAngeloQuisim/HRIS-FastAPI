@@ -22,7 +22,10 @@ const CSV = [
 describe('Attendance CSV import retry (§8.11)', () => {
   it('continues past a failed row, reports partial results, and uses the error toast', async () => {
     apiPostMock.mockResolvedValueOnce({ data: {} })
-    apiPostMock.mockRejectedValueOnce({ response: { status: 500, data: { message: 'boom' } } })
+    // 422 = definite validation rejection (outcome known: not committed).
+    // 5xx is deliberately NOT used here: it is ambiguous and marks the row
+    // UNKNOWN (see csv-import-idempotency tests).
+    apiPostMock.mockRejectedValueOnce({ response: { status: 422, data: { detail: 'boom' } } })
 
     const { getByRole, getByText, getByPlaceholder } = await renderWithClient(
       <AttendanceCsvImportWizard open={true} onOpenChange={() => {}} />

@@ -10,7 +10,7 @@ Conventions (uniform with Phase 0-1):
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Index
+from sqlalchemy import JSON, DateTime, Index, text
 from sqlmodel import Field, SQLModel
 
 
@@ -52,6 +52,18 @@ class DailyTimeRecord(SQLModel, table=True):
         Index("ix_daily_time_record_employee_deleted", "employee_id", "is_deleted"),
         Index("ix_daily_time_record_shift_deleted", "shift_id", "is_deleted"),
         Index("ix_daily_time_record_employee_login", "employee_id", "login_date"),
+        # QA-01 import idempotency: at most one ACTIVE row per (employee,
+        # opaque import key), enforced by the database so concurrent retries
+        # serialize. Soft-deleted rows are excluded so a fresh deliberate
+        # import under the same key can still create a new row.
+        Index(
+            "uq_daily_time_record_source_ref_active",
+            "employee_id",
+            "source_ref",
+            unique=True,
+            postgresql_where=text("is_deleted = false AND source_ref IS NOT NULL"),
+            sqlite_where=text("is_deleted = 0 AND source_ref IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

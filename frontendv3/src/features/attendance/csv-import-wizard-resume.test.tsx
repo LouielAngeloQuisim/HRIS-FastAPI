@@ -31,7 +31,9 @@ function WizardHarness() {
 
 describe('Attendance CSV wizard resume / clean slate on reopen (§8.13)', () => {
   it('resets to an empty, unimported state after close + reopen', async () => {
-    apiPostMock.mockRejectedValue({ response: { status: 500, data: { message: 'boom' } } })
+    // 422 definite rejection (not committed): close/reopen gives a clean
+    // slate. UNKNOWN rows are different — they persist by design (QA-01).
+    apiPostMock.mockRejectedValue({ response: { status: 422, data: { detail: 'boom' } } })
 
     const { getByRole, getByText, getByPlaceholder } = await renderWithClient(<WizardHarness />)
 

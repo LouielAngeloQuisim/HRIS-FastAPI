@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from app.attendance import calc
@@ -81,19 +82,37 @@ def create_dtr(
     session: Session,
     data: DailyTimeRecordCreate,
     actor_id: uuid.UUID,
-) -> DailyTimeRecord:
+) -> tuple[DailyTimeRecord, bool]:
     """Create a punch record: resolve codes, validate, run the calc core, set actor.
 
     ``employee_code``/``shift_code`` resolve server-side to their UUIDs (design §3.2
     column mapping). ``source`` is forced to ``'manual'`` server-side; computed and
     actor fields on the request body are ignored (server-authoritative).
+
+    QA-01 import idempotency: when ``source_ref`` (an opaque per-import-row key) is
+    supplied, the same (employee, key) with identical meaningful input returns the
+    already-committed row instead of inserting a duplicate — returns
+    ``(existing, replayed=True)`` so the route can answer 200 instead of 201.
+    Same key with a *different* payload is a conflict (409), never a silent swap.
+    A key whose active row was soft-deleted is also 409: an automatic retry must
+    not resurrect a deliberately deleted punch; a fresh explicit import gets a
+    fresh key. Concurrency is settled by the partial unique index
+    ``uq_daily_time_record_source_ref_active`` — the INSERT runs in a SAVEPOINT; a
+    losing concurrent inserter rolls back to the savepoint, re-reads the committed
+    winner and replays it (or 409s on a payload change). Keyless creates are
+    unchanged and always return ``(row, False)`` with 201.
     """
     from app.attendance.models import Shift
     from app.attendance.selectors import (
+        get_deleted_dtr_by_employee_and_source_ref,
+        get_dtr_by_employee_and_source_ref,
         get_employee_by_code,
         get_employee_by_id,
         get_shift_by_code,
     )
+
+    if data.source_ref is not None and not data.source_ref.strip():
+        raise HTTPException(status_code=400, detail="source_ref must not be blank")
 
     # --- resolve employee_code -> employee_id ---
     employee_id = data.employee_id
@@ -134,6 +153,35 @@ def create_dtr(
             status_code=400, detail="login_date must be before logout_date"
         )
 
+    # --- idempotent replay check (only when this request carries a key) ---
+    if data.source_ref is not None:
+        existing = get_dtr_by_employee_and_source_ref(
+            session=session, employee_id=employee_id, source_ref=data.source_ref
+        )
+        if existing is not None:
+            if _same_punch_payload(existing=existing, data=data, shift_id=shift_id):
+                return existing, True
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Import row changed since the first attempt with the same "
+                    f"identity ({data.source_ref}) - reconcile manually; the "
+                    "original punch was left untouched."
+                ),
+            )
+        if get_deleted_dtr_by_employee_and_source_ref(
+            session=session, employee_id=employee_id, source_ref=data.source_ref
+        ) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The punch previously committed under this import identity "
+                    f"({data.source_ref}) has been deleted. An automatic retry "
+                    "will not resurrect it - start a fresh import to re-record "
+                    "the punch."
+                ),
+            )
+
     db_obj = DailyTimeRecord.model_validate(
         data,
         update={
@@ -146,10 +194,67 @@ def create_dtr(
     )
     _compute_and_apply(db_obj=db_obj, shift=shift)
 
-    session.add(db_obj)
+    if data.source_ref is None:
+        # Keyless manual create: unchanged behavior, cannot conflict on the
+        # import index (NULL source_ref rows are excluded from it).
+        session.add(db_obj)
+        session.commit()
+        session.refresh(db_obj)
+        return db_obj, False
+
+    try:
+        with session.begin_nested():
+            session.add(db_obj)
+            session.flush()
+    except IntegrityError:
+        # Lost the concurrent race: the winner has now committed (PostgreSQL
+        # blocks the second inserter on the unique index until the first
+        # transaction resolves), so re-read it under READ COMMITTED.
+        session.expire_all()
+        winner = get_dtr_by_employee_and_source_ref(
+            session=session, employee_id=employee_id, source_ref=data.source_ref
+        )
+        if winner is None:
+            raise
+        if not _same_punch_payload(existing=winner, data=data, shift_id=shift_id):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "A different punch was committed under this import identity "
+                    f"({data.source_ref}) concurrently - reconcile manually."
+                ),
+            )
+        return winner, True
+
     session.commit()
     session.refresh(db_obj)
-    return db_obj
+    return db_obj, False
+
+
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Normalize for replay comparison: naive request timestamps are UTC by
+    convention (the wizard and API clients send explicit offsets); DB values
+    come back tz-aware. Compares instants, not string formats."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _same_punch_payload(
+    *, existing: DailyTimeRecord, data: DailyTimeRecordCreate, shift_id: uuid.UUID | None
+) -> bool:
+    """Replay guard: identical meaningful punch input only.
+
+    Actor/computed/source fields are server-authoritative and excluded; a key
+    replay must never silently return a row created with different times/shift.
+    """
+    return (
+        _as_utc(existing.login_date) == _as_utc(data.login_date)
+        and _as_utc(existing.logout_date) == _as_utc(data.logout_date)
+        and existing.shift_id == shift_id
+    )
 
 
 def recompute_dtr(*, session: Session, dtr: DailyTimeRecord) -> None:

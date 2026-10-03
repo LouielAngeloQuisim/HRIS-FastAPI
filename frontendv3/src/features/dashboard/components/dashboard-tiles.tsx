@@ -36,7 +36,7 @@ const TILES: TileDef[] = [
     key: 'dtr_records_daily_count',
     label: 'Daily Time Records',
     icon: CalendarClock,
-    hint: 'Attendance tracking not live yet',
+    hint: 'Employees with a punch today (Manila)',
   },
 ]
 

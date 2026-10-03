@@ -38,11 +38,14 @@ describe('DashboardTiles', () => {
     }
   })
 
-  it('shows the DTR hint when dtr_records_daily_count is 0', async () => {
+  it('shows the attendance semantics hint on the DTR tile (QA-08: stale "not live yet" removed)', async () => {
     const screen = await render(<DashboardTiles data={data} />)
     await expect
-      .element(screen.getByText(/Attendance tracking not live yet/i))
+      .element(screen.getByText(/punch today \(Manila\)/i))
       .toBeInTheDocument()
+    await expect
+      .element(screen.getByText(/Attendance tracking not live yet/i))
+      .not.toBeInTheDocument()
   })
 
   it('renders skeleton cards while loading (smoke test)', async () => {

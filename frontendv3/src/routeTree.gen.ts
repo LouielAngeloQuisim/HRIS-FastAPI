@@ -32,6 +32,8 @@ import { Route as AuthenticatedProjectsIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedProjectTypesIndexRouteImport } from './routes/_authenticated/project-types/index'
 import { Route as AuthenticatedPositionsIndexRouteImport } from './routes/_authenticated/positions/index'
 import { Route as AuthenticatedPhasesIndexRouteImport } from './routes/_authenticated/phases/index'
+import { Route as AuthenticatedPayrollIndexRouteImport } from './routes/_authenticated/payroll/index'
+import { Route as AuthenticatedPayrollRunsIndexRouteImport } from './routes/_authenticated/payroll-runs/index'
 import { Route as AuthenticatedOwnersIndexRouteImport } from './routes/_authenticated/owners/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelTypesIndexRouteImport } from './routes/_authenticated/model-types/index'
@@ -57,8 +59,13 @@ import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
 import { Route as AuthenticatedSettingsAccountRouteImport } from './routes/_authenticated/settings/account'
+import { Route as AuthenticatedPayrollRunsRunIdRouteImport } from './routes/_authenticated/payroll-runs/$runId'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedEmployeesEmployeeIdRouteImport } from './routes/_authenticated/employees/$employeeId'
+import { Route as AuthenticatedPayrollConfigSssIndexRouteImport } from './routes/_authenticated/payroll-config/sss/index'
+import { Route as AuthenticatedPayrollConfigPhilhealthIndexRouteImport } from './routes/_authenticated/payroll-config/philhealth/index'
+import { Route as AuthenticatedPayrollConfigPagibigIndexRouteImport } from './routes/_authenticated/payroll-config/pagibig/index'
+import { Route as AuthenticatedPayrollConfigBirIndexRouteImport } from './routes/_authenticated/payroll-config/bir/index'
 
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
@@ -180,6 +187,18 @@ const AuthenticatedPhasesIndexRoute =
   AuthenticatedPhasesIndexRouteImport.update({
     id: '/phases/',
     path: '/phases/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPayrollIndexRoute =
+  AuthenticatedPayrollIndexRouteImport.update({
+    id: '/payroll/',
+    path: '/payroll/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPayrollRunsIndexRoute =
+  AuthenticatedPayrollRunsIndexRouteImport.update({
+    id: '/payroll-runs/',
+    path: '/payroll-runs/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedOwnersIndexRoute =
@@ -329,6 +348,12 @@ const AuthenticatedSettingsAccountRoute =
     path: '/account',
     getParentRoute: () => AuthenticatedSettingsRouteRoute,
   } as any)
+const AuthenticatedPayrollRunsRunIdRoute =
+  AuthenticatedPayrollRunsRunIdRouteImport.update({
+    id: '/payroll-runs/$runId',
+    path: '/payroll-runs/$runId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedErrorsErrorRoute =
   AuthenticatedErrorsErrorRouteImport.update({
     id: '/errors/$error',
@@ -339,6 +364,30 @@ const AuthenticatedEmployeesEmployeeIdRoute =
   AuthenticatedEmployeesEmployeeIdRouteImport.update({
     id: '/employees/$employeeId',
     path: '/employees/$employeeId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPayrollConfigSssIndexRoute =
+  AuthenticatedPayrollConfigSssIndexRouteImport.update({
+    id: '/payroll-config/sss/',
+    path: '/payroll-config/sss/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPayrollConfigPhilhealthIndexRoute =
+  AuthenticatedPayrollConfigPhilhealthIndexRouteImport.update({
+    id: '/payroll-config/philhealth/',
+    path: '/payroll-config/philhealth/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPayrollConfigPagibigIndexRoute =
+  AuthenticatedPayrollConfigPagibigIndexRouteImport.update({
+    id: '/payroll-config/pagibig/',
+    path: '/payroll-config/pagibig/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPayrollConfigBirIndexRoute =
+  AuthenticatedPayrollConfigBirIndexRouteImport.update({
+    id: '/payroll-config/bir/',
+    path: '/payroll-config/bir/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 
@@ -357,6 +406,7 @@ export interface FileRoutesByFullPath {
   '/503': typeof errors503Route
   '/employees/$employeeId': typeof AuthenticatedEmployeesEmployeeIdRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/payroll-runs/$runId': typeof AuthenticatedPayrollRunsRunIdRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -382,6 +432,8 @@ export interface FileRoutesByFullPath {
   '/model-types/': typeof AuthenticatedModelTypesIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
   '/owners/': typeof AuthenticatedOwnersIndexRoute
+  '/payroll-runs/': typeof AuthenticatedPayrollRunsIndexRoute
+  '/payroll/': typeof AuthenticatedPayrollIndexRoute
   '/phases/': typeof AuthenticatedPhasesIndexRoute
   '/positions/': typeof AuthenticatedPositionsIndexRoute
   '/project-types/': typeof AuthenticatedProjectTypesIndexRoute
@@ -392,6 +444,10 @@ export interface FileRoutesByFullPath {
   '/subdivisions/': typeof AuthenticatedSubdivisionsIndexRoute
   '/tasks/': typeof AuthenticatedTasksIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
+  '/payroll-config/bir/': typeof AuthenticatedPayrollConfigBirIndexRoute
+  '/payroll-config/pagibig/': typeof AuthenticatedPayrollConfigPagibigIndexRoute
+  '/payroll-config/philhealth/': typeof AuthenticatedPayrollConfigPhilhealthIndexRoute
+  '/payroll-config/sss/': typeof AuthenticatedPayrollConfigSssIndexRoute
 }
 export interface FileRoutesByTo {
   '/forgot-password': typeof authForgotPasswordRoute
@@ -407,6 +463,7 @@ export interface FileRoutesByTo {
   '/': typeof AuthenticatedIndexRoute
   '/employees/$employeeId': typeof AuthenticatedEmployeesEmployeeIdRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/payroll-runs/$runId': typeof AuthenticatedPayrollRunsRunIdRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -432,6 +489,8 @@ export interface FileRoutesByTo {
   '/model-types': typeof AuthenticatedModelTypesIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
   '/owners': typeof AuthenticatedOwnersIndexRoute
+  '/payroll-runs': typeof AuthenticatedPayrollRunsIndexRoute
+  '/payroll': typeof AuthenticatedPayrollIndexRoute
   '/phases': typeof AuthenticatedPhasesIndexRoute
   '/positions': typeof AuthenticatedPositionsIndexRoute
   '/project-types': typeof AuthenticatedProjectTypesIndexRoute
@@ -442,6 +501,10 @@ export interface FileRoutesByTo {
   '/subdivisions': typeof AuthenticatedSubdivisionsIndexRoute
   '/tasks': typeof AuthenticatedTasksIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
+  '/payroll-config/bir': typeof AuthenticatedPayrollConfigBirIndexRoute
+  '/payroll-config/pagibig': typeof AuthenticatedPayrollConfigPagibigIndexRoute
+  '/payroll-config/philhealth': typeof AuthenticatedPayrollConfigPhilhealthIndexRoute
+  '/payroll-config/sss': typeof AuthenticatedPayrollConfigSssIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -460,6 +523,7 @@ export interface FileRoutesById {
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/employees/$employeeId': typeof AuthenticatedEmployeesEmployeeIdRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/_authenticated/payroll-runs/$runId': typeof AuthenticatedPayrollRunsRunIdRoute
   '/_authenticated/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/_authenticated/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -485,6 +549,8 @@ export interface FileRoutesById {
   '/_authenticated/model-types/': typeof AuthenticatedModelTypesIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
   '/_authenticated/owners/': typeof AuthenticatedOwnersIndexRoute
+  '/_authenticated/payroll-runs/': typeof AuthenticatedPayrollRunsIndexRoute
+  '/_authenticated/payroll/': typeof AuthenticatedPayrollIndexRoute
   '/_authenticated/phases/': typeof AuthenticatedPhasesIndexRoute
   '/_authenticated/positions/': typeof AuthenticatedPositionsIndexRoute
   '/_authenticated/project-types/': typeof AuthenticatedProjectTypesIndexRoute
@@ -495,6 +561,10 @@ export interface FileRoutesById {
   '/_authenticated/subdivisions/': typeof AuthenticatedSubdivisionsIndexRoute
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
+  '/_authenticated/payroll-config/bir/': typeof AuthenticatedPayrollConfigBirIndexRoute
+  '/_authenticated/payroll-config/pagibig/': typeof AuthenticatedPayrollConfigPagibigIndexRoute
+  '/_authenticated/payroll-config/philhealth/': typeof AuthenticatedPayrollConfigPhilhealthIndexRoute
+  '/_authenticated/payroll-config/sss/': typeof AuthenticatedPayrollConfigSssIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -513,6 +583,7 @@ export interface FileRouteTypes {
     | '/503'
     | '/employees/$employeeId'
     | '/errors/$error'
+    | '/payroll-runs/$runId'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
@@ -538,6 +609,8 @@ export interface FileRouteTypes {
     | '/model-types/'
     | '/models/'
     | '/owners/'
+    | '/payroll-runs/'
+    | '/payroll/'
     | '/phases/'
     | '/positions/'
     | '/project-types/'
@@ -548,6 +621,10 @@ export interface FileRouteTypes {
     | '/subdivisions/'
     | '/tasks/'
     | '/users/'
+    | '/payroll-config/bir/'
+    | '/payroll-config/pagibig/'
+    | '/payroll-config/philhealth/'
+    | '/payroll-config/sss/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/forgot-password'
@@ -563,6 +640,7 @@ export interface FileRouteTypes {
     | '/'
     | '/employees/$employeeId'
     | '/errors/$error'
+    | '/payroll-runs/$runId'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
@@ -588,6 +666,8 @@ export interface FileRouteTypes {
     | '/model-types'
     | '/models'
     | '/owners'
+    | '/payroll-runs'
+    | '/payroll'
     | '/phases'
     | '/positions'
     | '/project-types'
@@ -598,6 +678,10 @@ export interface FileRouteTypes {
     | '/subdivisions'
     | '/tasks'
     | '/users'
+    | '/payroll-config/bir'
+    | '/payroll-config/pagibig'
+    | '/payroll-config/philhealth'
+    | '/payroll-config/sss'
   id:
     | '__root__'
     | '/_authenticated'
@@ -615,6 +699,7 @@ export interface FileRouteTypes {
     | '/_authenticated/'
     | '/_authenticated/employees/$employeeId'
     | '/_authenticated/errors/$error'
+    | '/_authenticated/payroll-runs/$runId'
     | '/_authenticated/settings/account'
     | '/_authenticated/settings/appearance'
     | '/_authenticated/settings/display'
@@ -640,6 +725,8 @@ export interface FileRouteTypes {
     | '/_authenticated/model-types/'
     | '/_authenticated/models/'
     | '/_authenticated/owners/'
+    | '/_authenticated/payroll-runs/'
+    | '/_authenticated/payroll/'
     | '/_authenticated/phases/'
     | '/_authenticated/positions/'
     | '/_authenticated/project-types/'
@@ -650,6 +737,10 @@ export interface FileRouteTypes {
     | '/_authenticated/subdivisions/'
     | '/_authenticated/tasks/'
     | '/_authenticated/users/'
+    | '/_authenticated/payroll-config/bir/'
+    | '/_authenticated/payroll-config/pagibig/'
+    | '/_authenticated/payroll-config/philhealth/'
+    | '/_authenticated/payroll-config/sss/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -829,6 +920,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPhasesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/payroll/': {
+      id: '/_authenticated/payroll/'
+      path: '/payroll'
+      fullPath: '/payroll/'
+      preLoaderRoute: typeof AuthenticatedPayrollIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/payroll-runs/': {
+      id: '/_authenticated/payroll-runs/'
+      path: '/payroll-runs'
+      fullPath: '/payroll-runs/'
+      preLoaderRoute: typeof AuthenticatedPayrollRunsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/owners/': {
       id: '/_authenticated/owners/'
       path: '/owners'
@@ -1004,6 +1109,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsAccountRouteImport
       parentRoute: typeof AuthenticatedSettingsRouteRoute
     }
+    '/_authenticated/payroll-runs/$runId': {
+      id: '/_authenticated/payroll-runs/$runId'
+      path: '/payroll-runs/$runId'
+      fullPath: '/payroll-runs/$runId'
+      preLoaderRoute: typeof AuthenticatedPayrollRunsRunIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/errors/$error': {
       id: '/_authenticated/errors/$error'
       path: '/errors/$error'
@@ -1016,6 +1128,34 @@ declare module '@tanstack/react-router' {
       path: '/employees/$employeeId'
       fullPath: '/employees/$employeeId'
       preLoaderRoute: typeof AuthenticatedEmployeesEmployeeIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/payroll-config/sss/': {
+      id: '/_authenticated/payroll-config/sss/'
+      path: '/payroll-config/sss'
+      fullPath: '/payroll-config/sss/'
+      preLoaderRoute: typeof AuthenticatedPayrollConfigSssIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/payroll-config/philhealth/': {
+      id: '/_authenticated/payroll-config/philhealth/'
+      path: '/payroll-config/philhealth'
+      fullPath: '/payroll-config/philhealth/'
+      preLoaderRoute: typeof AuthenticatedPayrollConfigPhilhealthIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/payroll-config/pagibig/': {
+      id: '/_authenticated/payroll-config/pagibig/'
+      path: '/payroll-config/pagibig'
+      fullPath: '/payroll-config/pagibig/'
+      preLoaderRoute: typeof AuthenticatedPayrollConfigPagibigIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/payroll-config/bir/': {
+      id: '/_authenticated/payroll-config/bir/'
+      path: '/payroll-config/bir'
+      fullPath: '/payroll-config/bir/'
+      preLoaderRoute: typeof AuthenticatedPayrollConfigBirIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
   }
@@ -1049,6 +1189,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedEmployeesEmployeeIdRoute: typeof AuthenticatedEmployeesEmployeeIdRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
+  AuthenticatedPayrollRunsRunIdRoute: typeof AuthenticatedPayrollRunsRunIdRoute
   AuthenticatedSubdivisionsWizardRoute: typeof AuthenticatedSubdivisionsWizardRoute
   AuthenticatedAppsIndexRoute: typeof AuthenticatedAppsIndexRoute
   AuthenticatedBlocksIndexRoute: typeof AuthenticatedBlocksIndexRoute
@@ -1070,6 +1211,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedModelTypesIndexRoute: typeof AuthenticatedModelTypesIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
   AuthenticatedOwnersIndexRoute: typeof AuthenticatedOwnersIndexRoute
+  AuthenticatedPayrollRunsIndexRoute: typeof AuthenticatedPayrollRunsIndexRoute
+  AuthenticatedPayrollIndexRoute: typeof AuthenticatedPayrollIndexRoute
   AuthenticatedPhasesIndexRoute: typeof AuthenticatedPhasesIndexRoute
   AuthenticatedPositionsIndexRoute: typeof AuthenticatedPositionsIndexRoute
   AuthenticatedProjectTypesIndexRoute: typeof AuthenticatedProjectTypesIndexRoute
@@ -1079,6 +1222,10 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSubdivisionsIndexRoute: typeof AuthenticatedSubdivisionsIndexRoute
   AuthenticatedTasksIndexRoute: typeof AuthenticatedTasksIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
+  AuthenticatedPayrollConfigBirIndexRoute: typeof AuthenticatedPayrollConfigBirIndexRoute
+  AuthenticatedPayrollConfigPagibigIndexRoute: typeof AuthenticatedPayrollConfigPagibigIndexRoute
+  AuthenticatedPayrollConfigPhilhealthIndexRoute: typeof AuthenticatedPayrollConfigPhilhealthIndexRoute
+  AuthenticatedPayrollConfigSssIndexRoute: typeof AuthenticatedPayrollConfigSssIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -1086,6 +1233,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedEmployeesEmployeeIdRoute: AuthenticatedEmployeesEmployeeIdRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
+  AuthenticatedPayrollRunsRunIdRoute: AuthenticatedPayrollRunsRunIdRoute,
   AuthenticatedSubdivisionsWizardRoute: AuthenticatedSubdivisionsWizardRoute,
   AuthenticatedAppsIndexRoute: AuthenticatedAppsIndexRoute,
   AuthenticatedBlocksIndexRoute: AuthenticatedBlocksIndexRoute,
@@ -1109,6 +1257,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedModelTypesIndexRoute: AuthenticatedModelTypesIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
   AuthenticatedOwnersIndexRoute: AuthenticatedOwnersIndexRoute,
+  AuthenticatedPayrollRunsIndexRoute: AuthenticatedPayrollRunsIndexRoute,
+  AuthenticatedPayrollIndexRoute: AuthenticatedPayrollIndexRoute,
   AuthenticatedPhasesIndexRoute: AuthenticatedPhasesIndexRoute,
   AuthenticatedPositionsIndexRoute: AuthenticatedPositionsIndexRoute,
   AuthenticatedProjectTypesIndexRoute: AuthenticatedProjectTypesIndexRoute,
@@ -1118,6 +1268,14 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSubdivisionsIndexRoute: AuthenticatedSubdivisionsIndexRoute,
   AuthenticatedTasksIndexRoute: AuthenticatedTasksIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
+  AuthenticatedPayrollConfigBirIndexRoute:
+    AuthenticatedPayrollConfigBirIndexRoute,
+  AuthenticatedPayrollConfigPagibigIndexRoute:
+    AuthenticatedPayrollConfigPagibigIndexRoute,
+  AuthenticatedPayrollConfigPhilhealthIndexRoute:
+    AuthenticatedPayrollConfigPhilhealthIndexRoute,
+  AuthenticatedPayrollConfigSssIndexRoute:
+    AuthenticatedPayrollConfigSssIndexRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

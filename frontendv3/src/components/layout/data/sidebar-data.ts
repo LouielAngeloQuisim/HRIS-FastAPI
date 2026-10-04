@@ -20,6 +20,7 @@ import {
   Table2,
   BookOpen,
   FileEdit,
+  Wallet,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
@@ -168,6 +169,7 @@ export const sidebarData: SidebarData = {
       items: [
         { title: 'Payroll', url: '/payroll', icon: FolderKanban, permission: { module: 'payroll' } },
         { title: 'Payroll Runs', url: '/payroll-runs', icon: FolderKanban, permission: { module: 'payroll' } },
+        { title: 'Salary Setup', url: '/payroll/salary', icon: Wallet, permission: { module: 'payroll' } },
         { title: 'SSS Config', url: '/payroll-config/sss', icon: FolderKanban, permission: { module: 'sss_config' } },
         { title: 'PhilHealth Config', url: '/payroll-config/philhealth', icon: FolderKanban, permission: { module: 'philhealth_config' } },
         { title: 'Pag-IBIG Config', url: '/payroll-config/pagibig', icon: FolderKanban, permission: { module: 'pagibig_config' } },
@@ -208,6 +210,12 @@ export const sidebarData: SidebarData = {
           permission: { module: 'leave_request' },
         },
         {
+          title: 'Leave Policies',
+          url: '/leave-policies',
+          icon: FolderKanban,
+          permission: { module: 'leave_policy' },
+        },
+        {
           title: 'Leave Calendar',
           url: '/leave-calendar',
           icon: CalendarDays,
@@ -217,6 +225,12 @@ export const sidebarData: SidebarData = {
           title: 'Leave Ledger',
           url: '/leave-ledger',
           icon: BookOpen,
+          permission: { module: 'emp_leaves' },
+        },
+        {
+          title: 'Leave Enrollments',
+          url: '/leave-enrollments',
+          icon: FolderKanban,
           permission: { module: 'emp_leaves' },
         },
         {

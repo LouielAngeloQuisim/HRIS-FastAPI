@@ -7,6 +7,9 @@ import type {
   PayrollRunPublic,
   PayrollRunDetail,
   PayrollEntryPreview,
+  EmployeeSalaryList,
+  EmployeeSalaryPublic,
+  EmployeeSalaryCreate,
 } from './types'
 
 const API = ''
@@ -121,4 +124,50 @@ export function useApprovePayrollRun() {
 export function useVoidPayrollRun() {
   const qc = useQueryClient()
   return useMutation({ mutationFn: (id: string) => api.post<PayrollRunPublic>(`${API}/payroll/runs/${id}/void`).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-runs'] }) })
+}
+
+// -----------------------------------------------------------------------------
+// Employee Salary Management (PAY-03)
+// -----------------------------------------------------------------------------
+
+export const salaryKey = (employeeId: string) => ['salary', employeeId]
+
+export async function fetchEmployeeSalaries(employeeId: string): Promise<EmployeeSalaryList> {
+  const { data } = await api.get<EmployeeSalaryList>(`/payroll/employees/${employeeId}/salary`)
+  return data
+}
+
+export function useEmployeeSalaries(employeeId: string | undefined) {
+  return useQuery({
+    queryKey: salaryKey(employeeId ?? 'none'),
+    queryFn: () => fetchEmployeeSalaries(employeeId as string),
+    enabled: Boolean(employeeId),
+    placeholderData: keepPreviousData,
+  })
+}
+
+export async function createEmployeeSalary(salary: EmployeeSalaryCreate): Promise<EmployeeSalaryPublic> {
+  const response = await api.post<EmployeeSalaryPublic>(`/payroll/employees/${salary.employee_id}/salary`, salary)
+  return response.data
+}
+
+export async function updateEmployeeSalary(salary_id: string, salary: EmployeeSalaryCreate): Promise<EmployeeSalaryPublic> {
+  const response = await api.patch<EmployeeSalaryPublic>(`/payroll/salaries/${salary_id}`, salary)
+  return response.data
+}
+
+export function useCreateSalary() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: createEmployeeSalary,
+    onSuccess: (_, { employee_id }) => qc.invalidateQueries({ queryKey: salaryKey(employee_id) }),
+  })
+}
+
+export function useUpdateSalary() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: updateEmployeeSalary,
+    onSuccess: (_, { employee_id }) => qc.invalidateQueries({ queryKey: salaryKey(employee_id) }),
+  })
 }

@@ -8,10 +8,12 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { useCan } from '@/context/permissions-provider'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
 import { Upload } from 'lucide-react'
 import { CsvImportWizard } from './components/csv-import/csv-import-wizard'
-import { useEmployees } from '@/lib/api/employees'
+import { useEmployees, useDeleteEmployee } from '@/lib/api/employees'
 import { EmployeesTable } from './components/employees-table'
+import { ResourceForm } from './components/resource-form'
 
 const route = getRouteApi('/_authenticated/employees/')
 
@@ -19,6 +21,7 @@ export function Employees() {
   const search = route.useSearch()
   const navigate = route.useNavigate()
   const canView = useCan('emp_list', 'view')
+  const canEdit = useCan('emp_list', 'edit')
 
   const page = typeof search.page === 'number' ? search.page : 1
   const pageSize = typeof search.pageSize === 'number' ? search.pageSize : 10
@@ -30,6 +33,31 @@ export function Employees() {
   }))
   const count = data?.count ?? 0
   const [csvImportOpen, setCsvImportOpen] = useState(false)
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState<typeof employees[number] | null>(null)
+
+  const deleteMutation = useDeleteEmployee()
+
+  const handleArchive = async (employee: typeof employees[number]) => {
+    try {
+      await deleteMutation.mutateAsync(employee.id)
+      refetch()
+      toast.success('Employee archived')
+    } catch {
+      toast.error('Failed to archive employee')
+    }
+  }
+
+  const handleEdit = (employee: typeof employees[number]) => {
+    setEditing(employee)
+    setFormOpen(true)
+  }
+
+  const handleCloseForm = () => {
+    setFormOpen(false)
+    setEditing(null)
+    refetch()
+  }
 
   return (
     <EmployeesAuthGate canView={canView}>
@@ -48,9 +76,16 @@ export function Employees() {
                 {count} employee{count === 1 ? '' : 's'} total
               </p>
             </div>
-            <Button variant='outline' onClick={() => setCsvImportOpen(true)} data-testid="employee-csv-import-button">
-              <Upload className='mr-2 h-4 w-4' /> Import CSV
-            </Button>
+            <div className='flex gap-2'>
+              {canEdit && (
+                <Button data-testid='add-employee-button' onClick={() => setFormOpen(true)}>
+                  Add Employee
+                </Button>
+              )}
+              <Button variant='outline' onClick={() => setCsvImportOpen(true)} data-testid="employee-csv-import-button">
+                <Upload className='mr-2 h-4 w-4' /> Import CSV
+              </Button>
+            </div>
           </div>
         {isPending && (
           <div className='text-sm text-muted-foreground'>Loading employees…</div>
@@ -75,10 +110,18 @@ export function Employees() {
             count={count}
             search={search as Record<string, unknown>}
             navigate={navigate}
+            onEdit={handleEdit}
+            onDelete={handleArchive}
+            deletePending={deleteMutation.isPending}
           />
         )}
       </Main>
       {csvImportOpen && <CsvImportWizard open={csvImportOpen} onOpenChange={setCsvImportOpen} />}
+      <ResourceForm
+        item={editing}
+        open={formOpen}
+        onClose={handleCloseForm}
+      />
     </EmployeesAuthGate>
   )
 }

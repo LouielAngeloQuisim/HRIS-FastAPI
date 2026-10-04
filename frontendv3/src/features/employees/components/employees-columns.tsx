@@ -4,6 +4,10 @@ import { Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { type Employee, fullName } from '../data/schema'
+import { useEmployeesActions } from './employees-actions'
+
+// Re-export actions context so consumers of employees-columns can use it.
+export { EmployeesActionsProvider, useEmployeesActions } from './employees-actions'
 
 export const employeesColumns: ColumnDef<Employee>[] = [
   {
@@ -72,20 +76,42 @@ export const employeesColumns: ColumnDef<Employee>[] = [
   {
     id: 'actions',
     header: () => <div className='text-right'>Actions</div>,
-    cell: ({ row }) => (
-      <div className='flex justify-end'>
-        <Button variant='ghost' size='icon' asChild>
-          <Link
-            to='/employees/$employeeId'
-            params={{ employeeId: row.original.id }}
-            aria-label='View employee'
-          >
-            <Eye className='h-4 w-4' />
-          </Link>
-        </Button>
-      </div>
-    ),
+    cell: ({ row }) => <EmployeeActionsCell employee={row.original} />,
     enableSorting: false,
     enableHiding: false,
   },
 ]
+
+function EmployeeActionsCell({ employee }: { employee: Employee }) {
+  const { onEdit, onDelete, deletePending } = useEmployeesActions()
+  return (
+    <div className='flex justify-end gap-1'>
+      <Button variant='ghost' size='icon' asChild aria-label='View employee'>
+        <Link
+          to='/employees/$employeeId'
+          params={{ employeeId: employee.id }}
+        >
+          <Eye className='h-4 w-4' />
+        </Link>
+      </Button>
+      <Button
+        variant='ghost'
+        size='sm'
+        data-testid={`edit-employee-button-${employee.id}`}
+        onClick={() => onEdit?.(employee)}
+      >
+        Edit
+      </Button>
+      <Button
+        variant='ghost'
+        size='sm'
+        className='text-destructive hover:text-destructive'
+        data-testid={`archive-employee-button-${employee.id}`}
+        onClick={() => onDelete?.(employee)}
+        disabled={deletePending}
+      >
+        Archive
+      </Button>
+    </div>
+  )
+}

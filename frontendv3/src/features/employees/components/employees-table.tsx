@@ -22,7 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { DataTablePagination, DataTableToolbar } from '@/components/data-table'
-import { employeesColumns as columns } from './employees-columns'
+import { EmployeesActionsProvider, employeesColumns as columns } from './employees-columns'
 import { type Employee } from '../data/schema'
 
 type EmployeesTableProps = {
@@ -30,9 +30,12 @@ type EmployeesTableProps = {
   count: number
   search: Record<string, unknown>
   navigate: NavigateFn
+  onEdit: (employee: Employee) => void
+  onDelete: (employee: Employee) => void
+  deletePending?: boolean
 }
 
-export function EmployeesTable({ data, search, navigate }: EmployeesTableProps) {
+export function EmployeesTable({ data, search, navigate, onEdit, onDelete, deletePending }: EmployeesTableProps) {
   const [rowSelection, setRowSelection] = useState({})
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [sorting, setSorting] = useState<SortingState>([])
@@ -93,81 +96,83 @@ export function EmployeesTable({ data, search, navigate }: EmployeesTableProps) 
   }, [table, ensurePageInRange])
 
   return (
-    <div className='flex flex-1 flex-col gap-4'>
-      <DataTableToolbar
-        table={table}
-        searchPlaceholder='Search by code or name...'
-        filters={[
-          {
-            columnId: 'employee_status',
-            title: 'Status',
-            options: [
-              { label: 'Active', value: 'Active' },
-              { label: 'Resigned', value: 'Resigned' },
-              { label: 'Terminated', value: 'Terminated' },
-              { label: 'On Leave', value: 'On Leave' },
-            ],
-          },
-        ]}
-      />
-      <div className='overflow-hidden rounded-md border'>
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id} className='group/row'>
-                {headerGroup.headers.map((header) => (
-                  <TableHead
-                    key={header.id}
-                    colSpan={header.colSpan}
-                    className={cn(
-                      'bg-background group-hover/row:bg-muted',
-                      header.column.columnDef.meta?.className,
-                      header.column.columnDef.meta?.thClassName
-                    )}
-                  >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id} className='group/row'>
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell
-                      key={cell.id}
+    <EmployeesActionsProvider onEdit={onEdit} onDelete={onDelete} deletePending={deletePending}>
+      <div className='flex flex-1 flex-col gap-4'>
+        <DataTableToolbar
+          table={table}
+          searchPlaceholder='Search by code or name...'
+          filters={[
+            {
+              columnId: 'employee_status',
+              title: 'Status',
+              options: [
+                { label: 'Active', value: 'Active' },
+                { label: 'Resigned', value: 'Resigned' },
+                { label: 'Terminated', value: 'Terminated' },
+                { label: 'On Leave', value: 'On Leave' },
+              ],
+            },
+          ]}
+        />
+        <div className='overflow-hidden rounded-md border'>
+          <Table>
+            <TableHeader>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id} className='group/row'>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead
+                      key={header.id}
+                      colSpan={header.colSpan}
                       className={cn(
                         'bg-background group-hover/row:bg-muted',
-                        cell.column.columnDef.meta?.className,
-                        cell.column.columnDef.meta?.tdClassName
+                        header.column.columnDef.meta?.className,
+                        header.column.columnDef.meta?.thClassName
                       )}
                     >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
+                    </TableHead>
                   ))}
                 </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className='h-24 text-center'
-                >
-                  No employees found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows?.length ? (
+                table.getRowModel().rows.map((row) => (
+                  <TableRow key={row.id} className='group/row'>
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell
+                        key={cell.id}
+                        className={cn(
+                          'bg-background group-hover/row:bg-muted',
+                          cell.column.columnDef.meta?.className,
+                          cell.column.columnDef.meta?.tdClassName
+                        )}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={columns.length}
+                    className='h-24 text-center'
+                  >
+                    No employees found.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <DataTablePagination table={table} className='mt-auto' />
       </div>
-      <DataTablePagination table={table} className='mt-auto' />
-    </div>
+    </EmployeesActionsProvider>
   )
 }

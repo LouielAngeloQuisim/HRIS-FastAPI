@@ -816,3 +816,190 @@ export interface PayrollRunPreview {
   run: PayrollRunPublic
   entries: PayrollEntryPreview[]
 }
+
+// -----------------------------------------------------------------------------
+// Employee Salary Management (PAY-03)
+// -----------------------------------------------------------------------------
+
+export interface EmployeeSalaryBase {
+  basic_rate: string
+  currency?: string | null
+  effective_date: string
+  pay_type?: 'monthly' | 'daily' | 'hourly' | null
+  overtime_rate?: string | null
+  absent_penalty_rate?: string | null
+  non_taxable_allowance?: string | null
+  de_minimis_monthly?: Record<string, unknown> | null
+  thirteenth_month_exempt_portion?: string | null
+  is_active?: boolean | null
+}
+
+export interface EmployeeSalaryCreate extends EmployeeSalaryBase {
+  employee_id: string
+}
+
+export interface EmployeeSalaryUpdate {
+  basic_rate?: string | null
+  currency?: string | null
+  effective_date?: string | null
+  pay_type?: 'monthly' | 'daily' | 'hourly' | null
+  overtime_rate?: string | null
+  absent_penalty_rate?: string | null
+  non_taxable_allowance?: string | null
+  de_minimis_monthly?: Record<string, unknown> | null
+  thirteenth_month_exempt_portion?: string | null
+  is_active?: boolean | null
+}
+
+export interface EmployeeSalaryPublic extends EmployeeSalaryBase {
+  id: string
+  employee_id: string | null
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface EmployeeSalaryList {
+  data: EmployeeSalaryPublic[]
+  count: number
+}
+
+// -----------------------------------------------------------------------------
+// Leave Domain Types (QA-04)
+// -----------------------------------------------------------------------------
+
+export type LeaveCadence = 'annual' | 'monthly'
+export type GenderScope = 'all' | 'male' | 'female'
+export type MaritalStatusScope = 'all' | 'single' | 'married' | 'widowed' | 'divorced'
+export type LeaveRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
+
+export interface LeavePolicyBase {
+  code: string
+  name: string
+  description?: string | null
+  calendar_color?: string | null
+  cadence?: LeaveCadence | null
+  annual_entitlement_days?: string | null
+  prorate_on_hire?: boolean | null
+  carry_over_enabled?: boolean | null
+  carry_over_max_days?: string | null
+  carry_over_expires_on?: string | null
+  is_paid?: boolean | null
+  eligible_departments?: string[] | null
+  gender_scope?: GenderScope | null
+  marital_status_scope?: MaritalStatusScope | null
+  is_active?: boolean | null
+}
+
+export type LeavePolicyCreate = LeavePolicyBase
+
+export interface LeavePolicyUpdate {
+  code?: string | null
+  name?: string | null
+  description?: string | null
+  calendar_color?: string | null
+  cadence?: LeaveCadence | null
+  annual_entitlement_days?: string | null
+  prorate_on_hire?: boolean | null
+  carry_over_enabled?: boolean | null
+  carry_over_max_days?: string | null
+  carry_over_expires_on?: string | null
+  is_paid?: boolean | null
+  eligible_departments?: string[] | null
+  gender_scope?: GenderScope | null
+  marital_status_scope?: MaritalStatusScope | null
+  is_active?: boolean | null
+}
+
+export interface LeavePolicyPublic extends LeavePolicyBase {
+  id: string
+  is_system: boolean
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface LeavePolicyList {
+  data: LeavePolicyPublic[]
+  count: number
+}
+
+export interface EmployeeLeaveEnrollmentBase {
+  policy_id: string
+  leave_year?: number | null
+}
+
+export type EmployeeLeaveEnrollmentCreate = EmployeeLeaveEnrollmentBase
+
+export interface EmployeeLeaveEnrollmentPublic extends EmployeeLeaveEnrollmentBase {
+  id: string
+  employee_id: string
+  leave_year: number
+  granted_days: string
+  is_active: boolean
+  is_transferred: boolean
+  transferred_at: string | null
+  is_deleted: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface EmployeeLeaveEnrollmentList {
+  data: EmployeeLeaveEnrollmentPublic[]
+  count: number
+}
+
+export interface LeaveRequestBase {
+  employee_id: string
+  policy_id: string
+  date_start: string
+  date_end: string
+  leave_type?: string | null
+  reason?: string | null
+}
+
+export type LeaveRequestCreate = LeaveRequestBase
+
+export interface LeaveRequestPublic extends LeaveRequestBase {
+  id: string
+  status: LeaveRequestStatus
+  notes?: string | null
+  start_date?: string | null
+  end_date?: string | null
+  total_days?: string | null
+  approved_at?: string | null
+  rejected_at?: string | null
+  cancelled_at?: string | null
+  policy_name?: string | null
+  policy_code?: string | null
+  employee_name?: string | null
+}
+
+export interface LeaveRequestList {
+  data: LeaveRequestPublic[]
+  count: number
+}
+
+export interface LeaveLedgerEntryPublic {
+  id: string
+  employee_id: string
+  policy_id: string
+  leave_year: number
+  event_type: string
+  date: string
+  days: string
+  description?: string | null
+  created_at?: string | null
+}
+
+export interface LeaveLedgerSummary {
+  granted_total: string
+  consumed_total: string
+  remaining: string
+}
+
+export interface LeaveLedgerEventPage {
+  data: LeaveLedgerEntryPublic[]
+  pagination: { skip: number; limit: number; count: number }
+  summary: LeaveLedgerSummary
+}

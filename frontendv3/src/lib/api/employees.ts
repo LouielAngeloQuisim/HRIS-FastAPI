@@ -1,6 +1,6 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
-import { type EmployeeRecordsList, type EmployeeRecordsPublic } from './types'
+import { type EmployeeRecordsCreate, type EmployeeRecordsList, type EmployeeRecordsPublic, type EmployeeRecordsUpdate } from './types'
 
 export const employeesKey = (page: number, pageSize: number) => [
   'employees',
@@ -37,5 +37,36 @@ export function useEmployee(id: string | undefined) {
     queryKey: ['employee', id],
     queryFn: () => fetchEmployee(id as string),
     enabled: Boolean(id),
+  })
+}
+
+// -----------------------------------------------------------------------------
+// Create / update / soft-archive (QA-05)
+// -----------------------------------------------------------------------------
+
+export function useCreateEmployee() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: EmployeeRecordsCreate) =>
+      api.post<EmployeeRecordsPublic>('/employees', data).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['employees'] }),
+  })
+}
+
+export function useUpdateEmployee() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: EmployeeRecordsUpdate }) =>
+      api.patch<EmployeeRecordsPublic>(`/employees/${id}`, data).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['employees'] }),
+  })
+}
+
+export function useDeleteEmployee() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete(`/employees/${id}`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['employees'] }),
   })
 }

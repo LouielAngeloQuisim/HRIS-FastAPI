@@ -39,7 +39,9 @@ import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenti
 import { Route as AuthenticatedModelTypesIndexRouteImport } from './routes/_authenticated/model-types/index'
 import { Route as AuthenticatedLotsIndexRouteImport } from './routes/_authenticated/lots/index'
 import { Route as AuthenticatedLeaveRequestsIndexRouteImport } from './routes/_authenticated/leave-requests/index'
+import { Route as AuthenticatedLeavePoliciesIndexRouteImport } from './routes/_authenticated/leave-policies/index'
 import { Route as AuthenticatedLeaveLedgerIndexRouteImport } from './routes/_authenticated/leave-ledger/index'
+import { Route as AuthenticatedLeaveEnrollmentsIndexRouteImport } from './routes/_authenticated/leave-enrollments/index'
 import { Route as AuthenticatedLeaveCalendarIndexRouteImport } from './routes/_authenticated/leave-calendar/index'
 import { Route as AuthenticatedHolidaysIndexRouteImport } from './routes/_authenticated/holidays/index'
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
@@ -62,6 +64,7 @@ import { Route as AuthenticatedSettingsAccountRouteImport } from './routes/_auth
 import { Route as AuthenticatedPayrollRunsRunIdRouteImport } from './routes/_authenticated/payroll-runs/$runId'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedEmployeesEmployeeIdRouteImport } from './routes/_authenticated/employees/$employeeId'
+import { Route as AuthenticatedPayrollSalaryIndexRouteImport } from './routes/_authenticated/payroll/salary/index'
 import { Route as AuthenticatedPayrollConfigSssIndexRouteImport } from './routes/_authenticated/payroll-config/sss/index'
 import { Route as AuthenticatedPayrollConfigPhilhealthIndexRouteImport } from './routes/_authenticated/payroll-config/philhealth/index'
 import { Route as AuthenticatedPayrollConfigPagibigIndexRouteImport } from './routes/_authenticated/payroll-config/pagibig/index'
@@ -230,10 +233,22 @@ const AuthenticatedLeaveRequestsIndexRoute =
     path: '/leave-requests/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedLeavePoliciesIndexRoute =
+  AuthenticatedLeavePoliciesIndexRouteImport.update({
+    id: '/leave-policies/',
+    path: '/leave-policies/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedLeaveLedgerIndexRoute =
   AuthenticatedLeaveLedgerIndexRouteImport.update({
     id: '/leave-ledger/',
     path: '/leave-ledger/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedLeaveEnrollmentsIndexRoute =
+  AuthenticatedLeaveEnrollmentsIndexRouteImport.update({
+    id: '/leave-enrollments/',
+    path: '/leave-enrollments/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedLeaveCalendarIndexRoute =
@@ -366,6 +381,12 @@ const AuthenticatedEmployeesEmployeeIdRoute =
     path: '/employees/$employeeId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedPayrollSalaryIndexRoute =
+  AuthenticatedPayrollSalaryIndexRouteImport.update({
+    id: '/payroll/salary/',
+    path: '/payroll/salary/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedPayrollConfigSssIndexRoute =
   AuthenticatedPayrollConfigSssIndexRouteImport.update({
     id: '/payroll-config/sss/',
@@ -426,7 +447,9 @@ export interface FileRoutesByFullPath {
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/holidays/': typeof AuthenticatedHolidaysIndexRoute
   '/leave-calendar/': typeof AuthenticatedLeaveCalendarIndexRoute
+  '/leave-enrollments/': typeof AuthenticatedLeaveEnrollmentsIndexRoute
   '/leave-ledger/': typeof AuthenticatedLeaveLedgerIndexRoute
+  '/leave-policies/': typeof AuthenticatedLeavePoliciesIndexRoute
   '/leave-requests/': typeof AuthenticatedLeaveRequestsIndexRoute
   '/lots/': typeof AuthenticatedLotsIndexRoute
   '/model-types/': typeof AuthenticatedModelTypesIndexRoute
@@ -448,6 +471,7 @@ export interface FileRoutesByFullPath {
   '/payroll-config/pagibig/': typeof AuthenticatedPayrollConfigPagibigIndexRoute
   '/payroll-config/philhealth/': typeof AuthenticatedPayrollConfigPhilhealthIndexRoute
   '/payroll-config/sss/': typeof AuthenticatedPayrollConfigSssIndexRoute
+  '/payroll/salary/': typeof AuthenticatedPayrollSalaryIndexRoute
 }
 export interface FileRoutesByTo {
   '/forgot-password': typeof authForgotPasswordRoute
@@ -483,7 +507,9 @@ export interface FileRoutesByTo {
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
   '/holidays': typeof AuthenticatedHolidaysIndexRoute
   '/leave-calendar': typeof AuthenticatedLeaveCalendarIndexRoute
+  '/leave-enrollments': typeof AuthenticatedLeaveEnrollmentsIndexRoute
   '/leave-ledger': typeof AuthenticatedLeaveLedgerIndexRoute
+  '/leave-policies': typeof AuthenticatedLeavePoliciesIndexRoute
   '/leave-requests': typeof AuthenticatedLeaveRequestsIndexRoute
   '/lots': typeof AuthenticatedLotsIndexRoute
   '/model-types': typeof AuthenticatedModelTypesIndexRoute
@@ -505,6 +531,7 @@ export interface FileRoutesByTo {
   '/payroll-config/pagibig': typeof AuthenticatedPayrollConfigPagibigIndexRoute
   '/payroll-config/philhealth': typeof AuthenticatedPayrollConfigPhilhealthIndexRoute
   '/payroll-config/sss': typeof AuthenticatedPayrollConfigSssIndexRoute
+  '/payroll/salary': typeof AuthenticatedPayrollSalaryIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -543,7 +570,9 @@ export interface FileRoutesById {
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/_authenticated/holidays/': typeof AuthenticatedHolidaysIndexRoute
   '/_authenticated/leave-calendar/': typeof AuthenticatedLeaveCalendarIndexRoute
+  '/_authenticated/leave-enrollments/': typeof AuthenticatedLeaveEnrollmentsIndexRoute
   '/_authenticated/leave-ledger/': typeof AuthenticatedLeaveLedgerIndexRoute
+  '/_authenticated/leave-policies/': typeof AuthenticatedLeavePoliciesIndexRoute
   '/_authenticated/leave-requests/': typeof AuthenticatedLeaveRequestsIndexRoute
   '/_authenticated/lots/': typeof AuthenticatedLotsIndexRoute
   '/_authenticated/model-types/': typeof AuthenticatedModelTypesIndexRoute
@@ -565,6 +594,7 @@ export interface FileRoutesById {
   '/_authenticated/payroll-config/pagibig/': typeof AuthenticatedPayrollConfigPagibigIndexRoute
   '/_authenticated/payroll-config/philhealth/': typeof AuthenticatedPayrollConfigPhilhealthIndexRoute
   '/_authenticated/payroll-config/sss/': typeof AuthenticatedPayrollConfigSssIndexRoute
+  '/_authenticated/payroll/salary/': typeof AuthenticatedPayrollSalaryIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -603,7 +633,9 @@ export interface FileRouteTypes {
     | '/help-center/'
     | '/holidays/'
     | '/leave-calendar/'
+    | '/leave-enrollments/'
     | '/leave-ledger/'
+    | '/leave-policies/'
     | '/leave-requests/'
     | '/lots/'
     | '/model-types/'
@@ -625,6 +657,7 @@ export interface FileRouteTypes {
     | '/payroll-config/pagibig/'
     | '/payroll-config/philhealth/'
     | '/payroll-config/sss/'
+    | '/payroll/salary/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/forgot-password'
@@ -660,7 +693,9 @@ export interface FileRouteTypes {
     | '/help-center'
     | '/holidays'
     | '/leave-calendar'
+    | '/leave-enrollments'
     | '/leave-ledger'
+    | '/leave-policies'
     | '/leave-requests'
     | '/lots'
     | '/model-types'
@@ -682,6 +717,7 @@ export interface FileRouteTypes {
     | '/payroll-config/pagibig'
     | '/payroll-config/philhealth'
     | '/payroll-config/sss'
+    | '/payroll/salary'
   id:
     | '__root__'
     | '/_authenticated'
@@ -719,7 +755,9 @@ export interface FileRouteTypes {
     | '/_authenticated/help-center/'
     | '/_authenticated/holidays/'
     | '/_authenticated/leave-calendar/'
+    | '/_authenticated/leave-enrollments/'
     | '/_authenticated/leave-ledger/'
+    | '/_authenticated/leave-policies/'
     | '/_authenticated/leave-requests/'
     | '/_authenticated/lots/'
     | '/_authenticated/model-types/'
@@ -741,6 +779,7 @@ export interface FileRouteTypes {
     | '/_authenticated/payroll-config/pagibig/'
     | '/_authenticated/payroll-config/philhealth/'
     | '/_authenticated/payroll-config/sss/'
+    | '/_authenticated/payroll/salary/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -969,11 +1008,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedLeaveRequestsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/leave-policies/': {
+      id: '/_authenticated/leave-policies/'
+      path: '/leave-policies'
+      fullPath: '/leave-policies/'
+      preLoaderRoute: typeof AuthenticatedLeavePoliciesIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/leave-ledger/': {
       id: '/_authenticated/leave-ledger/'
       path: '/leave-ledger'
       fullPath: '/leave-ledger/'
       preLoaderRoute: typeof AuthenticatedLeaveLedgerIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/leave-enrollments/': {
+      id: '/_authenticated/leave-enrollments/'
+      path: '/leave-enrollments'
+      fullPath: '/leave-enrollments/'
+      preLoaderRoute: typeof AuthenticatedLeaveEnrollmentsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/leave-calendar/': {
@@ -1130,6 +1183,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedEmployeesEmployeeIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/payroll/salary/': {
+      id: '/_authenticated/payroll/salary/'
+      path: '/payroll/salary'
+      fullPath: '/payroll/salary/'
+      preLoaderRoute: typeof AuthenticatedPayrollSalaryIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/payroll-config/sss/': {
       id: '/_authenticated/payroll-config/sss/'
       path: '/payroll-config/sss'
@@ -1205,7 +1265,9 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedHelpCenterIndexRoute: typeof AuthenticatedHelpCenterIndexRoute
   AuthenticatedHolidaysIndexRoute: typeof AuthenticatedHolidaysIndexRoute
   AuthenticatedLeaveCalendarIndexRoute: typeof AuthenticatedLeaveCalendarIndexRoute
+  AuthenticatedLeaveEnrollmentsIndexRoute: typeof AuthenticatedLeaveEnrollmentsIndexRoute
   AuthenticatedLeaveLedgerIndexRoute: typeof AuthenticatedLeaveLedgerIndexRoute
+  AuthenticatedLeavePoliciesIndexRoute: typeof AuthenticatedLeavePoliciesIndexRoute
   AuthenticatedLeaveRequestsIndexRoute: typeof AuthenticatedLeaveRequestsIndexRoute
   AuthenticatedLotsIndexRoute: typeof AuthenticatedLotsIndexRoute
   AuthenticatedModelTypesIndexRoute: typeof AuthenticatedModelTypesIndexRoute
@@ -1226,6 +1288,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPayrollConfigPagibigIndexRoute: typeof AuthenticatedPayrollConfigPagibigIndexRoute
   AuthenticatedPayrollConfigPhilhealthIndexRoute: typeof AuthenticatedPayrollConfigPhilhealthIndexRoute
   AuthenticatedPayrollConfigSssIndexRoute: typeof AuthenticatedPayrollConfigSssIndexRoute
+  AuthenticatedPayrollSalaryIndexRoute: typeof AuthenticatedPayrollSalaryIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -1251,7 +1314,10 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedHelpCenterIndexRoute: AuthenticatedHelpCenterIndexRoute,
   AuthenticatedHolidaysIndexRoute: AuthenticatedHolidaysIndexRoute,
   AuthenticatedLeaveCalendarIndexRoute: AuthenticatedLeaveCalendarIndexRoute,
+  AuthenticatedLeaveEnrollmentsIndexRoute:
+    AuthenticatedLeaveEnrollmentsIndexRoute,
   AuthenticatedLeaveLedgerIndexRoute: AuthenticatedLeaveLedgerIndexRoute,
+  AuthenticatedLeavePoliciesIndexRoute: AuthenticatedLeavePoliciesIndexRoute,
   AuthenticatedLeaveRequestsIndexRoute: AuthenticatedLeaveRequestsIndexRoute,
   AuthenticatedLotsIndexRoute: AuthenticatedLotsIndexRoute,
   AuthenticatedModelTypesIndexRoute: AuthenticatedModelTypesIndexRoute,
@@ -1276,6 +1342,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedPayrollConfigPhilhealthIndexRoute,
   AuthenticatedPayrollConfigSssIndexRoute:
     AuthenticatedPayrollConfigSssIndexRoute,
+  AuthenticatedPayrollSalaryIndexRoute: AuthenticatedPayrollSalaryIndexRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

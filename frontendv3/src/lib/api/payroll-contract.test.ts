@@ -1,11 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
-vi.mock('./client', () => ({ api: { get, post } }))
-import { fetchPayrollRuns, previewPayroll, generatePayroll } from './payroll'
+const { get, post, patch, del } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() }))
+vi.mock('./client', () => ({ api: { get, post, patch, delete: del } }))
+import { fetchPayrollRuns, previewPayroll, generatePayroll, fetchEmployeeSalaries, updateEmployeeSalary, deleteEmployeeSalary } from './payroll'
 import { fetchSSSBrackets, fetchPhilHealthBrackets, fetchPagIBIGBrackets, fetchBIRBrackets } from './payroll-config'
 
 describe('payroll current backend contracts', () => {
   beforeEach(() => vi.clearAllMocks())
+  it('normalizes the salary endpoint raw array response', async () => {
+    const rows = [{ id: 'salary-1', employee_id: 'employee-1', basic_rate: '18000.00' }]
+    get.mockResolvedValueOnce({ data: rows })
+    expect(await fetchEmployeeSalaries('employee-1')).toEqual({ data: rows, count: 1 })
+    expect(get).toHaveBeenCalledWith('/payroll/employees/employee-1/salary')
+  })
+  it('sends salary sparse updates as one request variables object', async () => {
+    patch.mockResolvedValueOnce({ data: { id: 'salary-1', employee_id: 'employee-1', basic_rate: '19000.00' } })
+    const update = { salary_id: 'salary-1', salary: { basic_rate: '19000.00' } }
+    expect(await updateEmployeeSalary(update)).toEqual({ id: 'salary-1', employee_id: 'employee-1', basic_rate: '19000.00' })
+    expect(patch).toHaveBeenCalledWith('/payroll/salaries/salary-1', { basic_rate: '19000.00' })
+  })
+  it('archives only the selected salary and returns the message response', async () => {
+    del.mockResolvedValueOnce({ data: { message: 'Employee salary archived' } })
+    expect(await deleteEmployeeSalary('salary-1')).toEqual({ message: 'Employee salary archived' })
+    expect(del).toHaveBeenCalledWith('/payroll/salaries/salary-1')
+  })
   it.each([
     ['/payroll/sss-brackets/', fetchSSSBrackets],
     ['/payroll/philhealth-brackets/', fetchPhilHealthBrackets],

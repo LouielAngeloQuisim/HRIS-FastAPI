@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useCan } from '@/context/permissions-provider'
-import { useLeaveRequests, useApproveLeaveRequest, useRejectLeaveRequest } from '@/lib/api/leave-requests'
+import { useLeaveRequests, useApproveLeaveRequest, useRejectLeaveRequest, useCancelLeaveRequest } from '@/lib/api/leave-requests'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { LeaveRequestForm } from './components/leave-request-form'
@@ -17,6 +17,7 @@ export default function LeaveRequestsPage() {
 
   const approveMutation = useApproveLeaveRequest()
   const rejectMutation = useRejectLeaveRequest()
+  const cancelMutation = useCancelLeaveRequest()
 
   const handleApprove = async (id: string) => {
     try {
@@ -33,6 +34,15 @@ export default function LeaveRequestsPage() {
       toast.success('Leave request rejected')
     } catch {
       toast.error('Failed to reject leave request')
+    }
+  }
+
+  const handleCancel = async (id: string) => {
+    try {
+      await cancelMutation.mutateAsync({ id })
+      toast.success('Leave request cancelled')
+    } catch {
+      toast.error('Failed to cancel leave request')
     }
   }
 
@@ -113,26 +123,39 @@ export default function LeaveRequestsPage() {
                     <td className="p-2 max-w-xs truncate">{item.reason ?? '—'}</td>
                     {canApprove && (
                       <td className="p-2 text-right">
-                        {item.status === 'pending' && (
+                        {(item.status === 'pending' || item.status === 'approved') && (
                           <div className="flex gap-1 justify-end">
+                            {item.status === 'pending' && (
+                              <>
+                                <Button
+                                  data-testid={`approve-leave-request-button-${item.id}`}
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleApprove(item.id)}
+                                  disabled={approveMutation.isPending}
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  data-testid={`reject-leave-request-button-${item.id}`}
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-destructive"
+                                  onClick={() => handleReject(item.id)}
+                                  disabled={rejectMutation.isPending}
+                                >
+                                  Reject
+                                </Button>
+                              </>
+                            )}
                             <Button
-                              data-testid={`approve-leave-request-button-${item.id}`}
+                              data-testid={`cancel-leave-request-button-${item.id}`}
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleApprove(item.id)}
-                              disabled={approveMutation.isPending}
+                              onClick={() => handleCancel(item.id)}
+                              disabled={cancelMutation.isPending}
                             >
-                              Approve
-                            </Button>
-                            <Button
-                              data-testid={`reject-leave-request-button-${item.id}`}
-                              variant="ghost"
-                              size="sm"
-                              className="text-destructive"
-                              onClick={() => handleReject(item.id)}
-                              disabled={rejectMutation.isPending}
-                            >
-                              Reject
+                              Cancel Request
                             </Button>
                           </div>
                         )}

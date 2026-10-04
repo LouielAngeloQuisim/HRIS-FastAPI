@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { toast } from 'sonner'
+import type { EmployeeRecordsPublic } from '@/lib/api/types'
 import { ResourceForm } from './resource-form'
 
 const { createMock, updateMock, deleteMock } = vi.hoisted(() => ({
@@ -15,6 +16,45 @@ vi.mock('@/lib/api/employees', () => ({
   useUpdateEmployee: () => ({ mutateAsync: updateMock, isPending: false }),
   useDeleteEmployee: () => ({ mutateAsync: deleteMock, isPending: false }),
 }))
+
+const fullEmployee = (overrides: Partial<EmployeeRecordsPublic>): EmployeeRecordsPublic => ({
+  id: '550e8400-e29b-41d4-a716-446655440000',
+  employee_code: 'EMP-001',
+  first_name: 'Jane',
+  middle_name: 'D',
+  last_name: 'Doe',
+  extension: null,
+  birthdate: '1990-05-20',
+  birth_place: 'Manila',
+  gender: null,
+  civil_status: 'Single',
+  email: null,
+  zip_code: null,
+  area: null,
+  present_barangay: null,
+  present_city: null,
+  same_address: null,
+  permanent_barangay: null,
+  permanent_city: null,
+  date_hired: null,
+  employee_status: 'Active',
+  employment_type: null,
+  contract_expiry_date: null,
+  date_separated: null,
+  probationary_date: null,
+  regularization_date: null,
+  telephone: null,
+  cellphone: null,
+  profile_photo_path: null,
+  position_id: null,
+  division_id: null,
+  department_id: null,
+  user_id: null,
+  is_deleted: false,
+  created_at: null,
+  updated_at: null,
+  ...overrides,
+})
 
 describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
   it('renders nothing (no dialog) when closed', async () => {
@@ -41,14 +81,9 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
   })
 
   it('pre-fills the form when editing an existing employee', async () => {
-    const existing = {
-      id: '550e8400-e29b-41d4-a716-446655440000',
-      employee_code: 'EMP-001',
-      first_name: 'Jane',
+    const existing = fullEmployee({
       middle_name: 'D',
-      last_name: 'Doe',
       extension: 'Jr',
-      birthdate: '1990-05-20',
       birth_place: 'Manila',
       gender: 'Female',
       civil_status: 'Single',
@@ -63,7 +98,7 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
       cellphone: '',
       profile_photo_path: '',
       is_deleted: false,
-    }
+    })
     const screen = await render(<ResourceForm item={existing} open={true} onClose={vi.fn()} />)
 
     await expect.element(screen.getByRole('textbox', { name: /Employee Code/i })).toHaveValue('EMP-001')
@@ -101,8 +136,7 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
 
   it('updates an existing employee on submit with only changed fields', async () => {
     const onClose = vi.fn()
-    const existing = {
-      id: '550e8400-e29b-41d4-a716-446655440000',
+    const existing = fullEmployee({
       employee_code: 'EMP-001',
       first_name: 'Jane',
       last_name: 'Doe',
@@ -115,7 +149,7 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
       division_id: '',
       department_id: '',
       is_deleted: false,
-    }
+    })
     const screen = await render(<ResourceForm item={existing} open={true} onClose={onClose} />)
 
     await userEvent.type(screen.getByRole('textbox', { name: /First Name/i }), ' J.')
@@ -134,8 +168,7 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
 
   it('archives (soft-deletes) an employee when Archive is confirmed', async () => {
     const onClose = vi.fn()
-    const existing = {
-      id: '550e8400-e29b-41d4-a716-446655440000',
+    const existing = fullEmployee({
       employee_code: 'EMP-001',
       first_name: 'Jane',
       last_name: 'Doe',
@@ -148,7 +181,7 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
       division_id: '',
       department_id: '',
       is_deleted: false,
-    }
+    })
     const screen = await render(<ResourceForm item={existing} open={true} onClose={onClose} />)
 
     await userEvent.click(screen.getByTestId('resource-form-archive-button'))
@@ -163,9 +196,8 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
 
   it('shows a warning when no changes were made while editing', async () => {
     const onClose = vi.fn()
-    const warningSpy = vi.spyOn(toast, 'warning').mockImplementation(() => {})
-    const existing = {
-      id: '550e8400-e29b-41d4-a716-446655440000',
+    const warningSpy = vi.spyOn(toast, 'warning').mockImplementation(() => 'mock-message')
+    const existing = fullEmployee({
       employee_code: 'EMP-001',
       first_name: 'Jane',
       last_name: 'Doe',
@@ -178,7 +210,7 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
       division_id: '',
       department_id: '',
       is_deleted: false,
-    }
+    })
     const screen = await render(<ResourceForm item={existing} open={true} onClose={onClose} />)
 
     await userEvent.click(screen.getByRole('button', { name: /Update/i }))

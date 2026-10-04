@@ -8,6 +8,7 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { useCan } from '@/context/permissions-provider'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { ResourceDeleteDialog } from '@/components/resource-delete-dialog'
 import { toast } from 'sonner'
 import { Upload } from 'lucide-react'
 import { CsvImportWizard } from './components/csv-import/csv-import-wizard'
@@ -35,12 +36,17 @@ export function Employees() {
   const [csvImportOpen, setCsvImportOpen] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<typeof employees[number] | null>(null)
+  const [archiveTarget, setArchiveTarget] = useState<typeof employees[number] | null>(null)
 
   const deleteMutation = useDeleteEmployee()
 
-  const handleArchive = async (employee: typeof employees[number]) => {
+  const handleArchive = (employee: typeof employees[number]) => setArchiveTarget(employee)
+
+  const confirmArchive = async () => {
+    if (!archiveTarget) return
     try {
-      await deleteMutation.mutateAsync(employee.id)
+      await deleteMutation.mutateAsync(archiveTarget.id)
+      setArchiveTarget(null)
       refetch()
       toast.success('Employee archived')
     } catch {
@@ -117,6 +123,14 @@ export function Employees() {
         )}
       </Main>
       {csvImportOpen && <CsvImportWizard open={csvImportOpen} onOpenChange={setCsvImportOpen} />}
+      <ResourceDeleteDialog
+        open={Boolean(archiveTarget)}
+        onOpenChange={(open) => { if (!open) setArchiveTarget(null) }}
+        entityName='Employee'
+        entityLabel={archiveTarget ? `${archiveTarget.first_name} ${archiveTarget.last_name} (${archiveTarget.employee_code})` : ''}
+        onConfirm={confirmArchive}
+        isPending={deleteMutation.isPending}
+      />
       <ResourceForm
         item={editing}
         open={formOpen}

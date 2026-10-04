@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
+import type { LeavePolicyPublic } from '@/lib/api/types'
 import { toast } from 'sonner'
 import { LeavePolicyForm } from './policy-form'
 
@@ -49,10 +50,11 @@ describe('LeavePolicyForm (§QA-04 add/edit modal)', () => {
       gender_scope: 'all',
       marital_status_scope: 'all',
       is_active: true,
+      is_system: false,
       is_deleted: false,
       created_at: null,
       updated_at: null,
-    }
+    } as LeavePolicyPublic
     const screen = await render(<LeavePolicyForm open={true} onClose={vi.fn()} initialData={existing} />)
 
     await expect.element(screen.getByRole('textbox', { name: /Policy Code/i })).toHaveValue('SL')
@@ -100,10 +102,11 @@ describe('LeavePolicyForm (§QA-04 add/edit modal)', () => {
       gender_scope: 'all',
       marital_status_scope: 'all',
       is_active: true,
+      is_system: false,
       is_deleted: false,
       created_at: null,
       updated_at: null,
-    }
+    } as LeavePolicyPublic
     const screen = await render(<LeavePolicyForm open={true} onClose={onClose} initialData={existing} />)
 
     const entitlementInput = screen.getByTestId('policy-form-entitlement-input')
@@ -125,7 +128,7 @@ describe('LeavePolicyForm (§QA-04 add/edit modal)', () => {
 
   it('shows a warning when no changes were made while editing', async () => {
     const onClose = vi.fn()
-    const warningSpy = vi.spyOn(toast, 'warning').mockImplementation(() => {})
+    const warningSpy = vi.spyOn(toast, 'warning').mockImplementation(() => 'mock-message')
     const existing = {
       id: '550e8400-e29b-41d4-a716-446655440000',
       code: 'SL',
@@ -143,10 +146,11 @@ describe('LeavePolicyForm (§QA-04 add/edit modal)', () => {
       gender_scope: 'all',
       marital_status_scope: 'all',
       is_active: true,
+      is_system: false,
       is_deleted: false,
       created_at: null,
       updated_at: null,
-    }
+    } as LeavePolicyPublic
     const screen = await render(<LeavePolicyForm open={true} onClose={onClose} initialData={existing} />)
 
     await userEvent.click(screen.getByRole('button', { name: /Update/i }))

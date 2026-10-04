@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useRef, type FormEvent } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -31,7 +31,7 @@ import {
 import { useCreateLeavePolicy, useUpdateLeavePolicy } from '@/lib/api/leave-policies'
 import { toast } from 'sonner'
 import { saveErrorMessage } from '@/lib/api/save-error'
-import type { LeavePolicyCreate, LeavePolicyUpdate } from '@/lib/api/types'
+import type { LeavePolicyCreate, LeavePolicyUpdate, LeavePolicyPublic, LeaveCadence, GenderScope, MaritalStatusScope } from '@/lib/api/types'
 
 // Value-based deep equality for primitives, arrays, and plain objects (react-hook-form
 // deep-clones defaultValues, so reference-equality does not work for array fields).
@@ -48,9 +48,11 @@ function deepEquals(a: unknown, b: unknown): boolean {
     !Array.isArray(a) &&
     !Array.isArray(b)
   ) {
-    const ka = Object.keys(a as object)
-    const kb = Object.keys(b as object)
-    return ka.length === kb.length && ka.every((k) => deepEquals((a as any)[k], (b as any)[k]))
+    const left = a as Record<string, unknown>
+    const right = b as Record<string, unknown>
+    const ka = Object.keys(left)
+    const kb = Object.keys(right)
+    return ka.length === kb.length && ka.every((k) => deepEquals(left[k], right[k]))
   }
   return false
 }
@@ -67,7 +69,7 @@ const formSchema = z.object({
   carry_over_max_days: z.string().optional(),
   carry_over_expires_on: z.string().optional(),
   is_paid: z.boolean().optional(),
-  eligible_departments: z.any().optional(),
+  eligible_departments: z.array(z.string()).optional(),
   gender_scope: z.string().max(6).optional().or(z.literal('')),
   marital_status_scope: z.string().max(9).optional().or(z.literal('')),
   is_active: z.boolean().optional(),
@@ -77,7 +79,7 @@ type FormData = z.infer<typeof formSchema>
 interface Props {
   open: boolean
   onClose: () => void
-  initialData?: LeavePolicyCreate
+  initialData?: LeavePolicyPublic
 }
 
 const DEFAULTS = {
@@ -128,24 +130,6 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
     defaultValues: defaults,
   })
 
-  const policyDefaults = {
-    code: initialData?.code ?? '',
-    name: initialData?.name ?? '',
-    description: initialData?.description ?? undefined,
-    calendar_color: initialData?.calendar_color ?? undefined,
-    cadence: initialData?.cadence ?? undefined,
-    annual_entitlement_days: initialData?.annual_entitlement_days ?? undefined,
-    prorate_on_hire: initialData?.prorate_on_hire ?? false,
-    carry_over_enabled: initialData?.carry_over_enabled ?? false,
-    carry_over_max_days: initialData?.carry_over_max_days ?? undefined,
-    carry_over_expires_on: initialData?.carry_over_expires_on ?? undefined,
-    is_paid: initialData?.is_paid ?? false,
-    eligible_departments: initialData?.eligible_departments ?? [],
-    gender_scope: initialData?.gender_scope ?? undefined,
-    marital_status_scope: initialData?.marital_status_scope ?? undefined,
-    is_active: initialData?.is_active ?? true,
-  }
-
   // Stable baseline for the "no changes" check: compare the payload against the
   // form's original defaultValues by reference so array fields [] === [] match.
   const baseline = useRef<FormData>(defaults).current
@@ -158,7 +142,7 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
         name: data.name,
         description: data.description || undefined,
         calendar_color: data.calendar_color || undefined,
-        cadence: data.cadence || 'annual',
+        cadence: (data.cadence as LeaveCadence) || 'annual',
         annual_entitlement_days: data.annual_entitlement_days || undefined,
         prorate_on_hire: data.prorate_on_hire,
         carry_over_enabled: data.carry_over_enabled,
@@ -166,8 +150,8 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
         carry_over_expires_on: data.carry_over_expires_on || undefined,
         is_paid: data.is_paid,
         eligible_departments: data.eligible_departments || [],
-        gender_scope: data.gender_scope || 'all',
-        marital_status_scope: data.marital_status_scope || 'all',
+        gender_scope: (data.gender_scope as GenderScope) || 'all',
+        marital_status_scope: (data.marital_status_scope as MaritalStatusScope) || 'all',
         is_active: data.is_active,
       }
       if (isEdit && initialData?.id) {
@@ -194,6 +178,10 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
     }
   }
 
+  const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
+    void form.handleSubmit(onSubmit)(event)
+  }
+
   return (
     <>
       <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
@@ -207,7 +195,7 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
             </SheetDescription>
           </SheetHeader>
           <Form {...form}>
-            <form id='leave-policy-form' onSubmit={form.handleSubmit(onSubmit)} className='flex-1 space-y-6 overflow-y-auto px-4'>
+            <form id='leave-policy-form' onSubmit={handleFormSubmit} className='flex-1 space-y-6 overflow-y-auto px-4'>
               {form.formState.errors.root?.server?.message && (
                 <div className='rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive'>
                   {form.formState.errors.root.server.message}

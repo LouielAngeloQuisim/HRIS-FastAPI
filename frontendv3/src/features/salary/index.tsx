@@ -180,7 +180,7 @@ export default function SalaryPage() {
         key={formOpen ? (editing?.id ?? 'add') : 'closed'}
         open={formOpen}
         onClose={handleClose}
-        employeeId={selectedEmployeeId ?? editing?.employee_id}
+        employeeId={selectedEmployeeId ?? (editing?.employee_id ?? '')}
         initialData={editing ?? undefined}
       />
     </div>

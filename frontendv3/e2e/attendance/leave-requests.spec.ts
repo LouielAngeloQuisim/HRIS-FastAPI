@@ -42,3 +42,64 @@ test.describe('Leave Requests E2E', () => {
     await expect(page.locator('table, [role="table"]')).toBeVisible({ timeout: 5000 })
   })
 })
+
+
+test('admin can approve, reject and cancel leave requests and read back each status', async ({ page, loginAsAdmin }) => {
+  await loginAsAdmin()
+  const unique = Date.now().toString(36)
+  const employee = await createParent(page, 'employees', { employee_code: `LC${unique}`, first_name: 'Lifecycle', last_name: 'Leave', birthdate: '1990-01-01' })
+  const policy = await createParent(page, 'leave-policies', { code: `LC${unique}`, name: 'Lifecycle leave', annual_entitlement_days: '15.00', cadence: 'annual' })
+  await createParent(page, `employees/${employee.id}/leave-enrollments`, { policy_id: policy.id, leave_year: 2026 })
+  const leave = new LeaveRequestsPage(page)
+  await leave.goto()
+
+  async function submitRequest(date: string, reason: string) {
+    await leave.clickNew()
+    await leave.fillEmployeeId(`${employee.employee_code} - Lifecycle Leave`)
+    await leave.fillPolicyId(`${policy.code} - Lifecycle leave`)
+    await leave.fillDateStart(date)
+    await leave.fillDateEnd(date)
+    await leave.fillReason(reason)
+    const creating = waitForWrite(page, 'leave-requests', 'POST')
+    await leave.submit()
+    return assertWrite(await creating, 201)
+  }
+
+  const approved = await submitRequest('2026-11-02', 'E2E approve')
+  const approving = waitForWrite(page, `leave-requests/${approved.id}/approve`, 'POST')
+  await page.getByTestId(`approve-leave-request-button-${approved.id}`).click()
+  await assertWrite(await approving, 200)
+  await expect(page.getByRole('row').filter({ hasText: 'E2E approve' }).getByText('approved', { exact: true })).toBeVisible()
+
+  const rejected = await submitRequest('2026-11-04', 'E2E reject')
+  const rejecting = waitForWrite(page, `leave-requests/${rejected.id}/reject`, 'POST')
+  await page.getByTestId(`reject-leave-request-button-${rejected.id}`).click()
+  await assertWrite(await rejecting, 200)
+  await expect(page.getByRole('row').filter({ hasText: 'E2E reject' }).getByText('rejected', { exact: true })).toBeVisible()
+
+  const cancelled = await submitRequest('2026-11-06', 'E2E cancel')
+  const cancelling = waitForWrite(page, `leave-requests/${cancelled.id}/cancel`, 'POST')
+  await page.getByTestId(`cancel-leave-request-button-${cancelled.id}`).click()
+  await assertWrite(await cancelling, 200)
+  await expect(page.getByRole('row').filter({ hasText: 'E2E cancel' }).getByText('cancelled', { exact: true })).toBeVisible()
+
+  const headers = { Authorization: 'Bearer ' + (await page.context().cookies()).find(c => c.name === 'hris_at')!.value }
+  for (const [request, status] of [[approved, 'approved'], [rejected, 'rejected'], [cancelled, 'cancelled']] as const) {
+    const readback = await page.request.get(`${apiUrl}/leave-requests/${request.id}`, { headers })
+    expect(readback.status()).toBe(200)
+    expect((await readback.json()).request.status).toBe(status)
+  }
+
+  await page.goto('/leave-calendar')
+  await page.getByTestId('leave-calendar-employee-select').selectOption(employee.id)
+  await page.getByTestId('leave-calendar-from-date').fill('2026-11-01')
+  await page.getByTestId('leave-calendar-to-date').fill('2026-11-03')
+  await page.getByTestId('leave-calendar-apply-button').click()
+  await expect(page.getByRole('row').filter({ hasText: 'Lifecycle leave' }).getByText('approved', { exact: true })).toBeVisible()
+
+  await page.goto('/leave-ledger')
+  await page.getByTestId('leave-ledger-employee-select').selectOption(employee.id)
+  await page.getByTestId('leave-ledger-policy-select').selectOption(policy.id)
+  await expect(page.getByText(/Consumed:/)).toBeVisible()
+  await expect(page.getByText(`LeaveRequest:${approved.id}`, { exact: true })).toBeVisible()
+})

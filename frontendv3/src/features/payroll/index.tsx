@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { useCan } from '@/context/permissions-provider'
 import { usePreviewPayroll, useGeneratePayroll, useApprovePayrollRun, useVoidPayrollRun } from '@/lib/api/payroll'
 import { useEmployees } from '@/lib/api/employees'
@@ -29,6 +30,8 @@ export default function PayrollPage() {
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>('__all__')
   const [previewEntries, setPreviewEntries] = useState<PayrollEntryPreview[]>([])
   const [run, setRun] = useState<PayrollRunPublic | null>(null)
+  const [missingSalary, setMissingSalary] = useState(false)
+  const navigate = useNavigate()
 
   const { data: employeesData } = useEmployees(1, 100)
   const { data: departmentsData } = useDepartments(1, 100)
@@ -50,6 +53,7 @@ export default function PayrollPage() {
       toast.error('Select a valid date range with the end on or after the start.')
       return
     }
+    setMissingSalary(false)
     try {
       const entries = await previewMutation.mutateAsync({
         cutoff_type: cutoffType,
@@ -63,7 +67,9 @@ export default function PayrollPage() {
       setStep('review')
       toast.success(`Preview generated: ${entries.length} entries`)
     } catch (error) {
-      toast.error(saveErrorMessage(error))
+      const message = saveErrorMessage(error)
+      setMissingSalary(/no active salary record|no employees with active salary records/i.test(message))
+      toast.error(message)
     }
   }
 
@@ -197,6 +203,14 @@ export default function PayrollPage() {
           <Button data-testid='preview-payroll-button' onClick={handlePreview} disabled={previewMutation.isPending}>
             {previewMutation.isPending ? 'Previewing...' : 'Preview Payroll'}
           </Button>
+          {missingSalary && (
+            <div role='alert' data-testid='missing-salary-recovery' className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-50 p-4 text-sm dark:bg-amber-950'>
+              <span>No active salary is configured for one or more selected employees. Add an effective-dated salary, then return to preview.</span>
+              <Button type='button' variant='outline' data-testid='open-salary-setup-button' onClick={() => navigate({ to: '/payroll/salary' })}>
+                Open Salary Setup
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

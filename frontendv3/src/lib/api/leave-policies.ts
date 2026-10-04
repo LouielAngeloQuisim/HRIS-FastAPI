@@ -10,6 +10,7 @@ import type {
   EmployeeLeaveEnrollmentCreate,
   LeaveRequestList,
   LeaveRequestPublic,
+  LeaveRequestCreate,
 } from './types'
 
 // -----------------------------------------------------------------------------

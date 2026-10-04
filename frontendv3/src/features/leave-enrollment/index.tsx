@@ -108,8 +108,8 @@ export default function LeaveEnrollmentsPage() {
           </Select>
         </div>
         {(employeesPending || policiesPending) && <div className='text-sm text-muted-foreground'>Loading...</div>}
-        {isPending && <div className='text-sm text-muted-foreground'>Loading enrollments…</div>}
-        {isError && !isPending && (
+        {_enrollmentsPending && <div className='text-sm text-muted-foreground'>Loading enrollments…</div>}
+        {isError && !_enrollmentsPending && (
           <div className='flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-12 text-center'>
             <p className='text-sm text-muted-foreground'>Failed to load enrollments.</p>
             <button
@@ -121,7 +121,7 @@ export default function LeaveEnrollmentsPage() {
             </button>
           </div>
         )}
-        {!isPending && !isError && enrollmentsData && (
+        {!_enrollmentsPending && !isError && enrollmentsData && (
           <div className='overflow-x-auto rounded-lg border'>
             <table className='w-full text-sm'>
               <thead>
@@ -187,6 +187,7 @@ export default function LeaveEnrollmentsPage() {
         )}
       </Main>
       <EnrollmentDialog
+        key={dialogOpen ? `${selectedEmployeeId ?? 'none'}:${selectedYear}` : 'closed'}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         employeeId={selectedEmployeeId}

@@ -68,3 +68,12 @@ export function useRejectLeaveRequest() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['leave-requests'] }),
   })
 }
+
+export function useCancelLeaveRequest() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, note }: { id: string; note?: string }) =>
+      api.post(`/leave-requests/${id}/cancel`, note ? { note } : undefined).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['leave-requests'] }),
+  })
+}

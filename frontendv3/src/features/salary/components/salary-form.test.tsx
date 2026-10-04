@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
+import type { EmployeeSalaryPublic } from '@/lib/api/types'
 import { toast } from 'sonner'
 import { SalaryForm } from './salary-form'
 
@@ -13,7 +14,7 @@ const { createMock, updateMock, deleteMock } = vi.hoisted(() => ({
 vi.mock('@/lib/api/payroll', () => ({
   useCreateSalary: () => ({ mutateAsync: createMock, isPending: false }),
   useUpdateSalary: () => ({ mutateAsync: updateMock, isPending: false }),
-  useDeleteEmployee: () => ({ mutateAsync: deleteMock, isPending: false }),
+  useDeleteSalary: () => ({ mutateAsync: deleteMock, isPending: false }),
 }))
 vi.mock('@/lib/api/employees', () => ({
   useEmployees: () => ({ data: { data: [] }, isPending: false, isError: false }),
@@ -61,7 +62,10 @@ describe('SalaryForm (§PAY-03 add/edit modal)', () => {
           non_taxable_allowance: '0.00',
           thirteenth_month_exempt_portion: '90000.00',
           is_active: true,
-        }}
+          is_deleted: false,
+          created_at: null,
+          updated_at: null,
+        } as EmployeeSalaryPublic}
       />
     )
 
@@ -102,7 +106,7 @@ describe('SalaryForm (§PAY-03 add/edit modal)', () => {
       is_deleted: false,
       created_at: null,
       updated_at: null,
-    }
+    } as EmployeeSalaryPublic
     const screen = await render(<SalaryForm open={true} onClose={vi.fn()} employeeId='emp-1' initialData={existing} />)
 
     await expect.element(screen.getByTestId('salary-form-basic-rate-input')).toHaveValue(18000)
@@ -128,7 +132,7 @@ describe('SalaryForm (§PAY-03 add/edit modal)', () => {
       is_deleted: false,
       created_at: null,
       updated_at: null,
-    }
+    } as EmployeeSalaryPublic
     const screen = await render(<SalaryForm open={true} onClose={onClose} employeeId='emp-1' initialData={existing} />)
 
     await userEvent.type(screen.getByTestId('salary-form-basic-rate-input'), '19000.00')
@@ -136,8 +140,9 @@ describe('SalaryForm (§PAY-03 add/edit modal)', () => {
     await userEvent.click(screen.getByRole('button', { name: /Update/i }))
 
     await vi.waitFor(() => {
-      expect(updateMock).toHaveBeenCalledWith('550e8400-e29b-41d4-a716-446655440000', {
-        basic_rate: '19000.00',
+      expect(updateMock).toHaveBeenCalledWith({
+        salary_id: '550e8400-e29b-41d4-a716-446655440000',
+        salary: expect.objectContaining({ basic_rate: '19000.00' }),
       })
       expect(onClose).toHaveBeenCalled()
     })
@@ -145,7 +150,7 @@ describe('SalaryForm (§PAY-03 add/edit modal)', () => {
 
   it('shows a warning when no changes were made while editing', async () => {
     const onClose = vi.fn()
-    const warningSpy = vi.spyOn(toast, 'warning').mockImplementation(() => {})
+    const warningSpy = vi.spyOn(toast, 'warning').mockImplementation(() => 'mock-message')
     const existing = {
       id: '550e8400-e29b-41d4-a716-446655440000',
       employee_id: 'emp-1',
@@ -161,7 +166,7 @@ describe('SalaryForm (§PAY-03 add/edit modal)', () => {
       is_deleted: false,
       created_at: null,
       updated_at: null,
-    }
+    } as EmployeeSalaryPublic
     const screen = await render(<SalaryForm open={true} onClose={onClose} employeeId='emp-1' initialData={existing} />)
 
     await userEvent.click(screen.getByRole('button', { name: /Update/i }))

@@ -32,7 +32,7 @@ import { useCreateEmployee, useUpdateEmployee, useDeleteEmployee } from '@/lib/a
 import { toast } from 'sonner'
 import { saveErrorMessage } from '@/lib/api/save-error'
 import { ResourceDeleteDialog } from '@/components/resource-delete-dialog'
-import type { EmployeeRecordsPublic, EmployeeRecordsUpdate } from '@/lib/api/types'
+import type { EmployeeRecordsPublic, EmployeeRecordsCreate, EmployeeRecordsUpdate } from '@/lib/api/types'
 
 const formSchema = z.object({
   employee_code: z.string().min(1, 'Employee code is required'),
@@ -126,17 +126,15 @@ export function ResourceForm({ item, onClose, open }: Props) {
     form.clearErrors('root.server')
     try {
       if (isEdit && item?.id) {
-        const updateData: Record<string, unknown> = {}
-        Object.entries(data).forEach(([key, value]) => {
-          if (value === defaults[key]) return
-          updateData[key] = value
-        })
+        const updateData = Object.fromEntries(
+          Object.entries(data).filter(([key, value]) => value !== defaults[key as keyof FormData])
+        ) as Partial<EmployeeRecordsUpdate>
         if (Object.keys(updateData).length === 0) {
           toast.warning('No changes were made.')
           onClose()
           return
         }
-        await updateMutation.mutateAsync({ id: item.id, data: updateData as unknown as EmployeeRecordsUpdate })
+        await updateMutation.mutateAsync({ id: item.id, data: updateData })
         toast.success('Employee updated')
       } else {
         await createMutation.mutateAsync(data as EmployeeRecordsCreate)
@@ -214,7 +212,9 @@ export function ResourceForm({ item, onClose, open }: Props) {
         { key: 'cellphone', label: 'Cellphone', type: 'text', testid: 'resource-form-cellphone-input' },
       ],
     },
-  ]
+  ] as const
+
+  type EmployeeResourceFormFieldRow = (typeof fields)[number]['rows'][number]
 
   return (
     <>
@@ -237,7 +237,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
                 <div key={group.section} className='space-y-3'>
                   <h3 className='text-sm font-semibold uppercase tracking-wide text-muted-foreground'>{group.section}</h3>
                   <div className='grid gap-4 sm:grid-cols-2'>
-                    {group.rows.map(({ key, label, type, testid }) => (
+                    {group.rows.map(({ key, label, type, testid }: EmployeeResourceFormFieldRow) => (
                       <FormField
                         key={key}
                         control={form.control}
@@ -246,7 +246,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
                           <FormItem>
                             <FormLabel>{label}</FormLabel>
                             {type === 'select' ? (
-                              <Select value={field.value} onValueChange={field.onChange}>
+                              <Select value={field.value as string} onValueChange={field.onChange}>
                                 <FormControl>
                                   <SelectTrigger data-testid={testid}>
                                     <SelectValue placeholder={`Select ${label.toLowerCase()}`} />
@@ -273,8 +273,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
                               <FormControl>
                                 <Input
                                   type='date'
-                                  {...field}
-                                  value={field.value ?? ''}
+                                  value={(field.value ?? '') as string}
                                   onChange={(e) => field.onChange(e.target.value)}
                                   data-testid={testid}
                                 />
@@ -283,8 +282,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
                               <FormControl>
                                 <Input
                                   type='email'
-                                  {...field}
-                                  value={field.value ?? ''}
+                                  value={(field.value ?? '') as string}
                                   onChange={(e) => field.onChange(e.target.value)}
                                   data-testid={testid}
                                 />
@@ -292,8 +290,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
                             ) : (
                               <FormControl>
                                 <Input
-                                  {...field}
-                                  value={field.value ?? ''}
+                                  value={(field.value ?? '') as string}
                                   onChange={(e) => field.onChange(e.target.value)}
                                   data-testid={testid}
                                 />

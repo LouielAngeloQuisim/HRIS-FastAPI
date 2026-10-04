@@ -104,10 +104,12 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 describe('EmployeesTable', () => {
   const search = {}
   const navigate = vi.fn()
+  const onEdit = vi.fn()
+  const onDelete = vi.fn()
 
   it('renders rows from the data array', async () => {
     const screen = await render(
-      <EmployeesTable data={sample} count={2} search={search} navigate={navigate} />
+      <EmployeesTable data={sample} count={2} search={search} navigate={navigate} onEdit={onEdit} onDelete={onDelete} />
     )
 
     await expect.element(screen.getByText('E001')).toBeInTheDocument()
@@ -118,7 +120,7 @@ describe('EmployeesTable', () => {
 
   it('shows empty state when no data', async () => {
     const screen = await render(
-      <EmployeesTable data={[]} count={0} search={search} navigate={navigate} />
+      <EmployeesTable data={[]} count={0} search={search} navigate={navigate} onEdit={onEdit} onDelete={onDelete} />
     )
     await expect.element(screen.getByText('No employees found.')).toBeInTheDocument()
   })

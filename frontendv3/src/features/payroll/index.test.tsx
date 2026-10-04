@@ -32,8 +32,9 @@ vi.mock('@/context/permissions-provider', () => ({
   useCan: (...args: unknown[]) => useCanMock(...args),
 }))
 
+const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }))
 vi.mock('@tanstack/react-router', () => ({
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigateMock,
 }))
 
 const PREVIEW_ENTRIES = [
@@ -154,6 +155,19 @@ describe('PayrollPage', () => {
     await userEvent.click(screen.getByTestId('proceed-to-review-button'))
     await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce())
     expect(generate.mock.calls[0][0].entries).toEqual([{ employee_id: 'emp-1', overtime_pay: '500.25' }])
+  })
+
+  it('offers salary setup recovery when preview reports a missing salary', async () => {
+    useCanMock.mockReturnValue(true)
+    navigateMock.mockClear()
+    usePreviewPayrollMock.mockReturnValue({ mutateAsync: vi.fn().mockRejectedValue({ response: { data: { detail: 'Employee emp-1 has no active salary record' } } }), isPending: false })
+    const screen = await render(<PayrollPage />)
+    await screen.getByTestId('date-from-input').fill('2026-10-01')
+    await screen.getByTestId('date-to-input').fill('2026-10-31')
+    await userEvent.click(screen.getByTestId('preview-payroll-button'))
+    await expect.element(screen.getByTestId('missing-salary-recovery')).toBeVisible()
+    await userEvent.click(screen.getByTestId('open-salary-setup-button'))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/payroll/salary' })
   })
 
 })

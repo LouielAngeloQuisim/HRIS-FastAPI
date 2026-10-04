@@ -1,89 +1,47 @@
 # Remaining QA Execution Status
 
-**Batch:** 1 — employee & leave workflows (QA-05, PAY-03, QA-04)
-**Branch:** `fix/batch1-employee-leave-workflows` (from `origin/main` = 8cd0792)
-**Base SHA:** 8cd0792a63a71466490863c619c5068028a50d04 (PR #74, QA-01/03/08 deployed)
-**Head SHA:** TBD (updated each push)
-**Owner:** Kilocode (implementation) | Codex (validation/merge/deploy)
-
+**Active batch:** 1 — employee, salary, and leave workflows (QA-05, PAY-03, QA-04)
+**Branch:** `fix/batch1-employee-leave-workflows`
+**Local and origin branch HEAD:** `cac5b8aa5ca656af8fbe37cc531313963830870e` (equal; uncommitted work remains)
+**PR:** [#75](https://github.com/LouielAngeloQuisim/HRIS-FastAPI/pull/75), OPEN, MERGEABLE; remote checks currently show backend/CI config/CodeQL passing and frontend/E2E failing on the pushed revision.
 **Checkpoint updated:** 2026-10-04 (Manila)
 
-## Scope
+## Batch 1 status
 
-| ID | Priority | Kind | Task | Status |
-|---|---|---|---|---|
-| QA-05 | P1 | GAP | Manual employee maintenance (create/edit/soft-archive) | IN_PROGRESS |
-| PAY-03 | P1 | GAP | Employee salary setup + missing-salary empty state | PENDING |
-| QA-04 | P1 | GAP | Leave policy + enrollment setup + request/approve/reject/cancel | PENDING |
+The working tree contains the Batch 1 implementation and regression tests, but it is **not ready to hand off or merge**. No changes from this checkout have been committed or pushed. Preserve the current worktree; do not reset, clean, stash, or merge it.
 
-## Prerequisites / blocked-by
+| ID | Implementation | Current validation | Status |
+|---|---|---|---|
+| QA-05 | Employee create/edit/soft archive UI and regression tests | Employee form 8/8; employee row actions 2/2; new E2E journey written but not run successfully | Implemented; E2E pending |
+| PAY-03 | Effective-dated salary create/edit/archive UI; missing-salary recovery to salary setup and payroll review/generation | Salary form 8/8; payroll page 7/7; API contract 10/10; backend payroll suite included in 737 passing tests; E2E journey written but not run successfully | Implemented; E2E pending |
+| QA-04 | Leave policy CRUD, enrollment, request lifecycle actions, calendar/ledger flows | Policy form 7/7; delete dialog 4/4; enrollment dialog 3/3; leave requests page 5/5; leave backend suite included in 737 passing tests; lifecycle E2E written but not run successfully | Implemented; E2E pending |
 
-- Backend for QA-05 already implemented (POST/PATCH/DELETE `/employees`).
-- Backend for PAY-03 already implemented (`/payroll/employees/{id}/salary`, `/salaries/{id}`).
-- Backend for QA-04 already implemented (LeavePolicy CRUD, enrollment, leave requests + approve/reject/cancel).
-- No code changes in the merged PR #74 branch; preserving QA-01/03/08 regressions.
-- `fix/deploy-ubuntu-2604` is superseded (its changes already on `origin/main`); not affected by this batch.
+## Verification evidence
 
-## Status details
+Observed against local HEAD `cac5b8aa5ca656af8fbe37cc531313963830870e` and its uncommitted working tree:
 
-### QA-05 - Manual employee maintenance (P1)
-**Acceptance:** Create/edit/soft-archive supported core employee fields through UI. Preserve CSV import and profiles. Document deferred 201-file annexes accurately.
-- Backend: complete (POST /employees, PATCH /employees/:id, DELETE /employees/:id; soft delete; ownership-protected annex read).
-- Frontend TODO:
-  - [ ] `lib/api/employees.ts`: createEmployee/updateEmployee/deleteEmployee mutations + query invalidation
-  - [ ] `features/employees/components/resource-form.tsx`: create/edit Sheet form
-  - [ ] `features/employees/components/employees-table.tsx`: Edit/Delete row actions + data-testid
-  - [ ] `features/employees/index.tsx`: Add Employee button, modal, refetch on mutation
-  - [ ] Tests: `resource-form.test.tsx`, update `index.test.tsx`
-- Status: **IMPLEMENTING** (first files being written)
+- `uv run ruff check app` via `scripts/verify.sh`: clean.
+- `uv run mypy app`: 0 errors across 98 source files.
+- Disposable PostgreSQL 18 migration upgrade and `alembic check`: applied cleanly, no model/migration drift.
+- `uv run pytest tests/ -q`: **737 passed, 0 failed**, 1 warning.
+- `pnpm exec tsc -b`: 0 errors.
+- `pnpm exec eslint .`: 0 errors, 10 warnings (report-only).
+- `pnpm build`: successful.
+- `docs/MAP.md`: in sync with generator; `git diff --check`: clean.
+- Full frontend suite with bounded browser concurrency, `pnpm exec vitest run --browser.headless --no-file-parallelism --maxWorkers=1`: **116 files / 410 tests passed**.
+- All nine changed/added frontend unit-test files also passed individually, **54 tests total**.
 
-### PAY-03 - Employee salary setup prerequisite (P1)
-**Acceptance:** Authorized effective-dated salary setup through UI; user can resolve missing-salary empty state. Prove one fictional employee reaches successful payroll review/generation in isolated QA.
-- Backend: complete (create/update/list EmployeeSalary with effective_date; preview service throws "no active salary record" for missing rows — source of the empty state).
-- Frontend TODO:
-  - [ ] `lib/api/payroll.ts`: salary CRUD + hooks
-  - [ ] `features/payroll/salary-setup/index.tsx`: effective-dated salary table + add/edit Sheet
-  - [ ] Sidebar entry under Payroll
-  - [ ] Missing-salary empty-state warning on payroll execution page
-  - [ ] Tests: salary-setup page + permissions
-- Status: **PENDING** (depends on employee list completeness)
+The mandatory `bash scripts/verify.sh` was run. Its first browser-suite attempt timed out across unrelated and changed files while another Playwright MCP from the VS Code/Kilocode session was active. A second attempt pinned to one CPU reached the same browser screenshot/stability timeouts; it was stopped after those failures to avoid exhausting the WSL environment. The script therefore reported **FAIL** for Vitest on both attempts, even though the complete frontend suite subsequently passed with one worker. Do not report the full gate as PASS until `scripts/verify.sh` completes without interruption.
 
-### QA-04 - Leave policy and enrollment setup (P1)
-**Acceptance:** Policy CRUD and employee enrollment through UI; complete fictional request, approval/rejection/cancellation, calendar and ledger journeys; meaningful empty states.
-- Backend: complete (LeavePolicy CRUD incl. deactivate, enrollment POST/list, leave requests + approve/reject/cancel).
-- Frontend TODO:
-  - [ ] `lib/api/leave-policies.ts`: full CRUD + hooks
-  - [ ] `features/leave-policies/index.tsx`: policy CRUD page
-  - [ ] `features/leave-policies/components/policy-form.tsx` + `policy-delete-dialog.tsx`
-  - [ ] Route `routes/_authenticated/leave-policies/index.tsx` + sidebar entry
-  - [ ] `features/leave-enrollment/index.tsx`: employee ↔ policy enrollment UI
-  - [ ] Tests: page + enrollment
-- Status: **PENDING**
+Local Playwright E2E journeys have been added for employee CRUD, salary lifecycle and payroll recovery/generation, leave policy/enrollment, and leave request approve/reject/cancel with calendar/ledger readback. They have **not** been successfully run against the isolated E2E stack in this session. No production writes were made. The existing `hris-ui-qa-e2e` container was left stopped; the verification script removed its own temporary postgres container.
 
-## Test strategy
+## Current worktree
 
-- Targeted Vitest runs after each material change.
-- Full gate (`scripts/verify.sh`) when the batch is complete.
-- Full Playwright E2E suite at completion:
-  - `e2e/hris/employees.spec.ts` → new create/edit/archive + reload/read-back
-  - `e2e/payroll/execution.spec.ts` (new) → salary setup + preview with missing-salary + one complete generation
-  - `e2e/leave-policies` / `e2e/leave-enrollments` (new) → policy CRUD + enrollment + request/approve/reject/cancel
-  - Existing leave specs (leave-requests, leave-calendar, leave-ledger) re-run with real policy/enrollment data
-- All writes to isolated QA data; no production CRUD.
+There are 28 modified tracked files, including backend salary update/archive, employee/leave/salary frontend flows, tests, `docs/MAP.md`, and E2E changes. Untracked items include the new Batch 1 Playwright spec/page object, `DESKFLOW_PLAN.md`, `docs/bugs/`, and `scripts/__pycache__/`. All pre-existing work remains preserved. Review `git status --short` before editing.
 
-## Validation status per ID
+## Next actions
 
-| ID | Backend done | Frontend done | Tests done | PR ready | Reviewed/deployed |
-|---|---|---|---|---|---|
-| QA-05 | ✅ | 🟡 in progress | ⏳ | ⏳ | ⏳ |
-| PAY-03 | ✅ | ⏳ | ⏳ | ⏳ | ⏳ |
-| QA-04 | ✅ | ⏳ | ⏳ | ⏳ | ⏳ |
-
-## Known issues found during inspection (to fix in this batch)
-
-- None identified yet; backend endpoints match the intended UI.
-- Note: payroll salary update endpoint accepts `EmployeeSalaryCreate` body (preserved per backend contract).
-
-## Next action
-
-Write QA-05 employee create/edit/archive form + row actions, test, then proceed to PAY-03 salary setup and QA-04 leave policies/enrollment.
+1. Run the Batch 1 Playwright journeys against an isolated disposable database when the competing Kilocode/VS Code browser workload is idle; diagnose real failures without weakening assertions or writing production data.
+2. Once E2E is green, rerun `bash scripts/verify.sh` to completion. Report any persistent timeout with raw output; the single-worker Vitest full-suite result is supplemental evidence, not a replacement for the required gate.
+3. Refresh PR #75 after all local fixes: commit only reviewed Batch 1 files, push, verify local/remote SHA equality, and confirm GitHub checks on that exact SHA. Do not merge or deploy until independently reviewed and explicitly authorized.
+4. Start Batch 2 (PAY-01/02/04–08) only after Batch 1 is validated and handed off.

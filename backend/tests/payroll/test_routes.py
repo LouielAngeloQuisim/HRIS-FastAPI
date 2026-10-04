@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords
-from app.payroll.models import BIRBracket, PagIBIGBracket, PhilHealthBracket, SSSBracket
+from app.payroll.models import BIRBracket, EmployeeSalary, PagIBIGBracket, PhilHealthBracket, SSSBracket
 
 API = f"{settings.API_V1_STR}/payroll"
 
@@ -196,7 +196,7 @@ class TestEmployeeSalary:
         assert response.status_code == 200, response.text
         salary_id = response.json()["id"]
 
-        update_data = {"employee_id": employee_id, "basic_rate": 600.0, "effective_date": "2024-01-01"}
+        update_data = {"basic_rate": 600.0}
         response = client.patch(
             f"{API}/salaries/{salary_id}",
             json=update_data,
@@ -204,6 +204,33 @@ class TestEmployeeSalary:
         )
         assert response.status_code == 200, response.text
         assert response.json()["basic_rate"] == "600.00"
+        assert response.json()["currency"] == "PHP"
+        assert response.json()["effective_date"] == "2024-01-01"
+
+    def test_delete_salary_soft_deletes_salary_and_preserves_employee(self, client: TestClient, employee_record: EmployeeRecords, superuser_token_headers: dict[str, str], db: Session) -> None:
+        employee_id = str(employee_record.id)
+        created = client.post(f"{API}/employees/{employee_id}/salary/", json={"employee_id": employee_id, "basic_rate": "500.00", "effective_date": "2024-01-01"}, headers=superuser_token_headers)
+        assert created.status_code == 200, created.text
+        salary_id = created.json()["id"]
+
+        deleted = client.delete(f"{API}/salaries/{salary_id}", headers=superuser_token_headers)
+        assert deleted.status_code == 200, deleted.text
+        assert deleted.json()["message"] == "Employee salary archived"
+        assert db.get(EmployeeRecords, employee_record.id) is not None
+        salary = db.get(EmployeeSalary, uuid.UUID(salary_id))
+        assert salary is not None and salary.is_deleted is True
+        assert client.get(f"{API}/employees/{employee_id}/salary/", headers=superuser_token_headers).json() == []
+
+    def test_delete_salary_requires_payroll_delete_permission(self, client: TestClient, employee_record: EmployeeRecords, superuser_token_headers: dict[str, str], normal_user_token_headers: dict[str, str], db: Session) -> None:
+        employee_id = str(employee_record.id)
+        created = client.post(f"{API}/employees/{employee_id}/salary/", json={"employee_id": employee_id, "basic_rate": "500.00", "effective_date": "2024-01-01"}, headers=superuser_token_headers)
+        assert created.status_code == 200, created.text
+        salary_id = created.json()["id"]
+
+        denied = client.delete(f"{API}/salaries/{salary_id}", headers=normal_user_token_headers)
+        assert denied.status_code == 403, denied.text
+        salary = db.get(EmployeeSalary, uuid.UUID(salary_id))
+        assert salary is not None and salary.is_deleted is False
 
 
 class TestLoans:

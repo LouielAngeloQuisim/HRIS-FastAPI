@@ -28,12 +28,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { useCreateSalary, useUpdateSalary } from '@/lib/api/payroll'
-import { useDeleteEmployee } from '@/lib/api/employees'
+import { useCreateSalary, useUpdateSalary, useDeleteSalary } from '@/lib/api/payroll'
 import { toast } from 'sonner'
 import { saveErrorMessage } from '@/lib/api/save-error'
 import { ResourceDeleteDialog } from '@/components/resource-delete-dialog'
-import type { EmployeeSalaryCreate, EmployeeSalaryUpdate } from '@/lib/api/types'
+import type { EmployeeSalaryCreate, EmployeeSalaryUpdate, EmployeeSalaryPublic, PayType } from '@/lib/api/types'
 
 const formSchema = z.object({
   basic_rate: z.string().min(1, 'Basic rate is required'),
@@ -53,7 +52,7 @@ interface Props {
   open: boolean
   onClose: () => void
   employeeId: string | undefined
-  initialData?: EmployeeSalaryCreate
+  initialData?: EmployeeSalaryPublic
 }
 
 const DEFAULTS = {
@@ -73,7 +72,7 @@ export function SalaryForm({ open, onClose, employeeId, initialData }: Props) {
   const isEdit = Boolean(initialData?.id)
   const createMutation = useCreateSalary()
   const updateMutation = useUpdateSalary()
-  const deleteMutation = useDeleteEmployee()
+  const deleteMutation = useDeleteSalary()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -105,7 +104,7 @@ export function SalaryForm({ open, onClose, employeeId, initialData }: Props) {
         basic_rate: data.basic_rate,
         currency: data.currency || 'PHP',
         effective_date: data.effective_date,
-        pay_type: data.pay_type || 'monthly',
+        pay_type: (data.pay_type as PayType) || 'monthly',
         overtime_rate: data.overtime_rate || '0.000',
         absent_penalty_rate: data.absent_penalty_rate || '0.000',
         non_taxable_allowance: data.non_taxable_allowance || '0.00',
@@ -113,29 +112,17 @@ export function SalaryForm({ open, onClose, employeeId, initialData }: Props) {
         is_active: data.is_active ?? true,
       }
       if (isEdit && initialData?.id) {
-        const updatePayload: EmployeeSalaryUpdate = {
-          basic_rate: payload.basic_rate,
-          currency: payload.currency,
-          effective_date: payload.effective_date,
-          pay_type: payload.pay_type,
-          overtime_rate: payload.overtime_rate,
-          absent_penalty_rate: payload.absent_penalty_rate,
-          non_taxable_allowance: payload.non_taxable_allowance,
-          thirteenth_month_exempt_portion: payload.thirteenth_month_exempt_portion,
-          is_active: payload.is_active,
-        }
-        const updateDefaults = defaults
-        const updateData: Record<string, unknown> = {}
-        Object.entries(updatePayload).forEach(([key, value]) => {
-          if (value === updateDefaults[key]) return
-          updateData[key] = value
+        const updateData: Partial<EmployeeSalaryUpdate> = {}
+        Object.entries(data).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(defaults[key as keyof FormData])).forEach(([key, value]) => {
+          const payloadKey = key as keyof EmployeeSalaryUpdate
+          updateData[payloadKey] = value
         })
         if (Object.keys(updateData).length === 0) {
           toast.warning('No changes were made.')
           onClose()
           return
         }
-        await updateMutation.mutateAsync(initialData.id, updateData)
+        await updateMutation.mutateAsync({ salary_id: initialData.id, salary: updateData })
         toast.success('Salary updated')
       } else {
         await createMutation.mutateAsync(payload)
@@ -152,7 +139,7 @@ export function SalaryForm({ open, onClose, employeeId, initialData }: Props) {
     if (!initialData?.id) return
     setDeleting(true)
     try {
-      await deleteMutation.mutateAsync(initialData.id)
+      await deleteMutation.mutateAsync({ salary_id: initialData.id, employee_id: employeeId ?? initialData.employee_id ?? '' })
       toast.success('Salary archived')
       setDeleteOpen(false)
       onClose()
@@ -183,18 +170,14 @@ export function SalaryForm({ open, onClose, employeeId, initialData }: Props) {
                 </div>
               )}
               <div className='space-y-3'>
-                <FormField
-                  control={form.control}
-                  name='employee_id'
-                  render={({ _field }) => (
-                    <FormItem>
-                      <FormLabel>Employee</FormLabel>
-                      <FormControl>
-                        <Input disabled value={employeeId || '—'} data-testid='salary-form-employee-field' />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                <label className='text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70'>
+                  Employee
+                </label>
+                <Input
+                  disabled
+                  value={employeeId || '—'}
+                  data-testid='salary-form-employee-field'
+                  aria-label='Employee'
                 />
               </div>
               <div className='grid gap-4 sm:grid-cols-2'>

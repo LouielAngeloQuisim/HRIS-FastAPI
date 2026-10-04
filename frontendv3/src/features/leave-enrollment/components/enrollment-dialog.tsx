@@ -24,7 +24,7 @@ import type { LeavePolicyPublic } from '@/lib/api/types'
 
 type EnrollmentDialogProps = {
   open: boolean
-  _onOpenChange: (open: boolean) => void
+  onOpenChange: (open: boolean) => void
   employeeId: string | undefined
   leaveYear: number
   availablePolicies: LeavePolicyPublic[]
@@ -33,7 +33,7 @@ type EnrollmentDialogProps = {
 
 export function EnrollmentDialog({
   open,
-  _onOpenChange,
+  onOpenChange,
   employeeId,
   leaveYear,
   availablePolicies,
@@ -48,6 +48,7 @@ export function EnrollmentDialog({
   const { data: employeesData } = useEmployees(1, 500)
   const employees = employeesData?.data ?? []
   const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId)
+
 
   const handleEnroll = async () => {
     if (!selectedEmployeeId || !selectedPolicyId) return
@@ -65,7 +66,7 @@ export function EnrollmentDialog({
   }
 
   return (
-    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+    <Sheet open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) onClose() }}>
       <SheetContent className='flex flex-col'>
         <SheetHeader>
           <SheetTitle>Enroll Employee in Leave Policy</SheetTitle>
@@ -125,7 +126,7 @@ export function EnrollmentDialog({
           <SheetClose asChild>
             <Button type='button' variant='outline'>Cancel</Button>
           </SheetClose>
-          <Button onClick={handleEnroll} disabled={loading || !employeeId || !selectedPolicyId} data-testid='enrollment-dialog-submit-button'>
+          <Button onClick={handleEnroll} disabled={loading || !selectedEmployeeId || !selectedPolicyId} data-testid='enrollment-dialog-submit-button'>
             {loading ? 'Enrolling...' : 'Enroll'}
           </Button>
         </SheetFooter>

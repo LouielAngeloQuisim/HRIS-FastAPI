@@ -46,6 +46,7 @@ from app.payroll.schemas import (
     BIRBracketRead,
     EmployeeSalaryCreate,
     EmployeeSalaryRead,
+    EmployeeSalaryUpdate,
     FleetIntegrationConfigRead,
     FleetIntegrationMappingRead,
     IntegrationConfigCreate,
@@ -606,9 +607,9 @@ async def update_employee_salary(
     *,
     session: SessionDep,
     salary_id: uuid.UUID,
-    salary: EmployeeSalaryCreate,
+    salary: EmployeeSalaryUpdate,
 ) -> EmployeeSalaryRead:
-    """Update employee salary record."""
+    """Update employee salary record (sparse delta; untouched fields preserved)."""
     db_salary = session.get(EmployeeSalary, salary_id)
     if not db_salary:
         raise HTTPException(status_code=404, detail="Employee salary not found")
@@ -621,6 +622,29 @@ async def update_employee_salary(
     session.commit()
     session.refresh(db_salary)
     return EmployeeSalaryRead.model_validate(db_salary)
+
+
+@router.delete(
+    "/salaries/{salary_id}",
+    response_model=Message,
+    dependencies=[Depends(require_permission("payroll", "delete"))],
+)
+async def delete_employee_salary(
+    *,
+    session: SessionDep,
+    salary_id: uuid.UUID,
+) -> Message:
+    """Soft-delete an employee salary record. The employee remains intact;
+    history is preserved via ``is_deleted`` / ``deleted_at``."""
+    db_salary = session.get(EmployeeSalary, salary_id)
+    if db_salary is None or db_salary.is_deleted:
+        raise HTTPException(status_code=404, detail="Employee salary not found")
+
+    db_salary.is_deleted = True
+    db_salary.deleted_at = datetime.now(timezone.utc)
+    session.add(db_salary)
+    session.commit()
+    return Message(message="Employee salary archived")
 
 
 # --------------------------------------------------------------------------- #

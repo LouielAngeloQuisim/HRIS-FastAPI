@@ -48,7 +48,7 @@ interface Props {
 export function LeaveRequestForm({ onClose, open }: Props) {
   const createMutation = useSubmitLeaveRequest()
   const employees = useEmployees(1, 100)
-  const policies = useLeavePolicies()
+  const policies = useLeavePolicies(1, 100)
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),

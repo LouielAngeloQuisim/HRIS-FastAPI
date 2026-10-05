@@ -1,21 +1,31 @@
 # Remaining QA Execution Status
 
-Updated 2026-10-05, Asia/Manila.
+Updated 2026-10-05, Asia/Manila. This is the code acceptance checkpoint; live merge/deployment state is recorded in GitHub workflows and the final completion report.
 
-## Delivered
+## Accepted scope
 
-PR #75 merged as 4b94aac1539ab4ce558e77e85fc6d42ea8d2a39c. Batch 1 QA-05/PAY-03/QA-04 is deployed. Required local gate passed (737 backend, 411 frontend tests / 116 files); hosted E2E 59/59; all CI/CodeQL passed. Deployment run 37257032038 passed CI, image build, deploy and nine live verification checks. Independent read-only deployment verification also passed all nine checks. No production writes.
+| Items | Outcome | Evidence |
+| --- | --- | --- |
+| QA-01/QA-03/QA-08 | Previously fixed; regressions maintained | import reconciliation/owner isolation, approval/rejection, daily KPI browser journeys |
+| QA-02 | Withdrawn; native date-input test artifact | historical QA notes preserved |
+| QA-05/PAY-03/QA-04 | Fixed and deployed in PR #75 | employee CRUD, salary recovery/deactivation, leave policy/enrollment and request/calendar/ledger journeys |
+| PAY-01/PAY-02/PAY-04–PAY-08 | Fixed in PR #76, with final PAY-08 wording follow-up in this batch | statutory configuration lifecycle, monetary SSS values, BIR open bounds/periods, real rejected-write feedback, transient preview and identity-stable generation retry |
+| QA-06/QA-07 | Fixed and verified in final administration batch | role history/protection/race tests, related names after reload, unchanged persisted IDs, missing-parent fallbacks |
 
-## Active Batch 2
+No reported backlog implementation remains. Deferred attachment/201-file annexes and mock-backed template demos remain outside this accepted scope. Older untracked docs/bugs/ QA artifacts are reproduction history; their OPEN labels are superseded by this acceptance checkpoint and the final release report.
 
-Worktree /var/www/vhosts/hris-payroll-batch2, branch fix/batch2-payroll-workflows, baseline 4b94aac. Uncommitted implementation covers SSS money inputs/display, BIR nullable upper limit/period selector, inline mutation errors, statutory configuration update/deactivation, inactive-rate filtering, nonpersistent preview, generation request identity/fingerprint with PostgreSQL advisory lock, and locked unknown-outcome retries. Migration 8c12ab55d901 adds nullable generation_fingerprint; required generation payload now includes request_id UUID. Full scope PAY-01/02/04–08.
+## Delivery already verified
 
-Final local evidence: scripts/verify.sh RESULT PASS (exit 0), 751 backend tests; 417 frontend tests / 117 files; Ruff clean, mypy/tsc 0 errors, no migration/MAP drift, build OK; ESLint 0 errors / 7 report-only warnings. Migration downgrade/upgrade/check passed. Full Playwright final 65/65 without retries, including a real backend permission-denied write preserving SSS form values. Earlier first full run was 63/64 with an attendance Close timeout; unchanged rerun passed 64/64. Review complete; commit/push, hosted exact-head checks and merge/deploy pending.
+PR #75 merged as 4b94aac1539ab4ce558e77e85fc6d42ea8d2a39c. Deployment run 37257032038 passed; independent nine-check live verification passed. PR #76 merged as 4f88ec7fa850e8187bf9c5c0a4e28571a9b6890c. Deployment run 37261105896 passed CI/build/deploy/verify, post-merge E2E passed, and independent nine-check live verification passed. No production CRUD or permission changes during QA.
 
-## Batch 3
+## Final combined acceptance evidence
 
-Separate worktree /var/www/vhosts/hris-admin-batch3, branch fix/batch3-administration-workflows, same baseline. Role deactivation/assigned-role protection/assignment locking, bounded relationship labels, account-scoped caching and UI wiring are implemented but uncommitted. Focused backend 7/7 (including concurrent assignment/deactivation); focused frontend 33/33 / 15 files. One-command isolated browser runner added with guard tests. Final integration and full verification remain. QA-06/QA-07 not complete.
+Integrated origin/main 4f88ec7 into fix/batch3-administration-workflows before final testing. scripts/verify.sh RESULT PASS (exit 0): 797 backend tests; 431 frontend tests / 121 files; Ruff clean, mypy/tsc 0 errors, no migration/MAP drift, build OK; ESLint 0 errors / 7 report-only warnings. 250 API routes, 25 migrations, single head 8c12ab55d901. Full Playwright: 66/66 passed without retries using scripts/run-e2e-qa.sh, a unique disposable DB and native WSL Docker. Backend includes real two-session assignment/deactivation and generation concurrency proofs, authorized bounded labels, and seven runner URL/filter guards. Statutory form validation suite 25/25. The prior mock-boundary failure and numeric matcher type mismatch were corrected and are covered by the passing full gate.
 
-QA uses existing hris-ui-qa-e2e on 55603 with separate disposable databases; owned runners clean up their servers/database and restore it to stopped. Temporary Windows Docker CLI wrapper /tmp/hris-task-bin/docker enables tools without changing system configuration. Each worktree now has independent dependency environments; primary virtualenv editable package restored. Primary unrelated DESKFLOW_PLAN.md, docs/bugs/, scripts/__pycache__/ preserved.
+The final administration release follows protected PR review/checks/merge and automatic deployment; Codex owns delivery. This checkpoint records acceptance, not a continuously updated deployment monitor.
 
-Next: complete Batch 2 full gate/browser evidence, review, commit/push/PR, hosted checks and merge/deploy. Finish Batch 3 tests/labels, integrate merged Batch 2, run combined gates/browser coverage, review/merge/deploy and final read-only smoke. No tests apply to this documentation checkpoint itself.
+## Repeatable QA and next module
+
+See docs/testing/README.md for one-command full/per-module browser runs. The runner reuses hris-ui-qa-e2e with a unique database, owns its servers and restores the container's original state. Native Docker now responds directly in WSL; Windows CLI fallback is supported. Never run the CRUD suite against production. Use python3 scripts/verify-deployment.py for read-only live smoke.
+
+Start a new module from current origin/main in a fresh worktree, write its plan, then add meaningful Vitest and Playwright user journeys and run the full gate before PR delivery. Preserve unrelated primary DESKFLOW_PLAN.md, docs/bugs/ and script bytecode artifacts. No test applies to this documentation-only checkpoint; all code acceptance evidence above comes from actual session runs.

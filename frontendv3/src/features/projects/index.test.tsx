@@ -6,8 +6,8 @@ vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
 vi.mock('./components/resource-form', () => ({ ResourceForm: () => null }))
 vi.mock('./components/resource-delete-dialog', () => ({ ResourceDeleteDialog: () => null }))
 vi.mock('@/lib/api/projects', () => ({ useProjects: () => ({ data: { data: [{ id: 'project', code: 'P01', name: 'Named project', subdivision_id: 'subdivision', project_type_id: 'type' }], count: 1 }, isPending: false, isError: false }) }))
-vi.mock('@/lib/api/relationship-labels', async importOriginal => ({
-  ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(),
+vi.mock('@/lib/api/relationship-labels', async () => ({
+  ...await import('@/lib/api/relationship-label-text'),
   useRelationshipLabels: (resource: string) => ({ data: resource === 'subdivisions' ? { subdivision: 'S01 — Named subdivision' } : { type: 'T01 — Residential' } }),
 }))
 

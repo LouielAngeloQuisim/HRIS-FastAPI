@@ -6,8 +6,8 @@ vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
 vi.mock('./components/resource-form', () => ({ ResourceForm: () => null }))
 vi.mock('./components/resource-delete-dialog', () => ({ ResourceDeleteDialog: () => null }))
 vi.mock('@/lib/api/categories', () => ({ useCategories: () => ({ data: { data: [{ id: 'category', code: 'C01', project_id: 'project', model_id: 'model', phase_id: 'phase', blocks_id: 'block', owner_id: 'owner', lot_id: 'lot' }], count: 1 }, isPending: false, isError: false }) }))
-vi.mock('@/lib/api/relationship-labels', async importOriginal => ({
-  ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(),
+vi.mock('@/lib/api/relationship-labels', async () => ({
+  ...await import('@/lib/api/relationship-label-text'),
   useRelationshipLabels: () => ({ data: { project: 'P01 — Project', model: 'Model A', phase: 'Phase 1', block: 'Block 2', owner: 'Readable Owner', lot: 'Lot 3' } }),
 }))
 

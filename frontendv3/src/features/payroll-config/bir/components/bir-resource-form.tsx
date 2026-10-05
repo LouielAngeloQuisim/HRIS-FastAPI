@@ -26,10 +26,10 @@ import type { BIRBracketPublic } from '@/lib/api/types'
 
 const formSchema = z.object({
   period: z.enum(['daily', 'weekly', 'semi_monthly', 'monthly']),
-  bracket_min: z.coerce.number<number>().min(0),
-  bracket_max: z.coerce.number<number>().min(0).nullable(),
-  base_tax: z.coerce.number<number>().min(0),
-  excess_rate: z.coerce.number<number>().min(0).max(100),
+  bracket_min: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  bracket_max: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.').nullable(),
+  base_tax: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  excess_rate: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.').max(100, 'Enter a percentage between 0 and 100.'),
   effective_date: z.string().min(1, 'Select an effective date.'),
 })
 type FormData = z.infer<typeof formSchema>

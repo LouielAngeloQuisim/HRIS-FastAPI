@@ -222,3 +222,5 @@ describe('Permission-gate coverage (§8.6)', () => {
     })
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async () => ({ ...await import('@/lib/api/relationship-label-text'), useRelationshipLabels: () => ({ data: {} }) }))

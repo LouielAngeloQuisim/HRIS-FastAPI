@@ -26,7 +26,7 @@ describe('EmployeeProjects create 409 duplicate pair (§8.9)', () => {
 
     const { getByRole, getByText } = await renderWithClient(<EmployeeProjectsPage />)
     // Existing row is rendered.
-    await expect.element(getByText('e1')).toBeInTheDocument()
+    await expect.element(getByText('EMP01 — Test employee')).toBeInTheDocument()
 
     // Open create drawer.
     await userEvent.click(getByRole('button', { name: /Add EmployeeProjects/i }))
@@ -44,4 +44,4 @@ describe('EmployeeProjects create 409 duplicate pair (§8.9)', () => {
   })
 })
 
-vi.mock('@/lib/api/relationship-labels', async (importOriginal) => ({ ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(), useRelationshipLabels: () => ({ data: {} }) }))
+vi.mock('@/lib/api/relationship-labels', async () => ({ ...await import('@/lib/api/relationship-label-text'), useRelationshipLabels: () => ({ data: { e1: 'EMP01 — Test employee', p1: 'P01 — Test project' } }) }))

@@ -16,7 +16,13 @@ for qa_spec in "$@"; do
     echo 'Pass only an existing path relative to frontendv3/e2e' >&2; exit 2
   fi
 done
-command -v docker >/dev/null
+if ! command -v docker >/dev/null; then
+  if [[ -x '/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe' ]]; then
+    docker() { '/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe' "$@"; }
+  else
+    echo 'Docker CLI is unavailable; enable Docker Desktop WSL integration' >&2; exit 2
+  fi
+fi
 command -v uv >/dev/null
 command -v pnpm >/dev/null
 command -v setsid >/dev/null

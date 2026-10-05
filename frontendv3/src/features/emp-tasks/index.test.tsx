@@ -6,8 +6,8 @@ vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
 vi.mock('./components/resource-form', () => ({ ResourceForm: () => null }))
 vi.mock('./components/resource-delete-dialog', () => ({ ResourceDeleteDialog: () => null }))
 vi.mock('@/lib/api/emp-tasks', () => ({ useEmpTasks: () => ({ data: { data: [{ id: 'task', emp_project_id: 'assignment', task_desc: 'Fixture task' }], count: 1 }, isPending: false, isError: false }) }))
-vi.mock('@/lib/api/relationship-labels', async importOriginal => ({
-  ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(),
+vi.mock('@/lib/api/relationship-labels', async () => ({
+  ...await import('@/lib/api/relationship-label-text'),
   useRelationshipLabels: () => ({ data: { assignment: 'EMP01 — Named Employee → P01 — Named Project' } }),
 }))
 

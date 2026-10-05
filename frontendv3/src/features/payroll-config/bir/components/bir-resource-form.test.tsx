@@ -27,6 +27,7 @@ describe('BIRResourceForm validation', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Create/i }))
     expect(createMock).not.toHaveBeenCalled()
+    await expect.element(screen.getByText('Select an effective date.')).toBeVisible()
   })
 
   it('submits create mutation when form is valid', async () => {
@@ -101,4 +102,16 @@ describe('BIRResourceForm validation', () => {
     await expect.element(screen.getByRole('alert')).toBeInTheDocument()
     await expect.element(screen.getByLabelText(/Effective Date/i)).toHaveValue('2025-01-01')
   })
+})
+
+
+it('shows a clear numeric error, preserves the value and prevents a rejected submission', async () => {
+  createMock.mockClear()
+  const screen = await render(<BIRResourceForm item={null} open={true} onClose={() => {}} />)
+  await userEvent.fill(screen.getByTestId('bir-bracket_min-input'), '-1')
+  await userEvent.fill(screen.getByTestId('bir-effective-date-input'), '2028-01-01')
+  await userEvent.click(screen.getByRole('button', { name: /Create/i }))
+  await expect.element(screen.getByText('Enter 0 or a positive value.')).toBeVisible()
+  await expect.element(screen.getByTestId('bir-bracket_min-input')).toHaveValue(-1)
+  expect(createMock).not.toHaveBeenCalled()
 })

@@ -25,13 +25,13 @@ import { useCreateSSSBracket, useUpdateSSSBracket } from '@/lib/api/payroll-conf
 import type { SSSBracketPublic } from '@/lib/api/types'
 
 const formSchema = z.object({
-  msc_min: z.coerce.number<number>().min(0),
-  msc_max: z.coerce.number<number>().min(0),
-  employer_ss: z.coerce.number<number>().min(0),
-  employer_ec: z.coerce.number<number>().min(0),
-  employer_mpf: z.coerce.number<number>().min(0),
-  employee_ss: z.coerce.number<number>().min(0),
-  employee_mpf: z.coerce.number<number>().min(0),
+  msc_min: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  msc_max: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  employer_ss: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  employer_ec: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  employer_mpf: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  employee_ss: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  employee_mpf: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
   effective_date: z.string().min(1, 'Select an effective date.'),
 })
 type FormData = z.infer<typeof formSchema>

@@ -25,12 +25,12 @@ import { useCreatePhilHealthBracket, useUpdatePhilHealthBracket } from '@/lib/ap
 import type { PhilHealthBracketPublic } from '@/lib/api/types'
 
 const formSchema = z.object({
-  salary_min: z.coerce.number<number>().min(0),
-  salary_max: z.coerce.number<number>().min(0),
-  rate: z.coerce.number<number>().min(0).max(100),
-  employer_share: z.coerce.number<number>().min(0).max(100),
-  employee_share: z.coerce.number<number>().min(0).max(100),
-  effective_date: z.string().min(1),
+  salary_min: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  salary_max: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  rate: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.').max(100, 'Enter a percentage between 0 and 100.'),
+  employer_share: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.').max(100, 'Enter a percentage between 0 and 100.'),
+  employee_share: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.').max(100, 'Enter a percentage between 0 and 100.'),
+  effective_date: z.string().min(1, 'Select an effective date.'),
 })
 type FormData = z.infer<typeof formSchema>
 

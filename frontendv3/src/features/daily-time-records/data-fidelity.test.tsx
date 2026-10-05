@@ -67,4 +67,4 @@ describe('DailyTimeRecordsPage (data fidelity)', () => {
   })
 })
 
-vi.mock('@/lib/api/relationship-labels', async (importOriginal) => ({ ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(), useRelationshipLabels: () => ({ data: {} }) }))
+vi.mock('@/lib/api/relationship-labels', async () => ({ ...await import('@/lib/api/relationship-label-text'), useRelationshipLabels: () => ({ data: {} }) }))

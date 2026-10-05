@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-05
-Source commit: 0f7e8a092c48193ab9a89a7fd0693fe488f68e1b
+Source commit: 30357619464abb67133faed654be05f92c5fb221
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
@@ -411,15 +411,15 @@ reliable in the source tree's single-line import style) with plumbing
 - `attendance`: api `none`; flags: test
 - `auth`: api `auth`; flags: form, test
 - `blocks`: api `blocks`, `phases`, `save-error`; flags: route, form, test
-- `categories`: api `blocks`, `categories`, `lots`, `models`, `owners`, `phases`, `projects`, `relationship-labels`, `save-error`; flags: route, form, test
+- `categories`: api `blocks`, `categories`, `lots`, `models`, `owners`, `phases`, `projects`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
 - `chats`: api `none`; flags: route
-- `daily-time-records`: api `daily-time-records`, `relationship-labels`, `save-error`; flags: route, form, test
+- `daily-time-records`: api `daily-time-records`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
 - `dashboard`: api `none`; flags: test
 - `departments`: api `departments`, `divisions`; flags: route, form, test
 - `divisions`: api `divisions`; flags: route, form, test
-- `dtr-adjustments`: api `daily-time-records`, `dtr-adjustments`, `relationship-labels`, `save-error`; flags: route, form, test
-- `emp-tasks`: api `emp-tasks`, `employee-projects`, `relationship-labels`, `save-error`; flags: route, form, test
-- `employee-projects`: api `employee-projects`, `employees`, `projects`, `relationship-labels`, `save-error`; flags: route, form, test
+- `dtr-adjustments`: api `daily-time-records`, `dtr-adjustments`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
+- `emp-tasks`: api `emp-tasks`, `employee-projects`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
+- `employee-projects`: api `employee-projects`, `employees`, `projects`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
 - `employees`: api `employees`, `save-error`; flags: route, form, test
 - `holidays`: api `holidays`; flags: route, form, test
 - `leave-calendar`: api `employees`, `leave-ledger`; flags: route, test
@@ -437,7 +437,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `phases`: api `phases`, `save-error`, `subdivisions`; flags: route, form, test
 - `positions`: api `departments`, `positions`; flags: route, form, test
 - `project-types`: api `project-types`; flags: route, form
-- `projects`: api `project-types`, `projects`, `relationship-labels`, `subdivisions`; flags: route, form, test
+- `projects`: api `project-types`, `projects`, `relationship-label-text`, `relationship-labels`, `subdivisions`; flags: route, form, test
 - `roles`: api `roles`, `save-error`; flags: route, form, test
 - `salary`: api `employees`, `payroll`, `save-error`; flags: form, test
 - `settings`: api `none`; flags: route, form

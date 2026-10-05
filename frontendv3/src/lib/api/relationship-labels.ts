@@ -1,16 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/auth-store'
 import { api } from './client'
-
-// JWT subject is only a cache partition, never an authorization decision.
-// A full reload restores the token before the optional auth.user object.
-export function relationshipOwner(userId: string | undefined, token: string) {
-  if (userId) return userId
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { sub?: unknown }
-    return typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined
-  } catch { return undefined }
-}
+import { relationshipOwner } from './relationship-label-text'
+export { relationshipLabel, relationshipOwner } from './relationship-label-text'
 
 export function useRelationshipLabels(resource: string, ids: Array<string | null | undefined>) {
   const ownerId = useAuthStore(state => relationshipOwner(state.auth.user?.id, state.auth.accessToken))
@@ -31,8 +23,4 @@ export function useRelationshipLabels(resource: string, ids: Array<string | null
       return labels
     },
   })
-}
-
-export function relationshipLabel(labels: Record<string, string> | undefined, id: string | null | undefined) {
-  return id ? labels?.[id] ?? 'Unavailable record' : '—'
 }

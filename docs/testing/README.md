@@ -25,7 +25,7 @@ bash scripts/run-e2e-qa.sh system/roles.spec.ts       # custom role lifecycle
 bash scripts/run-e2e-qa.sh projects hris/emp-tasks.spec.ts # relationships/projects/tasks
 ```
 
-On hosts missing browser shared libraries, run `bash frontendv3/scripts/setup-playwright-libs.sh` once. Docker, uv, pnpm, Python 3, curl, setsid and flock must be available. Docker Desktop's WSL integration supplies the Docker CLI on Windows; the temporary CLI wrapper used in this debugging session is host setup, not a repository dependency.
+On hosts missing browser shared libraries, run `bash frontendv3/scripts/setup-playwright-libs.sh` once. Docker, uv, pnpm, Python 3, curl, setsid and flock must be available. On WSL, the runner also supports Docker Desktop's standard Windows CLI path when its Linux CLI link is unavailable. The daemon must already be running.
 
 The runner reuses `hris-ui-qa-e2e` (postgres:18, user/database e2e, loopback port 55603), or creates it if missing. It creates a unique database, migrates/seeds placeholder accounts, owns ports 8000/5173 and runs Chromium serially without retries. It drops only its own database and restores the QA container's original running/stopped state. Server logs are retained under the printed `/tmp/hris-ui-qa-*` path. Do not run two QA stacks concurrently or override the URLs with production addresses.
 

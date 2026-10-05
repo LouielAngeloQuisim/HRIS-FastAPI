@@ -1,7 +1,9 @@
 # Frontend Automated Testing Strategy
 ## HRIS Python — `frontendv3`
 
-## 1. Current State Assessment
+The assessment, phase checklists and coverage goals below preserve the original planning snapshot. Current verified counts and repeatable execution commands are maintained in [STATUS](../../docs/STATUS.md) and the [testing runbook](../../docs/testing/README.md). Use those sources for current implementation state.
+
+## 1. Original State Assessment (historical)
 
 | Layer | Framework | Status | Gap |
 |---|---|---|---|

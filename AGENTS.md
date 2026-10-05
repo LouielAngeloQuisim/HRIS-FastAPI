@@ -14,76 +14,11 @@ The original template shell (FastAPI + SQLModel + Alembic, generic user/item CRU
 - `docs/README.md` — documentation index. `docs/runbooks/` — authoritative operational procedures (§8 below is a summary only).
 - `docs/feature-development-workflow.md` — end-to-end process for any change: worktree from `origin/main`, one plan per task, implementation, `scripts/verify.sh`, PR with evidence. The `.kilo/` directory is intentionally untracked (see `.gitignore`); this document is the tracked source of the workflow.
 
-## 1.5 Mandatory Testing Policy — applies to EVERY change, no exceptions
+## 1.5 Mandatory Testing Policy
 
-**Every code change — however small, however "quick," including one-line
-fixes, config tweaks, or "just this small module" requests — must include
-a test and a full verification run before being reported as complete.**
-This is not limited to planned phase work; it applies to ad-hoc fixes,
-follow-up tweaks, and anything touching existing tested code.
+Before changing tests, fixtures or runners, read [`docs/testing/test-policy.md`](docs/testing/test-policy.md). It is the detailed source of truth for risk-based coverage, runner selection, validation cadence, isolation, diagnosis and evidence. Operational commands are in [`docs/testing/README.md`](docs/testing/README.md).
 
-This is NOT automatic behavior by default — it must be actively followed
-on every task, not only when explicitly reminded in a prompt. Treat this
-section itself as that standing reminder.
-
-**Before claiming any change is complete, run `scripts/verify.sh` and show its
-output. This replaces the old per-command manual checklist.** It runs ruff,
-mypy (hard gate), alembic drift-check, pytest against a throwaway
-postgres container, then frontend tsc/eslint (report-only)/vitest/build, and
-prints a PASS/FAIL summary. Exit 0 = all hard gates green; 1 = at least one
-failed. mypy is a hard gate. ESLint is report-only; the current baseline is
-0 errors and 7 warnings. See docs/STATUS.md.
-
-### For any backend change (`backend/`):
-1. Write or update a pytest test covering the change, in the matching
-   `backend/tests/<domain>/` directory, following the existing patterns
-   (see AGENTS.md §5 Architecture Conventions).
-2. Run the FULL backend suite (`pytest tests/ -q` from `backend/`), not
-   just the new/changed test file — confirm the total pass count and
-   that it is not lower than the last known-good baseline (see §6 for
-   current baseline numbers, kept up to date).
-3. Run `ruff check` and `mypy` on changed files.
-4. Only report the change as complete after all of the above pass, and
-   state the actual pass count in the report (e.g. "248 passed, 0
-   failed" — not "tests pass").
-
-### For any frontend change (`frontendv3/`):
-1. Write or update a Vitest browser-mode test covering the change,
-   colocated with the source file per the existing convention (see §5
-   Frontend Architecture Conventions, §6 Frontend Test Environment).
-2. Run the FULL frontend suite (`npx vitest run --browser.headless`,
-   with `LD_LIBRARY_PATH` set per §6), not just the new/changed test
-   file — confirm the total pass count is not lower than the last
-   known-good baseline.
-3. Run `npx tsc --noEmit` and `npx eslint .` on changed files.
-4. Only report the change as complete after all of the above pass, and
-   state the actual pass count in the report.
-
-### If a change touches BOTH backend and frontend:
-Run both suites above — do not report complete after only one side is
-verified.
-
-### If writing a genuine test is not possible or not sensible for a given
-change (e.g. a pure documentation edit, a config file with no testable
-behavior):
-State explicitly why no test applies — do not silently skip this section
-without a stated reason. "No test needed: this is a documentation-only
-change" is an acceptable statement; silence is not.
-
-### Never claim "tests pass" or "implementation complete" without having
-actually run the commands above in this session and observing real
-output. A claim of completion without a stated, real pass count is not
-acceptable — see Lessons Learned §7 for what happens when this discipline
-is skipped (a "complete" phase report with 0 of 12 required tests
-actually written, discovered only after being pushed back on multiple
-times).
-
-### For every new feature or module, tests are not optional — they are part of the definition of done. The full Vitest + Playwright strategy, including file conventions, mock patterns, E2E page objects, and business-flow examples, is documented in `frontendv3/docs/testing-strategy.md`. Any new feature must include:
-- Colocated Vitest browser tests (`index.test.tsx`, `heading.test.tsx`, `row-actions.test.tsx`, `data-fidelity.test.tsx`, `retry.test.tsx`, `permissions.test.tsx`, and `components/<feature>-form.test.tsx` where applicable).
-- A Playwright E2E spec under `frontendv3/e2e/<domain>/` covering the critical user journey for that feature.
-- Stable `data-testid` attributes on all key interactive elements (buttons, dialogs, form fields) so E2E selectors remain reliable across UI refactors.
-
-If a new feature does not yet have a corresponding E2E page object or domain folder in `e2e/`, create them before writing the spec. Do not wait to be asked — this is the standard deliverable for any feature work.
+During development, run targeted checks. For a finished batch, run `bash scripts/verify.sh` and relevant E2E coverage; repeat when later changes or failures justify it. Add meaningful regression coverage for executable changes and choose the lowest layer that proves the behavior, with E2E for critical integrated workflows. Do not use fixed test-file lists, counts or coverage targets as quality goals. Report actual results, skips, failures and coverage limits; never claim a pass without observed output. For documentation-only changes, state why no functional test applies and run documentation/link checks and the repository gate.
 
 ## 2. Current Status
 

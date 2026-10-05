@@ -9,8 +9,8 @@ after changes rather than preserving dated baseline claims.
 
 | Metric | Observed result | Evidence |
 | --- | --- | --- |
-| Backend tests | 797 passed, 0 failed | scripts/verify.sh, 2026-10-05 |
-| Backend test files | 57 | Python pathlib rglob("test_*.py") under backend/tests |
+| Backend tests | 807 passed, 0 failed, 0 skipped | scripts/verify.sh, 2026-10-05 |
+| Backend test files | 58 | Python pathlib rglob("test_*.py") under backend/tests |
 | mypy app | 0 errors, 98 source files | scripts/verify.sh |
 | Ruff | clean | scripts/verify.sh |
 | Alembic migrations | 25, single head 8c12ab55d901; no drift | migration inventory and scripts/verify.sh |
@@ -18,7 +18,7 @@ after changes rather than preserving dated baseline claims.
 | Domain packages | 12 | generated docs/MAP.md |
 | Vitest | 121 files / 431 tests passed | scripts/verify.sh |
 | Feature test files | 105 | pathlib inventory excluding screenshot artifacts |
-| Playwright | 66 passed, 34 specs, no retries | disposable DB browser run |
+| Playwright | 66 passed, 34 specs, 0 retries; 392.85 s at 1 worker | isolated local QA DB, 2026-10-05 |
 | TypeScript | 0 errors | scripts/verify.sh |
 | ESLint | 0 errors / 7 warnings, report-only | scripts/verify.sh |
 | Frontend build | passed | scripts/verify.sh |

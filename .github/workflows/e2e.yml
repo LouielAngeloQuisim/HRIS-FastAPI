@@ -52,6 +52,8 @@ jobs:
       E2E_ADMIN_PASSWORD: e2e-admin-placeholder
       E2E_USER_EMAIL: user@example.com
       E2E_USER_PASSWORD: e2e-user-placeholder
+      E2E_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+      E2E_WORKERS: 2
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -79,5 +81,5 @@ jobs:
         if: failure()
         with:
           name: playwright-failure-report
-          path: frontendv3/playwright-report/
+          path: frontendv3/test-results/e2e-*/html/
           retention-days: 7

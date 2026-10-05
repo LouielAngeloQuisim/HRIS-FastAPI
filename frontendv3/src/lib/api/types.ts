@@ -399,6 +399,7 @@ export interface EmpTaskUpdate { task_desc?: string | null; rendered_hours?: num
 
 // RBAC Role
 export interface RolePublic {
+  assigned_users?: number
   id: string
   code: string
   name: string

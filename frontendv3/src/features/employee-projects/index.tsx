@@ -1,3 +1,4 @@
+import { relationshipLabel, useRelationshipLabels } from '@/lib/api/relationship-labels'
 import { api } from '@/lib/api/client'
 import type { EmployeeProjectsPublic } from '@/lib/api/types'
 import { useState } from 'react'
@@ -20,6 +21,9 @@ export default function EmployeeProjectsPage() {
   const [editing, setEditing] = useState<EmployeeProjectsPublic | null>(null)
   const [deleteItem, setDeleteItem] = useState<EmployeeProjectsPublic | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
+
+  const employee_idLabels = useRelationshipLabels('employees', (data?.data ?? []).map(item => item.employee_id))
+  const project_idLabels = useRelationshipLabels('projects', (data?.data ?? []).map(item => item.project_id))
 
   if (!canView) {
     return (
@@ -62,8 +66,8 @@ export default function EmployeeProjectsPage() {
             <tbody>
               {data.data.map((item) => (
                 <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
-                  <td className="p-2">{item.employee_id ?? "—"}</td>
-                  <td className="p-2">{item.project_id ?? "—"}</td>
+                  <td className="p-2">{relationshipLabel(employee_idLabels.data, item.employee_id)}</td>
+                  <td className="p-2">{relationshipLabel(project_idLabels.data, item.project_id)}</td>
                   <td className="p-2">{item.date ?? "—"}</td>
                   <td className="p-2">{item.rendered_hours ?? "—"}</td>
                   <td className="p-2">{item.task ?? "—"}</td>

@@ -32,7 +32,7 @@ mypy (hard gate), alembic drift-check, pytest against a throwaway
 postgres container, then frontend tsc/eslint (report-only)/vitest/build, and
 prints a PASS/FAIL summary. Exit 0 = all hard gates green; 1 = at least one
 failed. mypy is a hard gate. ESLint is report-only; the current baseline is
-0 errors and 2 warnings. See docs/STATUS.md.
+0 errors and 7 warnings. See docs/STATUS.md.
 
 ### For any backend change (`backend/`):
 1. Write or update a pytest test covering the change, in the matching
@@ -87,23 +87,22 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 
 ## 2. Current Status
 
-### Backend - 707 tests green (verified 2026-10-02 by scripts/verify.sh)
-- **Backend inventory:** 51 test files under backend/tests; the domain groups below describe responsibilities, not the current total by phase.
+### Backend - 797 tests green (verified 2026-10-05 by scripts/verify.sh)
+- **Backend inventory:** 57 test files under backend/tests; the domain groups below describe responsibilities, not the current total by phase.
 - **Phase 2A/2B — Attendance module** (`backend/app/attendance/`): full CRUD for `Shift` + `DailyTimeRecord`, plus `DTRAdjustment`. Routers under `/shifts`, `/daily-time-records`, `/dtr-adjustments`. Row-level filter on DTR list: non-superusers see only their own records; users with no linked EmployeeRecords see `[]`.
 - **Phase B3 — Leave & Holidays module** (`backend/app/leave/`): full CRUD for `LeavePolicy`, `EmployeeLeaveEnrollment`, `LeaveRequest`, `LeaveLedgerEntry`, `HolidayConfig`, `HolidayInstance`. 84 tests in `backend/tests/leave/`.
-- **Additional backend modules on `origin/main`** (phase trackers lag the code — treat the modules, not `docs/roadmap/*.json`, as truth): `payroll` (routers under `/payroll/*` incl. `runs/generate` gated by `payroll:add`), `notification`, `audit`, `reports`, `dashboard`. Full generated inventory: `docs/MAP.md` (226 endpoints in 39 groups across 12 domain packages).
-- **23 Alembic migrations** (`backend/alembic/versions/`, verified 2026-10-02 via `ls backend/alembic/versions/*.py | wc -l`).
+- **Additional backend modules on `origin/main`** (phase trackers lag the code — treat the modules, not `docs/roadmap/*.json`, as truth): `payroll` (routers under `/payroll/*` incl. `runs/generate` gated by `payroll:add`), `notification`, `audit`, `reports`, `dashboard`. Full generated inventory: `docs/MAP.md` (250 endpoints in 39 groups across 12 domain packages).
+- **25 Alembic migrations** (`backend/alembic/versions/`, verified 2026-10-05 via `ls backend/alembic/versions/*.py | wc -l`).
 - All 16 HRIS domain resource routers are implemented in the `employee` module and served via the `routers` list in `app/employee/routes.py`: **employees, divisions, departments, subdivisions, positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks** — plus `/dashboard`, `/rbac`, `/items`, `/users`, `/auth`, `/shifts`, `/daily-time-records`, `/dtr-adjustments`, `/leave/*`, notifications, audit, reports, payroll, and local-only `/private`.
 
-### Frontend - 92 test files / 291 tests green (verified 2026-10-02)
-- Full Vitest run: **92 test files / 291 tests passing** (2026-10-02).
-- CRUD-complete feature pages with tests: divisions, departments, subdivisions (create wizard with failure-resume), positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks, shifts, roles (admin + permission matrix), dashboard, employees (**read-only list + profile + CSV import**).
+### Frontend - 121 test files / 431 tests green (verified 2026-10-05)
+- Full Vitest run: **121 test files / 431 tests passing** (2026-10-05).
+- CRUD-complete feature pages with tests: divisions, departments, subdivisions (create wizard with failure-resume), positions, project-types, projects, phases, blocks, lots, categories, models, model-types, owners, employee-projects, emp-tasks, shifts, roles (admin + permission matrix + protected custom deactivation), dashboard, employees (**core CRUD + profile + CSV import**), salary setup, leave workflows and statutory payroll configuration.
 - §8.1–§8.13 coverage: permission gating, 409 delete-error flows, CSV import success/retry, subdivision wizard state + resume.
-- **Playwright E2E infrastructure:** `e2e/fixtures/`, `e2e/helpers/`, `e2e/pages/`, 24 page objects covering every domain; 27 specs across `e2e/organization/`, `e2e/projects/`, `e2e/hris/`, `e2e/system/`, `e2e/attendance/` (verified 2026-10-02 via `ls frontendv3/e2e/pages/*.ts | wc -l` = 24 and `find frontendv3/e2e -name "*.spec.ts" | wc -l` = 27) with stable `data-testid` selectors on buttons, dialogs, and form fields.
+- **Playwright E2E infrastructure:** `e2e/fixtures/`, `e2e/helpers/`, `e2e/pages/`, 26 page objects and 34 specs across organization, projects, HRIS, system, attendance, payroll and auth. Verified 2026-10-05: 66 passing journeys without retries, with stable `data-testid` selectors. Run all or per-module with `bash scripts/run-e2e-qa.sh`; see docs/testing/README.md.
 
 ## 3. Known Gaps
 
-- **Employee create/edit/delete: GAP** (deferred per design §7, tracked in `docs/roadmap/frontend-phases.json` f2). Backend `/employees` CRUD exists; frontend has read-only list + profile + CSV import only.
 - **7 inert local `resource-delete-dialog` copies** (chats, dashboard, employees, roles, settings, tasks, users) carry the ErrorBody fix but are not imported anywhere (verified 2026-09-24: `git ls-files "*resource-delete-dialog.tsx"` lists 26 files, of which 25 are feature-local plus 1 shared, and `grep -rln` shows those 7 features' copies have zero importers; the `shared/` copy is imported by 23 files).
 - **EmployeeAttachments UI gap:** backend model + tests exist; the frontend annex/attachments UI is deferred.
 - **Unwired template demo features:** `apps`, `chats`, `tasks`, `users`, `settings` are complete shadcn-admin template UIs backed by local `./data/` mocks — no HRIS backend wiring.
@@ -133,7 +132,7 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 - **Domain packages, not one-file-per-resource.** Each domain is a package (e.g. `app/employee/`, `app/auth/`, `app/rbac/`, `app/user/`) layering `models.py` / `schemas.py` / `routes.py` / `services.py` / `selectors.py`. `app/employee/routes.py` uses a router factory (`_make_crud_router`) to build **16 per-resource routers** (`/employees`, `/divisions`, `/departments`, `/subdivisions`, `/positions`, `/project-types`, `/projects`, `/phases`, `/blocks`, `/lots`, `/categories`, `/models`, `/model-types`, `/owners`, `/employee-projects`, `/emp-tasks`), aggregated in a module-level `routers: list[APIRouter]` at `backend/app/employee/routes.py:594` (verified 2026-09-28: `grep -c "_router = " backend/app/employee/routes.py` = 16; the file contains no `include_router`/`sub_router` tokens; `app/api.py:22` loops `for employee_router in employee_routes.routers`). `app/api.py` includes auth, users, items, utils, rbac, employee (16 routers), attendance, leave, notifications, audit, payroll, reports, dashboard, and local-only private.
 - **Shared infra in `app/common/`:** `responses.py` (ErrorBody `{success, error, request_id}` envelope), `pagination.py`/`paginators.py`, `rate_limit.py` + deps, `route_policy.py` (public-route whitelist incl. `POST /api/v1/login/refresh-token`), `security.py`, `regex.py`, `schemas.py`, `types.py`, `audit/`.
 - **Auth:** custom JWT. Access token + **rotating single-use refresh token** (PyJWT). `POST /api/v1/login/refresh-token` rotates the refresh token; `route_policy` marks it public. Passwords via pwdlib (Argon2 primary, Bcrypt fallback). RBAC enforced via route policy / `require_permission`.
-- **DB:** SQLModel tables, Alembic migrations in `backend/alembic/versions/` (23, same count as §2, verified 2026-09-24), engine/config in `app/config/`.
+- **DB:** SQLModel tables, Alembic migrations in `backend/alembic/versions/` (25, same count as §2, verified 2026-10-05), engine/config in `app/config/`.
 
 ### Frontend
 - **Feature-dir pattern:** each domain is `src/features/<domain>/index.tsx` (page) + `components/` + feature-scoped tests beside source. Data access via hooks in `src/lib/api/<domain>.ts` (`useQuery`/`useMutation` + `invalidateQueries` on the shared axios `api` client). Server state via TanStack Query; client state via zustand (`src/stores/auth-store.ts`).
@@ -146,8 +145,8 @@ If a new feature does not yet have a corresponding E2E page object or domain fol
 - **Vitest browser mode** (`vitest run --browser.headless`, Playwright-backed). On this host, run once: `frontendv3/scripts/setup-playwright-libs.sh`, then export `LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"` before running tests.
 - Commands (from `frontendv3/`): full suite `npx vitest run --browser.headless`; single file `npx vitest run --browser.headless <path>`; lint `npx eslint .`; format `npx prettier --write .`; typecheck `npx tsc --noEmit`.
 - Test conventions: `renderWithClient` from `@/test-utils/providers`, `userEvent` from `vitest/browser`, hoisted `vi.mock` blocks (per-action `useCan` policy mock, `use*` hook mocks, axios `api.delete` mocks, sonner toast spies).
-- Baseline (verified 2026-10-02): **707 backend tests, 92 frontend files / 291 Vitest tests, 23 migrations with no drift, tsc 0 errors, mypy 0 errors (98 source files), ruff clean, ESLint 0 errors / 2 warnings**. ESLint warnings remain report-only.
-- Playwright E2E: **44 passing browser tests across 27 specs**, verified on a disposable database without retries. The dedicated e2e workflow runs on PRs and main. See docs/plans/e2e-ci-completion.md for isolation guards and coverage limits. Never point the CI suite at production.
+- Baseline (verified 2026-10-05): **797 backend tests, 121 frontend files / 431 Vitest tests, 25 migrations with no drift, tsc 0 errors, mypy 0 errors (98 source files), ruff clean, ESLint 0 errors / 7 warnings**. ESLint warnings remain report-only.
+- Playwright E2E: **66 passing browser tests across 34 specs**, verified on a disposable database without retries. The dedicated e2e workflow runs on PRs and main. See docs/plans/e2e-ci-completion.md for isolation guards and coverage limits. Never point the CI suite at production.
 
 
 ## 7. Lessons Learned (verified, no current regressions)

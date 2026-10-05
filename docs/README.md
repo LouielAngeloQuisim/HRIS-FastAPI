@@ -45,3 +45,5 @@
 - [plans/](./plans/README.md) - planning and implementation evidence.
 - [testing/](./testing/README.md) - full verification, browser CI and test conventions.
 - [archive/](./archive/README.md) - preserved historical sources and completed plans.
+
+Current QA acceptance and module handoff: [remaining QA execution status](./plans/remaining-qa-execution-status.md).

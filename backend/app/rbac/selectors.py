@@ -5,8 +5,11 @@ from sqlmodel import Session, select
 from app.rbac.models import Module, Role, RolePermission
 
 
-def get_role_by_code(*, session: Session, code: str) -> Role | None:
-    return session.exec(select(Role).where(Role.code == code)).first()
+def get_role_by_code(*, session: Session, code: str, for_update: bool = False) -> Role | None:
+    stmt = select(Role).where(Role.code == code)
+    if for_update:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    return session.exec(stmt).first()
 
 
 def get_role_by_id(*, session: Session, role_id: uuid.UUID) -> Role | None:

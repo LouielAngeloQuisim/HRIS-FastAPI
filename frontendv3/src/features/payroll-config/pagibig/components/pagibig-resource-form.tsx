@@ -25,11 +25,11 @@ import { useCreatePagIBIGBracket, useUpdatePagIBIGBracket } from '@/lib/api/payr
 import type { PagIBIGBracketPublic } from '@/lib/api/types'
 
 const formSchema = z.object({
-  salary_min: z.coerce.number<number>().min(0),
-  salary_max: z.coerce.number<number>().min(0),
-  employee_rate: z.coerce.number<number>().min(0).max(100),
-  employer_rate: z.coerce.number<number>().min(0).max(100),
-  effective_date: z.string().min(1),
+  salary_min: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  salary_max: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
+  employee_rate: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.').max(100, 'Enter a percentage between 0 and 100.'),
+  employer_rate: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.').max(100, 'Enter a percentage between 0 and 100.'),
+  effective_date: z.string().min(1, 'Select an effective date.'),
 })
 type FormData = z.infer<typeof formSchema>
 

@@ -1,3 +1,4 @@
+import { relationshipLabel, useRelationshipLabels } from '@/lib/api/relationship-labels'
 import { useDailyTimeRecords } from '@/lib/api/daily-time-records'
 import { SelectDropdown } from '@/components/select-dropdown'
 import { saveErrorMessage } from '@/lib/api/save-error'
@@ -46,6 +47,8 @@ export function DtrAdjustmentForm({ onClose, open }: Props) {
   const createMutation = useCreateDtrAdjustment()
   const records = useDailyTimeRecords(1, 100)
 
+  const employeeLabels = useRelationshipLabels('employees', (records.data?.data ?? []).map(record => record.employee_id))
+
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -82,7 +85,7 @@ export function DtrAdjustmentForm({ onClose, open }: Props) {
             <FormField control={form.control} name='daily_time_record_id' render={({ field }) => (
               <FormItem>
                 <FormLabel>Daily Time Record</FormLabel>
-                <SelectDropdown defaultValue={field.value} onValueChange={field.onChange} placeholder="Select a time record" items={(records.data?.data ?? []).map(record => ({ value: record.id, label: record.employee_id.slice(0, 8) + ' - ' + record.login_date }))} isPending={records.isPending} data-testid="dtr-adjustment-dtr-select" />
+                <SelectDropdown defaultValue={field.value} onValueChange={field.onChange} placeholder="Select a time record" items={(records.data?.data ?? []).map(record => ({ value: record.id, label: relationshipLabel(employeeLabels.data, record.employee_id) + ' - ' + record.login_date }))} isPending={records.isPending} data-testid="dtr-adjustment-dtr-select" />
                 <FormMessage />
               </FormItem>
             )} />

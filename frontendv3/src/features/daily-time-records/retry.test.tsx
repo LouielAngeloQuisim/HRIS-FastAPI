@@ -49,3 +49,5 @@ describe('DailyTimeRecordsPage (retry)', () => {
     expect(refetch).toHaveBeenCalled()
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async () => ({ ...await import('@/lib/api/relationship-label-text'), useRelationshipLabels: () => ({ data: {} }) }))

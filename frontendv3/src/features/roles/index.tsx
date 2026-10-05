@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { useCan } from '@/context/permissions-provider'
-import { useRoles } from '@/lib/api/roles'
+import { toast } from 'sonner'
+import { saveErrorMessage } from '@/lib/api/save-error'
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import type { RolePublic } from '@/lib/api/types'
+import { useRoles, useDeleteRole } from '@/lib/api/roles'
 import { Button } from '@/components/ui/button'
 import { RoleForm } from './components/role-form'
 import { PermissionMatrix } from './components/permission-matrix'
@@ -11,6 +15,9 @@ export default function RolesPage() {
   const canView = useCan('administration', 'view')
   const canCreate = useCan('administration', 'add')
   const canUpdate = useCan('administration', 'edit')
+  const canDelete = useCan('administration', 'delete')
+  const deleteMutation = useDeleteRole()
+  const [deactivating, setDeactivating] = useState<RolePublic | null>(null)
 
   const { data, isPending, isError, refetch } = useRoles(page, pageSize)
   const totalPages = data ? Math.max(1, Math.ceil(data.count / pageSize)) : 1
@@ -54,7 +61,7 @@ export default function RolesPage() {
               <tr className="border-b bg-muted/50">
                 <th className="p-2 text-left">Name</th>
                 <th className="p-2 text-left">Code</th>
-                <th className="p-2 text-left">Permissions</th>
+                <th className="p-2 text-left">Assigned users</th>
                 <th className="p-2 text-right">Actions</th>
               </tr>
             </thead>
@@ -63,10 +70,11 @@ export default function RolesPage() {
                 <tr key={role.id} className="border-b last:border-0 hover:bg-muted/50">
                   <td className="p-2">
                     {role.name}
+                    {!role.is_active && <span className="ml-2 text-xs">(inactive)</span>}
                     {role.is_system && <span className="ml-2 text-xs text-muted-foreground">(system)</span>}
                   </td>
                   <td className="p-2">{role.code ?? '—'}</td>
-                  <td className="p-2">{0} permissions</td>
+                  <td className="p-2">{role.assigned_users ?? 0} users</td>
                   <td className="p-2 text-right">
                      {canUpdate && !role.is_system && (
                        <Button variant="ghost" size="sm" onClick={() => { setMatrixRoleId(role.id); setMatrixRoleName(role.name) }} data-testid={`role-permission-matrix-button-${role.id}`}>Permissions</Button>
@@ -76,6 +84,9 @@ export default function RolesPage() {
                      )}
                     {role.is_system && canUpdate && (
                       <Button variant="ghost" size="sm" disabled title="System roles cannot be edited">Edit (system)</Button>
+                    )}
+                    {canDelete && !role.is_system && role.is_active && (
+                      <Button variant="ghost" size="sm" disabled={(role.assigned_users ?? 0) > 0} title={(role.assigned_users ?? 0) > 0 ? 'Assigned roles cannot be deactivated' : undefined} data-testid={`deactivate-role-button-${role.id}`} onClick={() => setDeactivating(role)}>Deactivate</Button>
                     )}
                   </td>
                 </tr>
@@ -105,6 +116,11 @@ export default function RolesPage() {
           </Button>
         </div>
       )}
+      <ConfirmDialog open={Boolean(deactivating)} onOpenChange={(open) => { if (!open) setDeactivating(null) }} title="Deactivate role" desc="Deactivate this unused custom role? Its permission history will remain preserved." confirmText="Deactivate" isLoading={deleteMutation.isPending} handleConfirm={async () => {
+        if (!deactivating) return
+        try { await deleteMutation.mutateAsync(deactivating.id); setDeactivating(null); toast.success('Role deactivated') }
+        catch (error) { toast.error(saveErrorMessage(error)) }
+      }} />
       <RoleForm
         open={formOpen}
         role={editingRole}

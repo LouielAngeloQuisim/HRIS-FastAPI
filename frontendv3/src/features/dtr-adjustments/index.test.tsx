@@ -90,6 +90,7 @@ describe('DtrAdjustmentsPage', () => {
     })
 
     const screen = await render(<DtrAdjustmentsPage />)
+    await expect.element(screen.getByText('EMP01 — Named Employee')).toBeVisible()
     await expect.element(screen.getByRole('button', { name: 'Approve' })).toBeVisible()
     await expect.element(screen.getByRole('button', { name: 'Reject' })).toBeVisible()
   })
@@ -131,3 +132,5 @@ describe('DtrAdjustmentsPage', () => {
     expect(rejected.className).toContain('bg-red-100')
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async () => ({ ...await import('@/lib/api/relationship-label-text'), useRelationshipLabels: () => ({ data: { 'emp-1': 'EMP01 — Named Employee' } }) }))

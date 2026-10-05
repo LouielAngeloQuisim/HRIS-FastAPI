@@ -1,6 +1,6 @@
 # Status (hand-maintained snapshot)
 
-Last updated: 2026-10-02. Baseline: the production UI regression repair branch,
+Last updated: 2026-10-05. Baseline: the combined employee/leave/payroll/administration QA finish pass,
 verified locally with scripts/verify.sh and a separate disposable-database browser run.
 This file is hand-maintained; docs/MAP.md is generated. Refresh observed counts
 after changes rather than preserving dated baseline claims.
@@ -9,18 +9,18 @@ after changes rather than preserving dated baseline claims.
 
 | Metric | Observed result | Evidence |
 | --- | --- | --- |
-| Backend tests | 707 passed, 0 failed | scripts/verify.sh, 2026-10-02 |
-| Backend test files | 51 | Python pathlib rglob("test_*.py") under backend/tests |
+| Backend tests | 797 passed, 0 failed | scripts/verify.sh, 2026-10-05 |
+| Backend test files | 57 | Python pathlib rglob("test_*.py") under backend/tests |
 | mypy app | 0 errors, 98 source files | scripts/verify.sh |
 | Ruff | clean | scripts/verify.sh |
-| Alembic migrations | 23, single head 3f0e3e733925; no drift | migration inventory and scripts/verify.sh |
-| API endpoints / route groups | 226 / 39 | generated docs/MAP.md |
+| Alembic migrations | 25, single head 8c12ab55d901; no drift | migration inventory and scripts/verify.sh |
+| API endpoints / route groups | 250 / 39 | generated docs/MAP.md |
 | Domain packages | 12 | generated docs/MAP.md |
-| Vitest | 92 files / 291 tests passed | scripts/verify.sh |
-| Feature test files | 86 | pathlib inventory excluding screenshot artifacts |
-| Playwright | 44 passed, 27 specs, no retries | disposable DB browser run |
+| Vitest | 121 files / 431 tests passed | scripts/verify.sh |
+| Feature test files | 105 | pathlib inventory excluding screenshot artifacts |
+| Playwright | 66 passed, 34 specs, no retries | disposable DB browser run |
 | TypeScript | 0 errors | scripts/verify.sh |
-| ESLint | 0 errors / 2 warnings, report-only | scripts/verify.sh |
+| ESLint | 0 errors / 7 warnings, report-only | scripts/verify.sh |
 | Frontend build | passed | scripts/verify.sh |
 | Architecture map | in sync | scripts/verify.sh |
 | Overall gate | RESULT: PASS (exit 0) | scripts/verify.sh |
@@ -48,8 +48,7 @@ query them when needed rather than treating an old snapshot as current.
 
 ## Coverage limits
 
-Employee UI supports list/profile and CSV import, not a full manual CRUD form.
-Leave ledger selection is incomplete; the E2E check covers its shell only.
+Employee core create/edit/soft-archive, profile and CSV import are covered. Salary setup/recovery, leave policy/enrollment and request lifecycle with calendar/ledger readback have browser regressions. Employee attachment/201-file annex UI remains deferred. Statutory configuration lifecycle, transient payroll preview, identity-stable generation retry, role protection and readable relationships are covered.
 Template apps/chats/tasks/users/settings are mock-backed demos. Existing
 production data is not a CI fixture. Operational documentation now covers
 architecture, decisions, modules, plans, testing, and archive provenance.

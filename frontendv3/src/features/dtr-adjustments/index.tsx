@@ -1,3 +1,4 @@
+import { relationshipLabel, useRelationshipLabels } from '@/lib/api/relationship-labels'
 import { useState } from 'react'
 import { useCan } from '@/context/permissions-provider'
 import { useDtrAdjustments, useApproveDtrAdjustment, useRejectDtrAdjustment } from '@/lib/api/dtr-adjustments'
@@ -34,6 +35,8 @@ export default function DtrAdjustmentsPage() {
       toast.error('Failed to reject DTR adjustment')
     }
   }
+
+  const employee_idLabels = useRelationshipLabels('employees', (data?.data ?? []).map(item => item.employee_id))
 
   if (!canView) {
     return (
@@ -82,7 +85,7 @@ export default function DtrAdjustmentsPage() {
               ) : (
                 data.data.map((item) => (
                   <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
-                    <td className="p-2">{item.employee_id ?? '—'}</td>
+                    <td className="p-2">{relationshipLabel(employee_idLabels.data, item.employee_id)}</td>
                     <td className="p-2">{item.original_login_date ? new Date(item.original_login_date).toLocaleString() : '—'}</td>
                     <td className="p-2">{item.original_logout_date ? new Date(item.original_logout_date).toLocaleString() : '—'}</td>
                     <td className="p-2">{item.adjusted_login_date ? new Date(item.adjusted_login_date).toLocaleString() : '—'}</td>

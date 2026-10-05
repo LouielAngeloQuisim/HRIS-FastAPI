@@ -34,7 +34,7 @@ export async function assertWrite(response: Response, status: number) {
 export async function crudJourney(page: Page, config: {
   route: string; prefix: string; add?: string; resource?: string;
   fields: Record<string, string>; editField: string; editValue: string;
-  prepare?: () => Promise<void>; expected?: Record<string, unknown>; readList?: boolean;
+  prepare?: () => Promise<void>; expected?: Record<string, unknown>; readList?: boolean; expectedLabels?: string[];
 }) {
   const { route, prefix, fields, editField, editValue } = config
   const resource = config.resource || route
@@ -49,6 +49,11 @@ export async function crudJourney(page: Page, config: {
   expect(created.id).toBeTruthy()
   if (config.expected) expect(created).toMatchObject(config.expected)
   await expect(page.getByTestId(prefix + '-submit-button')).not.toBeVisible()
+  if (config.expectedLabels) {
+    await page.reload()
+    const row = page.getByTestId('edit-' + prefix + '-button-' + created.id).locator('xpath=ancestor::tr')
+    for (const label of config.expectedLabels) await expect(row).toContainText(label)
+  }
   await page.getByTestId('edit-' + prefix + '-button-' + created.id).click()
   await page.getByTestId(prefix + '-' + editField + '-input').fill(editValue)
   const updating = waitForWrite(page, resource, 'PATCH', created.id)

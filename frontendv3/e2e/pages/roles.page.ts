@@ -53,4 +53,10 @@ export class RolesPage {
   async getRowCount() {
     return await this.rows.count()
   }
+  async deactivate(id: string) {
+    await this.page.getByTestId(`deactivate-role-button-${id}`).click()
+    await this.page.getByTestId('confirm-delete-button').click()
+    await expect(this.page.getByTestId(`deactivate-role-button-${id}`)).toHaveCount(0)
+  }
+
 }

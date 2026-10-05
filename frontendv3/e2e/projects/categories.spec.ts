@@ -9,7 +9,7 @@ test('categories preserve their complete parent chain through CRUD', async ({ pa
  const phase = await createParent(page, 'phases', { code: 'H' + unique, name: 'Phase ' + unique, subdivision_id: sub.id })
  const block = await createParent(page, 'blocks', { block_name: 'Block ' + unique, phase_id: phase.id })
  const lot = await createParent(page, 'lots', { lot_name: 'Lot ' + unique, lot_num: 101, blocks_id: block.id })
- await crudJourney(page, { route: 'categories', prefix: 'category', fields: { code: 'C' + unique, description: 'Original ' + unique }, editField: 'description', editValue: 'Reviewed ' + unique, expected: { project_id: project.id, phase_id: phase.id, blocks_id: block.id, lot_id: lot.id, is_overhead: false }, prepare: async () => {
+ await crudJourney(page, { route: 'categories', prefix: 'category', fields: { code: 'C' + unique, description: 'Original ' + unique }, editField: 'description', editValue: 'Reviewed ' + unique, expectedLabels: [project.name, phase.name, block.block_name, lot.lot_name], expected: { project_id: project.id, phase_id: phase.id, blocks_id: block.id, lot_id: lot.id, is_overhead: false }, prepare: async () => {
   await selectLabel(page, 'category-project-select', project.name)
   await selectLabel(page, 'category-phase-select', phase.name)
   await selectLabel(page, 'category-blocks-select', block.block_name)

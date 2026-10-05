@@ -66,3 +66,5 @@ describe('DailyTimeRecordsPage (data fidelity)', () => {
     await expect.element(screen.getByText('30')).toBeVisible()
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async () => ({ ...await import('@/lib/api/relationship-label-text'), useRelationshipLabels: () => ({ data: {} }) }))

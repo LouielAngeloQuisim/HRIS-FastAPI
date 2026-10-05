@@ -13,6 +13,7 @@ class ModulePublic(SQLModel):
 
 
 class RolePublic(SQLModel):
+    assigned_users: int = 0
     id: uuid.UUID
     code: str
     name: str

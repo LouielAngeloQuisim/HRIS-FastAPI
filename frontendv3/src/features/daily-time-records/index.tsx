@@ -1,3 +1,4 @@
+import { relationshipLabel, useRelationshipLabels } from '@/lib/api/relationship-labels'
 import { AttendanceCsvImportWizard } from '@/features/attendance/components/csv-import/attendance-csv-wizard'
 import { DailyTimeRecordForm } from './components/daily-time-record-form'
 import { ResourceDeleteDialog } from '@/components/resource-delete-dialog'
@@ -51,6 +52,8 @@ export default function DailyTimeRecordsPage() {
     }
   }
 
+  const employee_idLabels = useRelationshipLabels('employees', (data?.data ?? []).map(item => item.employee_id))
+
   if (!canView) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
@@ -98,7 +101,7 @@ export default function DailyTimeRecordsPage() {
               ) : (
                 data.data.map((item) => (
                   <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
-                    <td className="p-2">{item.employee_id ?? '—'}</td>
+                    <td className="p-2">{relationshipLabel(employee_idLabels.data, item.employee_id)}</td>
                     <td className="p-2">{item.login_date ? new Date(item.login_date).toLocaleString() : '—'}</td>
                     <td className="p-2">{item.logout_date ? new Date(item.logout_date).toLocaleString() : '—'}</td>
                     <td className="p-2 text-right">{item.rendered_minutes ?? '—'}</td>

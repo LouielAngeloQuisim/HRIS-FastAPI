@@ -1,3 +1,4 @@
+import { RolesPage } from '../pages/roles.page'
 import { test, expect } from '../fixtures'
 import { apiUrl, waitForWrite, assertWrite } from '../helpers/crud-journey'
 
@@ -29,4 +30,41 @@ test('custom role can be created, renamed and assigned a permission', async ({ p
   const response = await page.request.get(apiUrl + '/rbac/roles/' + created.id + '/permissions', { headers: { Authorization: 'Bearer ' + token } })
   expect(response.status()).toBe(200)
   expect((await response.json()).permissions).toContain('division.view')
+  const deactivation = waitForWrite(page, 'rbac/roles', 'DELETE', created.id)
+  await new RolesPage(page).deactivate(created.id)
+  await assertWrite(await deactivation, 200)
+  await page.reload()
+  await expect(page.getByTestId(`deactivate-role-button-${created.id}`)).toHaveCount(0)
+  const roles = await page.request.get(apiUrl + '/rbac/roles', { headers: { Authorization: 'Bearer ' + token } })
+  expect((await roles.json()).data).toEqual(expect.arrayContaining([expect.objectContaining({ id: created.id, is_active: false })]))
+  const history = await page.request.get(apiUrl + '/rbac/roles/' + created.id + '/permissions', { headers: { Authorization: 'Bearer ' + token } })
+  expect((await history.json()).permissions).toContain('division.view')
+
+})
+
+test('assigned and system roles stay protected and a regular account cannot administer them', async ({ page, loginAsAdmin, loginAsUser, logout }) => {
+  await loginAsAdmin()
+  const token = (await page.context().cookies()).find(cookie => cookie.name === 'hris_at')!.value
+  const headers = { Authorization: `Bearer ${token}` }
+  const unique = Date.now().toString(36)
+  const roleResponse = await page.request.post(`${apiUrl}/rbac/roles`, { headers, data: { code: `A${unique}`, name: `Assigned ${unique}` } })
+  expect(roleResponse.status()).toBe(201)
+  const role = await roleResponse.json()
+  const userResponse = await page.request.post(`${apiUrl}/users/`, { headers, data: { email: `assigned-${unique}@example.com`, password: 'e2e-assigned-placeholder', is_superuser: false } })
+  expect(userResponse.status()).toBe(200)
+  const user = await userResponse.json()
+  expect((await page.request.post(`${apiUrl}/users/${user.id}/role`, { headers, data: { role_code: role.code } })).status()).toBe(200)
+  await page.goto('/roles')
+  await expect(page.getByTestId(`deactivate-role-button-${role.id}`)).toBeDisabled()
+  const row = page.getByTestId(`deactivate-role-button-${role.id}`).locator('xpath=ancestor::tr')
+  await expect(row).toContainText('1 users')
+  expect((await page.request.delete(`${apiUrl}/rbac/roles/${role.id}`, { headers })).status()).toBe(409)
+  const roles = await page.request.get(`${apiUrl}/rbac/roles`, { headers })
+  const system = (await roles.json()).data.find((item: { is_system: boolean }) => item.is_system)
+  await expect(page.getByTestId(`deactivate-role-button-${system.id}`)).toHaveCount(0)
+  expect((await page.request.delete(`${apiUrl}/rbac/roles/${system.id}`, { headers })).status()).toBe(403)
+  await logout()
+  await loginAsUser(process.env.E2E_USER_EMAIL || 'user@example.com', process.env.E2E_USER_PASSWORD || 'e2e-user-placeholder')
+  await page.goto('/roles')
+  await expect(page.getByTestId(`deactivate-role-button-${role.id}`)).toHaveCount(0)
 })

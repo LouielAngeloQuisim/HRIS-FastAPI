@@ -26,7 +26,7 @@ export function useUpdateRole() {
 
 export function useDeleteRole() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: (id: string) => api.delete(`/rbac/roles/${id}`).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['roles'] }) })
+  return useMutation({ onError: () => {}, mutationFn: (id: string) => api.delete(`/rbac/roles/${id}`).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['roles'] }) })
 }
 
 export async function fetchRolePermissions(id: string): Promise<string[]> {

@@ -36,3 +36,5 @@ describe('DailyTimeRecordsPage (row actions)', () => {
     expect([...editButtons].some(btn => btn.textContent === 'Edit')).toBe(false)
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async () => ({ ...await import('@/lib/api/relationship-label-text'), useRelationshipLabels: () => ({ data: {} }) }))

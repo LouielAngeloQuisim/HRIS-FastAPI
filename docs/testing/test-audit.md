@@ -42,3 +42,9 @@ Both full E2E runs succeeded: 66 passed each, 0 retries (2 workers: 4.6m; final 
 1. Capture aggregate process-tree memory and comparable CI timing when a meaningful runner/configuration decision arises; current local sample showed pressure at two workers.
 2. Continue risk-based review of money precision, timezone boundaries, null/empty, inactive/deleted records, retries and concurrency when changing those domains; this audit did not perform mutation testing or prove exhaustive coverage.
 3. Consider further setup consolidation only when repeated mechanics create demonstrated maintenance or runtime cost. Do not remove tests based on name/count similarity.
+
+## Independent review follow-up
+
+The timeout wrapper previously used `--foreground`, which could leave descendants alive after exit 124, and cleared its group ID before cleanup. The runner now signals the owned session on command completion and interruption, waits at most two seconds before SIGKILL escalation, and preserves the original command status. Timeout uses group-aware signaling. A regression spawns a TERM-resistant descendant and proves timeout exit 124, descendant termination, owned-database removal and prior container-state restoration. Targeted runner tests: 16 passed.
+
+Follow-up full verification: `scripts/verify.sh` PASS (exit 0), 807 pytest and 431 Vitest tests; Ruff/mypy/TypeScript/build clean, no migration or MAP drift. Full local E2E and hosted final-head checks are required before merge.

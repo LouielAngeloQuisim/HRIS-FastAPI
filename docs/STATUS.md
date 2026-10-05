@@ -9,7 +9,7 @@ after changes rather than preserving dated baseline claims.
 
 | Metric | Observed result | Evidence |
 | --- | --- | --- |
-| Backend tests | 806 passed, 0 failed, 0 skipped | scripts/verify.sh, 2026-10-05 |
+| Backend tests | 807 passed, 0 failed, 0 skipped | scripts/verify.sh, 2026-10-05 |
 | Backend test files | 58 | Python pathlib rglob("test_*.py") under backend/tests |
 | mypy app | 0 errors, 98 source files | scripts/verify.sh |
 | Ruff | clean | scripts/verify.sh |

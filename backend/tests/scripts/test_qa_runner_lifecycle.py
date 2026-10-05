@@ -44,22 +44,23 @@ raise SystemExit('unexpected docker command: ' + joined)
     uv = fake_bin / "uv"
     uv.write_text(
         """#!/usr/bin/env python3
-import os, sys, time
+import os, sys, time, subprocess, signal
 if not any(argument.endswith('prestart.sh') for argument in sys.argv):
     raise SystemExit('unexpected uv command')
 mode = os.environ['QA_UV_MODE']
 if mode == 'fail':
     print('injected prestart failure', file=sys.stderr)
     raise SystemExit(23)
+if mode == 'descendants':
+    child = subprocess.Popen([sys.executable, '-c', 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'])
+    open(os.environ['QA_CHILD_PID'], 'w').write(str(child.pid))
 open(os.environ['QA_UV_STARTED'], 'w').write(str(os.getpid()))
 while True: time.sleep(0.2)
 """
     )
     uv.chmod(0o755)
     pnpm = fake_bin / "pnpm"
-    pnpm.write_text(
-        "#!/bin/sh\nprintf 'pnpm\\n' >>\"$QA_PNPM_CALLED\"\nexit 99\n"
-    )
+    pnpm.write_text("#!/bin/sh\nprintf 'pnpm\\n' >>\"$QA_PNPM_CALLED\"\nexit 99\n")
     pnpm.chmod(0o755)
     environment = {
         **os.environ,
@@ -135,7 +136,11 @@ def test_qa_runner_reports_cleanup_failure_without_losing_setup_failure(
     environment["QA_UV_MODE"] = "fail"
     environment["QA_DOCKER_FAIL_DROP"] = "true"
     result = subprocess.run(
-        ["bash", str(RUNNER)], env=environment, capture_output=True, text=True, timeout=20
+        ["bash", str(RUNNER)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
     )
 
     assert result.returncode == 23, result.stderr
@@ -150,7 +155,11 @@ def test_qa_runner_leaves_preexisting_running_container_running_after_setup_fail
     environment["QA_UV_MODE"] = "fail"
     environment["QA_CONTAINER_RUNNING"] = "true"
     result = subprocess.run(
-        ["bash", str(RUNNER)], env=environment, capture_output=True, text=True, timeout=20
+        ["bash", str(RUNNER)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
     )
 
     assert result.returncode == 23, result.stderr
@@ -187,5 +196,37 @@ def test_qa_runner_cleans_only_its_database_and_restores_stopped_container_on_si
     deadline = time.monotonic() + 3
     while _process_is_running(uv_pid) and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert not _process_is_running(uv_pid), "startup process survived runner interruption"
+    assert not _process_is_running(uv_pid), (
+        "startup process survived runner interruption"
+    )
     _assert_owned_resources_cleaned(events)
+
+
+def test_qa_runner_timeout_kills_term_resistant_descendant(tmp_path: Path) -> None:
+    environment, events = _fake_tools(tmp_path)
+    environment.update(
+        QA_UV_MODE="descendants",
+        E2E_COMMAND_TIMEOUT_SECONDS="1",
+        QA_CHILD_PID=str(tmp_path / "child-pid"),
+    )
+    process = subprocess.Popen(
+        ["bash", str(RUNNER)],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    child_pid = None
+    try:
+        _wait_for(Path(environment["QA_UV_STARTED"]), process)
+        child_pid = int(Path(environment["QA_CHILD_PID"]).read_text())
+        _, stderr = process.communicate(timeout=15)
+        assert process.returncode == 124, stderr
+        assert not _process_is_running(child_pid), "descendant survived timeout"
+        _assert_owned_resources_cleaned(events)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
+        if child_pid and _process_is_running(child_pid):
+            os.kill(child_pid, signal.SIGKILL)

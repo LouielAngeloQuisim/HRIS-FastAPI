@@ -22,7 +22,7 @@ During development, run targeted checks. For a finished batch, run `bash scripts
 
 ## 2. Current Status
 
-### Backend - 806 tests green (verified 2026-10-05 by scripts/verify.sh)
+### Backend - 807 tests green (verified 2026-10-05 by scripts/verify.sh)
 - **Backend inventory:** 58 test files under backend/tests; the domain groups below describe responsibilities, not the current total by phase.
 - **Phase 2A/2B — Attendance module** (`backend/app/attendance/`): full CRUD for `Shift` + `DailyTimeRecord`, plus `DTRAdjustment`. Routers under `/shifts`, `/daily-time-records`, `/dtr-adjustments`. Row-level filter on DTR list: non-superusers see only their own records; users with no linked EmployeeRecords see `[]`.
 - **Phase B3 — Leave & Holidays module** (`backend/app/leave/`): full CRUD for `LeavePolicy`, `EmployeeLeaveEnrollment`, `LeaveRequest`, `LeaveLedgerEntry`, `HolidayConfig`, `HolidayInstance`. 84 tests in `backend/tests/leave/`.
@@ -80,7 +80,7 @@ During development, run targeted checks. For a finished batch, run `bash scripts
 - **Vitest browser mode** (`vitest run --browser.headless`, Playwright-backed). On this host, run once: `frontendv3/scripts/setup-playwright-libs.sh`, then export `LD_LIBRARY_PATH="$(pwd)/.playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"` before running tests.
 - Commands (from `frontendv3/`): full suite `npx vitest run --browser.headless`; single file `npx vitest run --browser.headless <path>`; lint `npx eslint .`; format `npx prettier --write .`; typecheck `npx tsc --noEmit`.
 - Test conventions: `renderWithClient` from `@/test-utils/providers`, `userEvent` from `vitest/browser`, hoisted `vi.mock` blocks (per-action `useCan` policy mock, `use*` hook mocks, axios `api.delete` mocks, sonner toast spies).
-- Baseline (verified 2026-10-05): **806 backend tests, 121 frontend files / 431 Vitest tests, 25 migrations with no drift, tsc 0 errors, mypy 0 errors (98 source files), ruff clean, ESLint 0 errors / 7 warnings**. ESLint warnings remain report-only.
+- Baseline (verified 2026-10-05): **807 backend tests, 121 frontend files / 431 Vitest tests, 25 migrations with no drift, tsc 0 errors, mypy 0 errors (98 source files), ruff clean, ESLint 0 errors / 7 warnings**. ESLint warnings remain report-only.
 - Playwright E2E: **66 passing browser tests across 34 specs**, verified on a disposable database without retries. The dedicated e2e workflow runs on PRs and main. See docs/plans/e2e-ci-completion.md for isolation guards and coverage limits. Never point the CI suite at production.
 
 

@@ -60,13 +60,25 @@ qa_database="hris_qa_$(python3 -c 'import secrets; print(secrets.token_hex(6))')
 qa_run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 export E2E_RUN_ID="$qa_run_id"
 qa_logs="$(mktemp -d /tmp/hris-ui-qa-XXXXXX)"
+# Stop the owned session, including descendants that outlive its leader.
+qa_stop_group() {
+  local group_pid="$1"
+  kill -TERM -- "-$group_pid" 2>/dev/null || true
+  for _ in {1..20}; do
+    kill -0 -- "-$group_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -KILL -- "-$group_pid" 2>/dev/null || true
+  wait "$group_pid" 2>/dev/null || true
+}
 qa_run_command() {
   local command_timeout="$1"
   shift
-  setsid timeout --foreground --signal=TERM --kill-after=10 "$command_timeout" "$@" &
+  setsid timeout --signal=TERM --kill-after=10 "$command_timeout" "$@" &
   qa_command_pid=$!
   local rc=0
   wait "$qa_command_pid" || rc=$?
+  qa_stop_group "$qa_command_pid"
   qa_command_pid=""
   return "$rc"
 }
@@ -74,9 +86,9 @@ cleanup() {
   local original_status=$?
   trap - EXIT INT TERM
   set +e
-  if [[ -n "$qa_command_pid" ]]; then kill -- "-$qa_command_pid" 2>/dev/null; wait "$qa_command_pid" 2>/dev/null; fi
-  if [[ -n "${qa_vite_pid:-}" ]]; then kill -- "-$qa_vite_pid" 2>/dev/null; wait "$qa_vite_pid" 2>/dev/null; fi
-  if [[ -n "${qa_backend_pid:-}" ]]; then kill -- "-$qa_backend_pid" 2>/dev/null; wait "$qa_backend_pid" 2>/dev/null; fi
+  if [[ -n "$qa_command_pid" ]]; then qa_stop_group "$qa_command_pid"; fi
+  if [[ -n "${qa_vite_pid:-}" ]]; then qa_stop_group "$qa_vite_pid"; fi
+  if [[ -n "${qa_backend_pid:-}" ]]; then qa_stop_group "$qa_backend_pid"; fi
   if [[ "$qa_database_created" == 1 ]]; then
     docker exec hris-ui-qa-e2e psql -U e2e -d e2e -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS $qa_database WITH (FORCE)" >/dev/null 2>&1 || {
       echo "QA cleanup failed: could not drop this run's database $qa_database" >&2

@@ -23,11 +23,6 @@ if ! command -v docker >/dev/null; then
     echo 'Docker CLI is unavailable; enable Docker Desktop WSL integration' >&2; exit 2
   fi
 fi
-command -v uv >/dev/null
-command -v pnpm >/dev/null
-command -v setsid >/dev/null
-command -v flock >/dev/null
-command -v timeout >/dev/null
 qa_workers="${E2E_WORKERS:-1}"
 [[ "$qa_workers" =~ ^[1-4]$ ]] || { echo 'E2E_WORKERS must be an integer from 1 to 4' >&2; exit 2; }
 qa_command_timeout="${E2E_COMMAND_TIMEOUT_SECONDS:-600}"
@@ -38,6 +33,11 @@ qa_suite_timeout="${E2E_SUITE_TIMEOUT_SECONDS:-1500}"
 [[ "$qa_suite_timeout" =~ ^[1-9][0-9]*$ ]] && (( qa_suite_timeout <= 2400 )) || {
   echo 'E2E_SUITE_TIMEOUT_SECONDS must be an integer from 1 to 2400' >&2; exit 2;
 }
+command -v uv >/dev/null
+command -v pnpm >/dev/null
+command -v setsid >/dev/null
+command -v flock >/dev/null
+command -v timeout >/dev/null
 exec 9>/tmp/hris-ui-qa-e2e.lock
 flock -n 9 || { echo 'Another isolated QA runner is active' >&2; exit 2; }
 # Own these listener ports; never reuse an unknown backend or frontend.

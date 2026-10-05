@@ -18,7 +18,7 @@ after changes rather than preserving dated baseline claims.
 | Domain packages | 12 | generated docs/MAP.md |
 | Vitest | 121 files / 431 tests passed | scripts/verify.sh |
 | Feature test files | 105 | pathlib inventory excluding screenshot artifacts |
-| Playwright | 66 passed, 34 specs, 0 retries; 408.39 s at 1 worker | isolated local QA DB, 2026-10-05 |
+| Playwright | 66 passed, 34 specs, 0 retries; 392.85 s at 1 worker | isolated local QA DB, 2026-10-05 |
 | TypeScript | 0 errors | scripts/verify.sh |
 | ESLint | 0 errors / 7 warnings, report-only | scripts/verify.sh |
 | Frontend build | passed | scripts/verify.sh |

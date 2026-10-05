@@ -46,3 +46,5 @@ describe('DailyTimeRecordsPage (record count)', () => {
     await expect.element(screen.getByText('42 records')).toBeVisible()
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async (importOriginal) => ({ ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(), useRelationshipLabels: () => ({ data: {} }) }))

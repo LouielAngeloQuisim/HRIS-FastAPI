@@ -43,3 +43,5 @@ describe('EmployeeProjects create 409 duplicate pair (§8.9)', () => {
     await expect.element(getByRole('heading', { name: /Create EmployeeProjects/i })).toBeInTheDocument()
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async (importOriginal) => ({ ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(), useRelationshipLabels: () => ({ data: {} }) }))

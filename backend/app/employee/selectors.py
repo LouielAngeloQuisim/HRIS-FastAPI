@@ -7,9 +7,9 @@ model. All list queries filter ``is_deleted = false`` and return
 """
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
-from sqlmodel import Session, col, func, select
+from sqlmodel import Session, SQLModel, col, func, select
 from sqlmodel.sql.expression import SelectOfScalar
 
 from app.common.types import ModelT
@@ -111,3 +111,26 @@ def count_active_categories_referencing(
     if lot_id is not None:
         statement = statement.where(Category.lot_id == lot_id)
     return session.exec(statement).one()
+
+
+def get_resource_labels(*, session: Session, model: type[ModelT], ids: list[uuid.UUID]) -> dict[str, str]:
+    """Resolve a bounded set of active records in a batch, never one query per row."""
+    from app.employee.models import EmployeeProjects, EmployeeRecords, Project
+
+    rows = session.exec(select(model).where(col(model.id).in_(ids), col(model.is_deleted).is_(False))).all()
+    if model is EmployeeProjects:
+        assignments = [cast(EmployeeProjects, row) for row in rows]
+        employees = get_resource_labels(session=session, model=EmployeeRecords, ids=[row.employee_id for row in assignments])
+        projects = get_resource_labels(session=session, model=Project, ids=[row.project_id for row in assignments])
+        return {str(row.id): f"{employees.get(str(row.employee_id), 'Unavailable employee')} → {projects.get(str(row.project_id), 'Unavailable project')}" for row in assignments}
+    result = {}
+    for row in rows:
+        values = cast(SQLModel, row).model_dump()
+        code = values.get("employee_code") or values.get("code") or values.get("subdivision_code")
+        name = values.get("name") or values.get("title") or values.get("block_name") or values.get("lot_name")
+        if not name:
+            name = " ".join(str(values.get(key) or "") for key in ("first_name", "last_name")).strip()
+        if not name and values.get("lot_num") is not None:
+            name = f"Lot {values['lot_num']}"
+        result[str(row.id)] = " — ".join(str(value) for value in (code, name) if value) or "Unnamed record"
+    return result

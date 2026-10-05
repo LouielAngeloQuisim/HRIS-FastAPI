@@ -27,3 +27,5 @@ describe('DtrAdjustmentForm', () => {
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async (importOriginal) => ({ ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(), useRelationshipLabels: () => ({ data: {} }) }))

@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import col, func, select
 
 from app.common.dependencies import CurrentUser, SessionDep
 from app.rbac.dependencies import require_permission
@@ -27,6 +28,7 @@ from app.rbac.services import (
     get_effective_permissions,
     update_role,
 )
+from app.user.models import User
 
 router = APIRouter(prefix="/rbac", tags=["rbac"])
 
@@ -47,7 +49,8 @@ def read_modules(session: SessionDep) -> Any:
 )
 def read_roles(session: SessionDep) -> Any:
     roles = get_all_roles(session=session)
-    return RolesPublic(data=roles, count=len(roles))
+    counts = dict(session.exec(select(User.role_id, func.count(col(User.id))).where(col(User.role_id).is_not(None)).group_by(col(User.role_id))).all())
+    return RolesPublic(data=[RolePublic.model_validate(role).model_copy(update={"assigned_users": counts.get(role.id, 0)}) for role in roles], count=len(roles))
 
 
 @router.post(
@@ -89,8 +92,8 @@ def read_role_permissions(session: SessionDep, role_id: uuid.UUID) -> Any:
         raise HTTPException(status_code=404, detail="Role not found")
     result: list[str] = []
     for module, perm in get_permissions_for_role(session=session, role_id=db_role.id):
-        for action, col in ACTION_COLUMN.items():
-            if getattr(perm, col, False):
+        for action, column_name in ACTION_COLUMN.items():
+            if getattr(perm, column_name, False):
                 result.append(f"{module.code}.{action.value}")
     return {"permissions": result}
 

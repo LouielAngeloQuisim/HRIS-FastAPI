@@ -158,9 +158,11 @@ def assign_user_role(
     db_user = session.get(User, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
-    role = get_role_by_code(session=session, code=body.role_code)
+    role = get_role_by_code(session=session, code=body.role_code, for_update=True)
     if role is None:
         raise HTTPException(status_code=404, detail="Role not found")
+    if not role.is_active:
+        raise HTTPException(status_code=409, detail="Inactive roles cannot be assigned")
     if role.is_system and not current_user.is_superuser:
         raise HTTPException(
             status_code=403, detail="Cannot assign a system role without superuser rights"

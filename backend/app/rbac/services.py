@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.rbac.models import (
@@ -150,7 +151,14 @@ def _apply_role_permissions(
 
 
 def delete_role(*, session: Session, db_role: Role) -> Role:
-    """Soft delete: deactivate the role; never hard-delete (avoids orphaned users)."""
+    """Deactivate unused custom roles, serializing against role assignment."""
+    locked = session.exec(select(Role).where(Role.id == db_role.id).with_for_update().execution_options(populate_existing=True)).one()
+    if locked.is_system:
+        raise HTTPException(status_code=403, detail="System roles cannot be deactivated")
+    if not locked.is_active:
+        raise HTTPException(status_code=404, detail="Role is already inactive")
+    if session.exec(select(User.id).where(User.role_id == locked.id).limit(1)).first() is not None:
+        raise HTTPException(status_code=409, detail="Assigned roles cannot be deactivated. Reassign their users first.")
     db_role.is_active = False
     session.add(db_role)
     session.commit()

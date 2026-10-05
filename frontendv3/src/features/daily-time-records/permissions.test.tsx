@@ -35,3 +35,5 @@ describe('DailyTimeRecordsPage (permissions)', () => {
     await expect.element(screen.getByText('You do not have permission to view daily time records.')).toBeVisible()
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async (importOriginal) => ({ ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(), useRelationshipLabels: () => ({ data: {} }) }))

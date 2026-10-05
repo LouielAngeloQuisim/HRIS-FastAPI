@@ -9,7 +9,7 @@ declare additional handlers on their router.
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlmodel import SQLModel
 
@@ -24,6 +24,7 @@ from app.employee.selectors import (
     get_attachment_by_id,
     get_attachments_for_employee,
     get_list,
+    get_resource_labels,
 )
 from app.employee.services import (
     create_attachment,
@@ -95,6 +96,10 @@ def _make_crud_router(
     def list_objs(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
         rows, count = get_list(session=session, model=model, skip=skip, limit=limit)
         return listing(data=[public.model_validate(r) for r in rows], count=count)
+
+    @router.get("/labels", response_model=dict[str, str], dependencies=[Depends(require_permission(module, "view"))])
+    def read_labels(session: SessionDep, ids: list[uuid.UUID] = Query(..., min_length=1, max_length=200)) -> dict[str, str]:
+        return get_resource_labels(session=session, model=model, ids=ids)
 
     @router.get(
         "/{obj_id}",

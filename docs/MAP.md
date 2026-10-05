@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
-Generated: 2026-10-04
-Source commit: cac5b8aa5ca656af8fbe37cc531313963830870e
+Generated: 2026-10-05
+Source commit: 4b94aac1539ab4ce558e77e85fc6d42ea8d2a39c
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 228 endpoints in 39 groups
+## Backend routes (`/api/*`): 244 endpoints in 39 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -19,18 +19,20 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `GET /api/v1/audit-log/`  `[perms: audit:view]`
 - `GET /api/v1/audit-log/{log_id}`  `[perms: audit:view]`
 
-### `/api/v1/blocks` (5 routes)
+### `/api/v1/blocks` (6 routes)
 
 - `GET /api/v1/blocks/`  `[perms: projects:view]`
 - `POST /api/v1/blocks/`  `[perms: projects:add]`
+- `GET /api/v1/blocks/labels`  `[perms: projects:view]`
 - `DELETE /api/v1/blocks/{obj_id}`  `[perms: projects:delete]`
 - `GET /api/v1/blocks/{obj_id}`  `[perms: projects:view]`
 - `PATCH /api/v1/blocks/{obj_id}`  `[perms: projects:edit]`
 
-### `/api/v1/categories` (5 routes)
+### `/api/v1/categories` (6 routes)
 
 - `GET /api/v1/categories/`  `[perms: category:view]`
 - `POST /api/v1/categories/`  `[perms: category:add]`
+- `GET /api/v1/categories/labels`  `[perms: category:view]`
 - `DELETE /api/v1/categories/{obj_id}`  `[perms: category:delete]`
 - `GET /api/v1/categories/{obj_id}`  `[perms: category:view]`
 - `PATCH /api/v1/categories/{obj_id}`  `[perms: category:edit]`
@@ -50,18 +52,20 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `GET /api/v1/dashboard/`  `[perms: emp_list:view]`
 
-### `/api/v1/departments` (5 routes)
+### `/api/v1/departments` (6 routes)
 
 - `GET /api/v1/departments/`  `[perms: department:view]`
 - `POST /api/v1/departments/`  `[perms: department:add]`
+- `GET /api/v1/departments/labels`  `[perms: department:view]`
 - `DELETE /api/v1/departments/{obj_id}`  `[perms: department:delete]`
 - `GET /api/v1/departments/{obj_id}`  `[perms: department:view]`
 - `PATCH /api/v1/departments/{obj_id}`  `[perms: department:edit]`
 
-### `/api/v1/divisions` (5 routes)
+### `/api/v1/divisions` (6 routes)
 
 - `GET /api/v1/divisions/`  `[perms: division:view]`
 - `POST /api/v1/divisions/`  `[perms: division:add]`
+- `GET /api/v1/divisions/labels`  `[perms: division:view]`
 - `DELETE /api/v1/divisions/{obj_id}`  `[perms: division:delete]`
 - `GET /api/v1/divisions/{obj_id}`  `[perms: division:view]`
 - `PATCH /api/v1/divisions/{obj_id}`  `[perms: division:edit]`
@@ -74,29 +78,32 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `POST /api/v1/dtr-adjustments/{obj_id}/approve`  `[perms: daily_time_record:edit]`
 - `POST /api/v1/dtr-adjustments/{obj_id}/reject`  `[perms: daily_time_record:edit]`
 
-### `/api/v1/emp-tasks` (7 routes)
+### `/api/v1/emp-tasks` (8 routes)
 
 - `GET /api/v1/emp-tasks/`  `[perms: emp_task:view]`
 - `POST /api/v1/emp-tasks/`  `[perms: emp_task:add]`
+- `GET /api/v1/emp-tasks/labels`  `[perms: emp_task:view]`
 - `DELETE /api/v1/emp-tasks/{obj_id}`  `[perms: emp_task:delete]`
 - `GET /api/v1/emp-tasks/{obj_id}`  `[perms: emp_task:view]`
 - `PATCH /api/v1/emp-tasks/{obj_id}`  `[perms: emp_task:edit]`
 - `POST /api/v1/emp-tasks/{obj_id}/approve`  `[perms: emp_project:edit]`
 - `POST /api/v1/emp-tasks/{obj_id}/deny`  `[perms: emp_project:edit]`
 
-### `/api/v1/employee-projects` (6 routes)
+### `/api/v1/employee-projects` (7 routes)
 
 - `GET /api/v1/employee-projects/`  `[perms: emp_project:view]`
 - `POST /api/v1/employee-projects/`  `[perms: emp_project:add]`
+- `GET /api/v1/employee-projects/labels`  `[perms: emp_project:view]`
 - `DELETE /api/v1/employee-projects/{obj_id}`  `[perms: emp_project:delete]`
 - `GET /api/v1/employee-projects/{obj_id}`  `[perms: emp_project:view]`
 - `PATCH /api/v1/employee-projects/{obj_id}`  `[perms: emp_project:edit]`
 - `POST /api/v1/employee-projects/{obj_id}/unassign`  `[perms: emp_project:edit]`
 
-### `/api/v1/employees` (16 routes)
+### `/api/v1/employees` (17 routes)
 
 - `GET /api/v1/employees/`  `[perms: emp_list:view]`
 - `POST /api/v1/employees/`  `[perms: emp_list:add]`
+- `GET /api/v1/employees/labels`  `[perms: emp_list:view]`
 - `GET /api/v1/employees/me`  `[perms: emp_list:view]`
 - `GET /api/v1/employees/{employee_id}/additional-records`
 - `PATCH /api/v1/employees/{employee_id}/additional-records`
@@ -162,26 +169,29 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/logout`
 
-### `/api/v1/lots` (5 routes)
+### `/api/v1/lots` (6 routes)
 
 - `GET /api/v1/lots/`  `[perms: projects:view]`
 - `POST /api/v1/lots/`  `[perms: projects:add]`
+- `GET /api/v1/lots/labels`  `[perms: projects:view]`
 - `DELETE /api/v1/lots/{obj_id}`  `[perms: projects:delete]`
 - `GET /api/v1/lots/{obj_id}`  `[perms: projects:view]`
 - `PATCH /api/v1/lots/{obj_id}`  `[perms: projects:edit]`
 
-### `/api/v1/model-types` (5 routes)
+### `/api/v1/model-types` (6 routes)
 
 - `GET /api/v1/model-types/`  `[perms: model_types:view]`
 - `POST /api/v1/model-types/`  `[perms: model_types:add]`
+- `GET /api/v1/model-types/labels`  `[perms: model_types:view]`
 - `DELETE /api/v1/model-types/{obj_id}`  `[perms: model_types:delete]`
 - `GET /api/v1/model-types/{obj_id}`  `[perms: model_types:view]`
 - `PATCH /api/v1/model-types/{obj_id}`  `[perms: model_types:edit]`
 
-### `/api/v1/models` (5 routes)
+### `/api/v1/models` (6 routes)
 
 - `GET /api/v1/models/`  `[perms: models:view]`
 - `POST /api/v1/models/`  `[perms: models:add]`
+- `GET /api/v1/models/labels`  `[perms: models:view]`
 - `DELETE /api/v1/models/{obj_id}`  `[perms: models:delete]`
 - `GET /api/v1/models/{obj_id}`  `[perms: models:view]`
 - `PATCH /api/v1/models/{obj_id}`  `[perms: models:edit]`
@@ -200,10 +210,11 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `GET /api/v1/openapi.json`
 
-### `/api/v1/owners` (6 routes)
+### `/api/v1/owners` (7 routes)
 
 - `GET /api/v1/owners/`  `[perms: owner:view]`
 - `POST /api/v1/owners/`  `[perms: owner:add]`
+- `GET /api/v1/owners/labels`  `[perms: owner:view]`
 - `DELETE /api/v1/owners/{obj_id}`  `[perms: owner:delete]`
 - `GET /api/v1/owners/{obj_id}`  `[perms: owner:view]`
 - `PATCH /api/v1/owners/{obj_id}`  `[perms: owner:edit]`
@@ -266,18 +277,20 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `PATCH /api/v1/payroll/sss-brackets/{bracket_id}`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/sss/calculate`
 
-### `/api/v1/phases` (5 routes)
+### `/api/v1/phases` (6 routes)
 
 - `GET /api/v1/phases/`  `[perms: phase:view]`
 - `POST /api/v1/phases/`  `[perms: phase:add]`
+- `GET /api/v1/phases/labels`  `[perms: phase:view]`
 - `DELETE /api/v1/phases/{obj_id}`  `[perms: phase:delete]`
 - `GET /api/v1/phases/{obj_id}`  `[perms: phase:view]`
 - `PATCH /api/v1/phases/{obj_id}`  `[perms: phase:edit]`
 
-### `/api/v1/positions` (5 routes)
+### `/api/v1/positions` (6 routes)
 
 - `GET /api/v1/positions/`  `[perms: emp_settings:view]`
 - `POST /api/v1/positions/`  `[perms: emp_settings:add]`
+- `GET /api/v1/positions/labels`  `[perms: emp_settings:view]`
 - `DELETE /api/v1/positions/{obj_id}`  `[perms: emp_settings:delete]`
 - `GET /api/v1/positions/{obj_id}`  `[perms: emp_settings:view]`
 - `PATCH /api/v1/positions/{obj_id}`  `[perms: emp_settings:edit]`
@@ -286,18 +299,20 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/private/users/`
 
-### `/api/v1/project-types` (5 routes)
+### `/api/v1/project-types` (6 routes)
 
 - `GET /api/v1/project-types/`  `[perms: project_type:view]`
 - `POST /api/v1/project-types/`  `[perms: project_type:add]`
+- `GET /api/v1/project-types/labels`  `[perms: project_type:view]`
 - `DELETE /api/v1/project-types/{obj_id}`  `[perms: project_type:delete]`
 - `GET /api/v1/project-types/{obj_id}`  `[perms: project_type:view]`
 - `PATCH /api/v1/project-types/{obj_id}`  `[perms: project_type:edit]`
 
-### `/api/v1/projects` (5 routes)
+### `/api/v1/projects` (6 routes)
 
 - `GET /api/v1/projects/`  `[perms: projects:view]`
 - `POST /api/v1/projects/`  `[perms: projects:add]`
+- `GET /api/v1/projects/labels`  `[perms: projects:view]`
 - `DELETE /api/v1/projects/{obj_id}`  `[perms: projects:delete]`
 - `GET /api/v1/projects/{obj_id}`  `[perms: projects:view]`
 - `PATCH /api/v1/projects/{obj_id}`  `[perms: projects:edit]`
@@ -332,10 +347,11 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `GET /api/v1/shifts/{obj_id}`  `[perms: shifts:view]`
 - `PATCH /api/v1/shifts/{obj_id}`  `[perms: shifts:edit]`
 
-### `/api/v1/subdivisions` (5 routes)
+### `/api/v1/subdivisions` (6 routes)
 
 - `GET /api/v1/subdivisions/`  `[perms: subdivision:view]`
 - `POST /api/v1/subdivisions/`  `[perms: subdivision:add]`
+- `GET /api/v1/subdivisions/labels`  `[perms: subdivision:view]`
 - `DELETE /api/v1/subdivisions/{obj_id}`  `[perms: subdivision:delete]`
 - `GET /api/v1/subdivisions/{obj_id}`  `[perms: subdivision:view]`
 - `PATCH /api/v1/subdivisions/{obj_id}`  `[perms: subdivision:edit]`
@@ -389,15 +405,15 @@ reliable in the source tree's single-line import style) with plumbing
 - `attendance`: api `none`; flags: test
 - `auth`: api `auth`; flags: form, test
 - `blocks`: api `blocks`, `phases`, `save-error`; flags: route, form, test
-- `categories`: api `blocks`, `categories`, `lots`, `models`, `owners`, `phases`, `projects`, `save-error`; flags: route, form, test
+- `categories`: api `blocks`, `categories`, `lots`, `models`, `owners`, `phases`, `projects`, `relationship-labels`, `save-error`; flags: route, form, test
 - `chats`: api `none`; flags: route
-- `daily-time-records`: api `daily-time-records`, `save-error`; flags: route, form, test
+- `daily-time-records`: api `daily-time-records`, `relationship-labels`, `save-error`; flags: route, form, test
 - `dashboard`: api `none`; flags: test
 - `departments`: api `departments`, `divisions`; flags: route, form, test
 - `divisions`: api `divisions`; flags: route, form, test
-- `dtr-adjustments`: api `daily-time-records`, `dtr-adjustments`, `save-error`; flags: route, form, test
-- `emp-tasks`: api `emp-tasks`, `employee-projects`, `save-error`; flags: route, form, test
-- `employee-projects`: api `employee-projects`, `employees`, `projects`, `save-error`; flags: route, form, test
+- `dtr-adjustments`: api `daily-time-records`, `dtr-adjustments`, `relationship-labels`, `save-error`; flags: route, form, test
+- `emp-tasks`: api `emp-tasks`, `employee-projects`, `relationship-labels`, `save-error`; flags: route, form, test
+- `employee-projects`: api `employee-projects`, `employees`, `projects`, `relationship-labels`, `save-error`; flags: route, form, test
 - `employees`: api `employees`, `save-error`; flags: route, form, test
 - `holidays`: api `holidays`; flags: route, form, test
 - `leave-calendar`: api `employees`, `leave-ledger`; flags: route, test
@@ -415,8 +431,8 @@ reliable in the source tree's single-line import style) with plumbing
 - `phases`: api `phases`, `save-error`, `subdivisions`; flags: route, form, test
 - `positions`: api `departments`, `positions`; flags: route, form, test
 - `project-types`: api `project-types`; flags: route, form
-- `projects`: api `project-types`, `projects`, `subdivisions`; flags: route, form, test
-- `roles`: api `roles`; flags: route, form, test
+- `projects`: api `project-types`, `projects`, `relationship-labels`, `subdivisions`; flags: route, form, test
+- `roles`: api `roles`, `save-error`; flags: route, form, test
 - `salary`: api `employees`, `payroll`, `save-error`; flags: form, test
 - `settings`: api `none`; flags: route, form
 - `shifts`: api `shifts`; flags: route, form

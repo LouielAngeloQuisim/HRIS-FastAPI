@@ -1,3 +1,4 @@
+import { relationshipLabel, useRelationshipLabels } from '@/lib/api/relationship-labels'
 import { api } from '@/lib/api/client'
 import type { CategoryPublic } from '@/lib/api/types'
 import { useState } from 'react'
@@ -20,6 +21,13 @@ export default function CategoryPage() {
   const [editing, setEditing] = useState<CategoryPublic | null>(null)
   const [deleteItem, setDeleteItem] = useState<CategoryPublic | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
+
+  const project_idLabels = useRelationshipLabels('projects', (data?.data ?? []).map(item => item.project_id))
+  const model_idLabels = useRelationshipLabels('models', (data?.data ?? []).map(item => item.model_id))
+  const phase_idLabels = useRelationshipLabels('phases', (data?.data ?? []).map(item => item.phase_id))
+  const blocks_idLabels = useRelationshipLabels('blocks', (data?.data ?? []).map(item => item.blocks_id))
+  const owner_idLabels = useRelationshipLabels('owners', (data?.data ?? []).map(item => item.owner_id))
+  const lot_idLabels = useRelationshipLabels('lots', (data?.data ?? []).map(item => item.lot_id))
 
   if (!canView) {
     return (
@@ -70,12 +78,12 @@ export default function CategoryPage() {
                   <td className="p-2">{item.description ?? "—"}</td>
                   <td className="p-2">{item.location ?? "—"}</td>
                   <td className="p-2">{item.is_overhead == null ? "Not set" : item.is_overhead ? "Yes" : "No"}</td>
-                  <td className="p-2">{item.project_id ?? "—"}</td>
-                  <td className="p-2">{item.model_id ?? "—"}</td>
-                  <td className="p-2">{item.phase_id ?? "—"}</td>
-                  <td className="p-2">{item.blocks_id ?? "—"}</td>
-                  <td className="p-2">{item.owner_id ?? "—"}</td>
-                  <td className="p-2">{item.lot_id ?? "—"}</td>
+                  <td className="p-2">{relationshipLabel(project_idLabels.data, item.project_id)}</td>
+                  <td className="p-2">{relationshipLabel(model_idLabels.data, item.model_id)}</td>
+                  <td className="p-2">{relationshipLabel(phase_idLabels.data, item.phase_id)}</td>
+                  <td className="p-2">{relationshipLabel(blocks_idLabels.data, item.blocks_id)}</td>
+                  <td className="p-2">{relationshipLabel(owner_idLabels.data, item.owner_id)}</td>
+                  <td className="p-2">{relationshipLabel(lot_idLabels.data, item.lot_id)}</td>
                   <td className="p-2 text-right">
                      {canEdit && <Button variant="ghost" size="sm" onClick={() => { setEditing(item); setOpen(true) }} data-testid={`edit-category-button-${item.id}`}>Edit</Button>}
                      {canDelete && <Button variant="ghost" size="sm" onClick={() => { setDeleteItem(item); setDeleteOpen(true) }} className="text-destructive" data-testid={`delete-category-button-${item.id}`}>Delete</Button>}

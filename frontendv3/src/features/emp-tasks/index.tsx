@@ -1,3 +1,4 @@
+import { relationshipLabel, useRelationshipLabels } from '@/lib/api/relationship-labels'
 import { api } from '@/lib/api/client'
 import type { EmpTaskPublic } from '@/lib/api/types'
 import { useState } from 'react'
@@ -20,6 +21,8 @@ export default function EmpTaskPage() {
   const [editing, setEditing] = useState<EmpTaskPublic | null>(null)
   const [deleteItem, setDeleteItem] = useState<EmpTaskPublic | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
+
+  const emp_project_idLabels = useRelationshipLabels('employee-projects', (data?.data ?? []).map(item => item.emp_project_id))
 
   if (!canView) {
     return (
@@ -63,7 +66,7 @@ export default function EmpTaskPage() {
             <tbody>
               {data.data.map((item) => (
                 <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
-                  <td className="p-2">{item.emp_project_id ?? "—"}</td>
+                  <td className="p-2">{relationshipLabel(emp_project_idLabels.data, item.emp_project_id)}</td>
                   <td className="p-2">{item.task_desc ?? "—"}</td>
                   <td className="p-2">{item.rendered_hours ?? "—"}</td>
                   <td className="p-2">{item.assigned_hours ?? "—"}</td>

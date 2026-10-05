@@ -45,3 +45,5 @@ describe('DailyTimeRecordsPage (header)', () => {
     await expect.element(screen.getByRole('heading', { name: 'Daily Time Records' })).toBeVisible()
   })
 })
+
+vi.mock('@/lib/api/relationship-labels', async (importOriginal) => ({ ...await importOriginal<typeof import('@/lib/api/relationship-labels')>(), useRelationshipLabels: () => ({ data: {} }) }))

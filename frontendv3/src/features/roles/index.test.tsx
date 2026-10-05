@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-react'
 import RolesPage from './index'
 
@@ -9,9 +10,10 @@ vi.mock('./components/permission-matrix', () => ({
   PermissionMatrix: () => null,
 }))
 
-const { useRolesMock } = vi.hoisted(() => ({ useRolesMock: vi.fn() }))
+const { useRolesMock, deleteMock } = vi.hoisted(() => ({ useRolesMock: vi.fn(), deleteMock: vi.fn() }))
 vi.mock('@/lib/api/roles', () => ({
   useRoles: (...args: unknown[]) => useRolesMock(...args),
+  useDeleteRole: () => ({ mutateAsync: deleteMock, isPending: false }),
 }))
 
 const { useCanMock } = vi.hoisted(() => ({ useCanMock: vi.fn() }))
@@ -89,4 +91,29 @@ describe('RolesPage', () => {
       .element(getByText(/You do not have permission to view roles/i))
       .toBeVisible()
   })
+  it('deactivates only unused custom roles through confirmation', async () => {
+    useRolesMock.mockReturnValue({ data: ROLES, isPending: false, isError: false, refetch: vi.fn() })
+    useCanMock.mockReturnValue(true)
+    deleteMock.mockResolvedValue({})
+    const screen = await render(<RolesPage />)
+    await expect.element(screen.getByTestId('deactivate-role-button-r1')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('deactivate-role-button-r4'))
+    await userEvent.click(screen.getByTestId('confirm-delete-button'))
+    await vi.waitFor(() => expect(deleteMock).toHaveBeenCalledWith('r4'))
+  })
+
+  it('protects assigned roles in the UI', async () => {
+    useRolesMock.mockReturnValue({ data: { ...ROLES, data: ROLES.data.map(role => ({ ...role, assigned_users: 1 })) }, isPending: false, isError: false, refetch: vi.fn() })
+    useCanMock.mockReturnValue(true)
+    const screen = await render(<RolesPage />)
+    await expect.element(screen.getByTestId('deactivate-role-button-r4')).toBeDisabled()
+  })
+
+  it('hides role deactivation from a view-only caller', async () => {
+    useRolesMock.mockReturnValue({ data: ROLES, isPending: false, isError: false, refetch: vi.fn() })
+    useCanMock.mockImplementation((_module: string, action: string) => action === 'view')
+    const screen = await render(<RolesPage />)
+    await expect.element(screen.getByTestId('deactivate-role-button-r4')).not.toBeInTheDocument()
+  })
+
 })

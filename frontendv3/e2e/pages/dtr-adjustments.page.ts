@@ -34,9 +34,9 @@ export class DtrAdjustmentsPage {
     await this.newButton.click()
   }
 
-  async fillDtrId(id: string) {
+  async selectDtrEmployee(code: string) {
     await this.dtrIdInput.click()
-    await this.page.getByRole('option').filter({ hasText: id.slice(0, 8) }).click()
+    await this.page.getByRole('option').filter({ hasText: code }).click()
   }
 
   async fillAdjustedLogin(date: string) {

@@ -6,5 +6,5 @@ test('projects preserves associations through create, edit and delete', async ({
   await loginAsAdmin()
   const unique = Date.now().toString(36)
   const parent = await subdivision(page, unique); const type = await createParent(page, 'project-types', { code: 'T' + unique, name: 'Type ' + unique })
-  await crudJourney(page, { route: 'projects', prefix: 'project', fields: { code: unique, name: 'Project ' + unique }, editField: 'name', editValue: 'Updated ' + unique, expected: { subdivision_id: parent.id, project_type_id: type.id }, prepare: async () => { await selectLabel(page, 'project-subdivision-select', parent.name); await selectLabel(page, 'project-type-select', type.name) } })
+  await crudJourney(page, { route: 'projects', prefix: 'project', fields: { code: unique, name: 'Project ' + unique }, editField: 'name', editValue: 'Updated ' + unique, expectedLabels: [parent.name, type.name], expected: { subdivision_id: parent.id, project_type_id: type.id }, prepare: async () => { await selectLabel(page, 'project-subdivision-select', parent.name); await selectLabel(page, 'project-type-select', type.name) } })
 })

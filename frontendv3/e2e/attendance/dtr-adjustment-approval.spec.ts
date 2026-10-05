@@ -25,12 +25,10 @@ async function getJson(page: import('@playwright/test').Page, path: string) {
   return res.json()
 }
 
-async function createAdjustmentThroughUi(page: import('@playwright/test').Page, employeeId: string, dtrId: string, adjustedLogout: string) {
+async function createAdjustmentThroughUi(page: import('@playwright/test').Page, employeeCode: string, dtrId: string, adjustedLogout: string) {
   await page.getByTestId('new-dtr-adjustment-button').click()
   await page.getByTestId('dtr-adjustment-dtr-select').click()
-  // Options are labeled `<employee_id8> - <login_date>` — filter by the
-  // employee prefix narrowed further by the created DTR's row (unique per test).
-  await page.getByRole('option').filter({ hasText: employeeId.slice(0, 8) }).first().click()
+  await page.getByRole('option').filter({ hasText: employeeCode }).click()
   await page.getByTestId('dtr-adjustment-date-input').fill('2026-09-15')
   await page.getByTestId('dtr-adjustment-login-input').fill('2026-09-15T08:00')
   await page.getByTestId('dtr-adjustment-logout-input').fill(adjustedLogout)
@@ -42,6 +40,7 @@ async function createAdjustmentThroughUi(page: import('@playwright/test').Page, 
   const res = await created
   expect(res.status()).toBe(201)
   const body = await res.json()
+  expect((body.data || body).daily_time_record_id).toBe(dtrId)
   return body.data || body
 }
 
@@ -57,7 +56,7 @@ test.describe('DTR adjustment approval E2E (QA-03)', () => {
 
     const adjustment = await page.goto('/dtr-adjustments').then(async () => {
       await expect(page.getByTestId('new-dtr-adjustment-button')).toBeVisible()
-      return createAdjustmentThroughUi(page, employee.id, dtr.id, '2026-09-15T16:30')
+      return createAdjustmentThroughUi(page, employee.employee_code, dtr.id, '2026-09-15T16:30')
     })
     expect(adjustment.status).toBe('PENDING')
 
@@ -89,7 +88,7 @@ test.describe('DTR adjustment approval E2E (QA-03)', () => {
 
     await page.goto('/dtr-adjustments')
     await expect(page.getByTestId('new-dtr-adjustment-button')).toBeVisible()
-    const adjustment = await createAdjustmentThroughUi(page, employee.id, dtr.id, '2026-09-15T18:00')
+    const adjustment = await createAdjustmentThroughUi(page, employee.employee_code, dtr.id, '2026-09-15T18:00')
 
     await page.getByTestId(`reject-dtr-adjustment-button-${adjustment.id}`).click()
     await expect(page.getByTestId(`reject-dtr-adjustment-button-${adjustment.id}`)).toHaveCount(0, { timeout: 10000 })

@@ -34,7 +34,9 @@ bash scripts/run-e2e-qa.sh payroll                  # domain filter
 bash scripts/run-e2e-qa.sh system/roles.spec.ts
 ```
 
-The runner accepts existing paths relative to `frontendv3/e2e` or domain filters. It requires Docker, `uv`, `pnpm`, `setsid`, `flock`, Python and `curl`; Docker must already be running. It uses a disposable database and loopback services, runs serially with zero retries, and prints the path to server logs. It guards owned ports and prevents concurrent local QA runs. Do not override URLs toward production.
+The runner accepts existing paths relative to `frontendv3/e2e` or domain filters. It requires Docker, `uv`, `pnpm`, `setsid`, `flock`, `timeout`, Python and `curl`; Docker must already be running. It uses a per-run database on loopback, runs with one worker and zero retries by default, and prints its worker/retry settings plus server-log path. Set `E2E_WORKERS=2` or higher on a host with measured spare capacity; accepted values are 1–4. Startup/seed commands and the suite have bounded timeouts; their defaults are 600 and 1,500 seconds, configurable with `E2E_COMMAND_TIMEOUT_SECONDS` (max 900) and `E2E_SUITE_TIMEOUT_SECONDS` (max 2,400). The runner guards owned ports and prevents concurrent local QA runs. Do not override URLs toward production.
+
+Playwright reports and attachments are written under a unique `frontendv3/test-results/e2e-<run-id>/` directory. The runner generates a unique ID for each local run; CI uses its run and attempt IDs. The runner drops only the database it created and restores the reused QA container to its prior running/stopped state.
 
 On hosts missing Chromium shared libraries, run `bash frontendv3/scripts/setup-playwright-libs.sh` once. The browser-mode Vitest gate sets `LD_LIBRARY_PATH` itself; when running Vitest directly, use:
 

@@ -1,52 +1,44 @@
 # Test and runner audit
 
-Audit baseline: clean `codex/testing-policy-audit` worktree at `origin/main` SHA `4f2eece1f5f0eec8a36ddd65b709fcdf7fcc4336` (2026-10-05). The primary checkout had unrelated untracked files; they were preserved. No functional test or runner changes were made in this audit. Counts in old docs/STATUS snapshots were treated as historical, not re-verified here.
+Audit continued on PR #81's `codex/testing-policy-audit` branch, based on its actual head `514de7592ae711005461f1f78a3a09211c5410e5` (2026-10-05). The main checkout's untracked files were preserved. Counts in previous snapshots were treated as historical and refreshed only after the final gate.
 
-## Findings ranked by impact
+## Findings and changes, ranked by impact
 
-### High: E2E seed failures are swallowed and cleanup can look successful
+### High: dormant E2E seed lifecycle could hide setup/cleanup failures
 
-- `frontendv3/e2e/global-setup.ts:74-96` catches seed exceptions, logs them and returns successfully. Seed helpers at `:15-71` also accept failed POST responses and continue with partial/empty IDs. Tests can therefore run with missing prerequisites and fail later misleadingly or pass without intended data.
-- `frontendv3/e2e/global-teardown.ts:14-43` ignores failed deletes and state-file parse errors, then reports cleanup complete. This hides leaked seed records. The state is a fixed `e2e/.e2e-seed-state.json`, creating a collision risk for concurrent invocations sharing a checkout.
-- Recommendation: separately plan a small fixture/runner fix: fail setup on unexpected non-success responses; make cleanup failures visible; store state per run or remove cross-run state. Add focused regression coverage and exercise failure/interruption cleanup before changing behavior.
-- Measurement limit: code inspection only; no parallel runs or injected seed/cleanup failures were performed.
+`frontendv3/playwright.config.ts` did not register `e2e/global-setup.ts` or `global-teardown.ts`; the configured suite instead seeds the regular account through `backend/scripts/seed_e2e.py` and creates domain state in specs/helpers. The global hooks and `fixtures/api.fixture.ts` were dead code: no configured hook/import/fixture consumers. Removed those uncalled files and fixture exports. No browser tests or assertions were removed; authentication, domain setup and persisted readback remain in the active path.
 
-### High: Local and hosted E2E execute different retry/worker policies
+The active user seed previously allowed setup errors to propagate without clear dependency context. It now fails with an actionable seed error and a regression test injects a create-user failure. The local runner checks database readiness and expected placeholder container configuration, bounds setup and suite commands, records per-run result paths, and reports database/container cleanup failures instead of swallowing them. Fault-injection tests cover setup failure, cleanup failure, a pre-existing running container and SIGTERM during setup. Only the randomly named database created by this runner is dropped; a shared container is stopped only if it was stopped before this run.
 
-- `frontendv3/playwright.config.ts:9-12` sets CI retries to 2 and workers to 1; local defaults to zero retries and Playwright's default worker count. `scripts/run-e2e-qa.sh:98` explicitly uses one worker and zero retries. A green hosted run can conceal first-attempt failures that the local runner exposes, and its elapsed time is not directly comparable to local QA.
-- Recommendation: keep retry policy diagnostic (retain first-attempt evidence), report flaky/retried outcomes distinctly, and benchmark worker counts on isolated disposable databases before changing concurrency. Consider using one retry policy for release evidence only after the suite is measured.
-- Measurement limit: no current timing artifacts found. Runtime and contention impact is a hypothesis; no wall-time/resource benchmark was run.
+### High: browser outputs and worker/retry policy were shared or inconsistent
 
-### Medium: Historical frontend strategy conflicts with current policy and implementation
+Playwright previously wrote fixed report/state paths and enabled two hosted retries while local QA used zero. Reports/artifacts now use a validated run-specific directory; local and hosted runs use zero retries and a stable run ID. Local workers are configurable (1–4), with a default of **1** on this 4-vCPU, 3.83-GiB WSL host. CI uses 2 workers on its hosted runner. This avoids forcing parallel browser pressure on constrained developer machines while allowing the larger CI host to use measured parallelism.
 
-- The previous `frontendv3/docs/testing-strategy.md` prescribed identical per-feature test filenames, minimum test/spec counts and a 90% coverage gate, and showed stale auth/setup examples. Those prescriptions conflict with current code and the risk-based requirement. It has been replaced with a reference to the policy and runbook.
-- Recommendation: select cases by behavior and risk; preserve layered checks where each catches a distinct boundary (for example Vitest request/state behavior plus E2E persisted readback), and avoid rote file matrices.
-- Evidence: source document contained literal lists and historical targets; current actual suites contain 58 backend Python test files, 121 frontend source test files and 68 E2E TypeScript files in this checkout. Counts are inventory only, not quality metrics.
+### Medium: unused test scaffolding increased setup surface
 
-### Medium: Repeated E2E CRUD scaffolding offers a consolidation opportunity, but not a deletion case
+Removed only the unregistered global hooks and unused API fixture. No pytest, Vitest or Playwright behavioral test was consolidated or deleted: similar CRUD flows protect distinct domain associations, permissions, UI behavior or persisted state. Backend authorization/concurrency checks, Vitest frontend behavior checks and Playwright integrated journeys remain complementary layers. Existing payroll lost-response/idempotency, attendance isolation, money/date and role-protection cases remain in place. This audit did not establish exhaustive boundary coverage across every domain; add cases when a concrete risk or gap is identified.
 
-- Many domain specs and page objects repeat create/edit/delete flows (`frontendv3/e2e/organization/*.spec.ts`, `projects/*.spec.ts`, `hris/*.spec.ts`; page objects under `e2e/pages/`). Some validate distinct relationship chains, persistence and UI affordances, so identical-looking CRUD coverage may protect different contracts.
-- Recommendation: during future changes, extract only stable repeated mechanics (e.g. parent creation) when duplication causes measurable maintenance cost; retain assertions for each domain's unique associations, authorization and persistence. Do not mass-delete similar tests based on shape alone.
-- Measurement limit: static review; no mutation testing, assertion effectiveness study or test runtime attribution was performed.
+### Medium: runner failure and resource behavior lacked direct regression evidence
 
-### Medium: The verification script may be expensive, but no timing evidence justifies optimization
+Added fake-tool fault injection for setup, cleanup and interruption paths plus invalid worker/timeout configuration. The local full browser run is serialized by a lock and uses a unique throwaway database. E2E contains no arbitrary fixed sleeps in the reviewed paths; fixed assertion timeouts wait for observable UI conditions. Existing Vitest timer waits cover explicit delayed behavior. Shared session-scoped pytest database setup remains intentional for that suite.
 
-- `scripts/verify.sh:125-...` provisions disposable PostgreSQL, installs/synchronizes backend and frontend dependencies, and runs Ruff, mypy, Alembic, full pytest, TypeScript, ESLint, full browser-mode Vitest, map drift and build. This broad gate is appropriate for final evidence but costly for every edit. Local iterations can use focused runners as the policy now directs.
-- `scripts/verify.sh:...` can skip DB-dependent checks when Docker is unavailable, while exiting according to its accumulated gates; the summary must be read to distinguish a full pass from skipped backend work. E2E is separate by design (`docs/STATUS.md` historical note; `.github/workflows/e2e.yml`).
-- Recommendation: if run time becomes a demonstrated bottleneck, collect per-section timings and resource usage from representative clean and warm runs before changing caching, job parallelism or gate boundaries. Preserve full PR coverage.
-- Measurement limit: no logs or runner timing reports were present in the checkout. Host CPU/RAM, Docker configuration, dependency cache state and suite timings were not recorded, so runtime/resource conclusions are unmeasured.
+## Measurements
 
-## Coverage and isolation review
+Host during measurement: WSL, 4 CPUs, 3.83 GiB Docker/guest memory, 2 GiB swap; Python host 3.12.3 (uv runtime Python 3.14.6), Node 24.18.0, pnpm 11.17.0, Docker 28.3.3. E2E used isolated local PostgreSQL 18, Chromium, 66 tests / 34 specs, retries 0. GNU `time` max RSS is process-level and is not an aggregate for the process tree.
 
-- Useful overlap is present where layers answer different questions: backend/API authorization and concurrency tests prove server enforcement; Vitest checks UI permission and request/state behavior; Playwright checks critical integrated paths and persisted readback. Do not count these as redundant unless they assert the same behavior at the same boundary.
-- Existing focused files cover high-risk areas such as payroll generation lost-response recovery (`frontendv3/e2e/payroll/configuration-workflows.spec.ts:47`), attendance import idempotency and account isolation, and frontend import retry/resume. Their presence does not establish full boundary coverage for all money/date/null/deleted-record cases; audit those per change and domain risk.
-- Local E2E runner has loopback URL guards, unique disposable DB creation, port ownership checks, a lock, zero retries, and cleanup that drops its run DB and restores container state (`scripts/run-e2e-qa.sh`). CI uses a disposable Postgres service and placeholder variables (`.github/workflows/e2e.yml`).
-- Playwright selectors include semantic roles and test IDs; arbitrary fixed sleeps were not identified in the searched E2E/config paths. Some helpers use fixed visibility timeouts, which are bounded assertions rather than sleeps.
-- A fixed setup state file and swallowed errors remain the concrete E2E isolation/reliability risks above. Local runner cleanup is trapped for normal shell exit/signals, but hard termination/power loss is inherently outside shell cleanup guarantees.
+| Workload | Workers | Playwright time | Runner wall | Peak process RSS | Minimum available memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Payroll slice, 7 tests (before) | 1 | 55.7 s | 73.78 s | 326,196 KiB | not sampled |
+| Payroll slice, 7 tests (after) | 2 | 48.5 s | 61.50 s | 314,800 KiB | not sampled |
+| Full E2E repeat, current runner | 1 | 6.6 min | 408.39 s | 388,948 KiB | 1.32 GiB |
+| Full E2E repeat, current runner | 2 | 4.6 min | 289.95 s | 357,720 KiB | 0.68 GiB |
 
-## Prioritized backlog
+The comparable payroll slice improved ~13% in browser time and ~17% wall time at two workers. The full 2-worker run was 289.95s (66 passed in 4.6m), while the finished 1-worker run was 408.39s (66 passed in 6.6m): about 29% less wall time at two workers. During those runs, available memory reached 0.68 GiB at two workers and 1.32 GiB at one worker; swap use during the two-worker run rose from 282 to 381 MiB. On this 3.83-GiB WSL host that resource pressure outweighs local speed benefit, so local default is one worker; two remains opt-in, and CI uses two. The earlier full 1-worker timing is historical and lacked resource sampling; this current 1-worker measurement is the comparable finished candidate.
 
-1. Harden E2E global setup/teardown failure reporting and per-run state ownership; add fault-injection tests and interruption cleanup evidence.
-2. Record CI and local section-level timing plus CPU/memory/Docker conditions over a small representative set; only then assess cache, worker, or fixture optimizations.
-3. Review test quality by risk area (permissions, persistence, time zones, monetary rounding, null/empty, inactive/deleted, retry/idempotency/concurrency) as domain changes occur; add targeted cases only for demonstrated gaps.
-4. Consider focused deduplication of repeated E2E setup mechanics where maintenance cost is demonstrated, preserving domain-specific contracts.
+Both full E2E runs succeeded: 66 passed each, 0 retries (2 workers: 4.6m; 1 worker: 6.6m), exit 0. After each run the container was stopped as it had been before the run, and that run’s database was dropped. The final candidate was validated at the local default of one worker. The interrupted-run fault injection verified setup process termination and owned-database cleanup. Hard power loss/SIGKILL cannot be cleaned up by shell traps and remains a limitation.
+
+## Remaining risks and prioritized backlog
+
+1. Capture aggregate process-tree memory and comparable CI timing when a meaningful runner/configuration decision arises; current local sample showed pressure at two workers.
+2. Continue risk-based review of money precision, timezone boundaries, null/empty, inactive/deleted records, retries and concurrency when changing those domains; this audit did not perform mutation testing or prove exhaustive coverage.
+3. Consider further setup consolidation only when repeated mechanics create demonstrated maintenance or runtime cost. Do not remove tests based on name/count similarity.

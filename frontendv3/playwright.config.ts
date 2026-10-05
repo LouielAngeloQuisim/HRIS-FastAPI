@@ -3,17 +3,31 @@
  */
 
 import { defineConfig, devices } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
+import * as path from 'node:path'
+
+const runId = process.env.E2E_RUN_ID || `${Date.now()}-${process.pid}-${randomUUID().slice(0, 8)}`
+if (!/^[a-zA-Z0-9_-]+$/.test(runId)) {
+  throw new Error('E2E_RUN_ID may contain only letters, numbers, _ and -')
+}
+const workerCount = Number(process.env.E2E_WORKERS || 1)
+if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > 4) {
+  throw new Error('E2E_WORKERS must be an integer from 1 to 4')
+}
+const runArtifacts = path.join(process.cwd(), 'test-results', `e2e-${runId}`)
 
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  retries: 0,
+  workers: workerCount,
   reporter: [
-    ['html', { outputFolder: 'playwright-report' }],
-    ['json', { outputFile: 'test-results.json' }],
+    ['line'],
+    ['html', { outputFolder: path.join(runArtifacts, 'html') }],
+    ['json', { outputFile: path.join(runArtifacts, 'results.json') }],
   ],
+  outputDir: path.join(runArtifacts, 'artifacts'),
   use: {
     baseURL: process.env.E2E_BASE_URL || 'http://localhost:5173',
     trace: 'retain-on-failure',

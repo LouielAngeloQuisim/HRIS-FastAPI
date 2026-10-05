@@ -39,12 +39,12 @@ export function useSSSBracket(id: string | undefined) {
 
 export function useCreateSSSBracket() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: (data: SSSBracketCreate) => api.post(`${API}/payroll/sss-brackets/`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
+  return useMutation({ onError: () => {}, mutationFn: (data: SSSBracketCreate) => api.post(`${API}/payroll/sss-brackets/`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
 }
 
 export function useUpdateSSSBracket() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: ({ id, data }: { id: string; data: SSSBracketUpdate }) => api.patch(`${API}/payroll/sss-brackets/${id}`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
+  return useMutation({ onError: () => {}, mutationFn: ({ id, data }: { id: string; data: SSSBracketUpdate }) => api.patch(`${API}/payroll/sss-brackets/${id}`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
 }
 
 export function useDeleteSSSBracket() {
@@ -70,12 +70,12 @@ export function usePhilHealthBracket(id: string | undefined) {
 
 export function useCreatePhilHealthBracket() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: (data: PhilHealthBracketCreate) => api.post(`${API}/payroll/philhealth-brackets/`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
+  return useMutation({ onError: () => {}, mutationFn: (data: PhilHealthBracketCreate) => api.post(`${API}/payroll/philhealth-brackets/`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
 }
 
 export function useUpdatePhilHealthBracket() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: ({ id, data }: { id: string; data: PhilHealthBracketUpdate }) => api.patch(`${API}/payroll/philhealth-brackets/${id}`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
+  return useMutation({ onError: () => {}, mutationFn: ({ id, data }: { id: string; data: PhilHealthBracketUpdate }) => api.patch(`${API}/payroll/philhealth-brackets/${id}`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
 }
 
 export function useDeletePhilHealthBracket() {
@@ -101,12 +101,12 @@ export function usePagIBIGBracket(id: string | undefined) {
 
 export function useCreatePagIBIGBracket() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: (data: PagIBIGBracketCreate) => api.post(`${API}/payroll/pagibig-brackets/`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
+  return useMutation({ onError: () => {}, mutationFn: (data: PagIBIGBracketCreate) => api.post(`${API}/payroll/pagibig-brackets/`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
 }
 
 export function useUpdatePagIBIGBracket() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: ({ id, data }: { id: string; data: PagIBIGBracketUpdate }) => api.patch(`${API}/payroll/pagibig-brackets/${id}`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
+  return useMutation({ onError: () => {}, mutationFn: ({ id, data }: { id: string; data: PagIBIGBracketUpdate }) => api.patch(`${API}/payroll/pagibig-brackets/${id}`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
 }
 
 export function useDeletePagIBIGBracket() {
@@ -132,12 +132,12 @@ export function useBIRBracket(id: string | undefined) {
 
 export function useCreateBIRBracket() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: (data: BIRBracketCreate) => api.post(`${API}/payroll/bir-brackets/`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
+  return useMutation({ onError: () => {}, mutationFn: (data: BIRBracketCreate) => api.post(`${API}/payroll/bir-brackets/`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
 }
 
 export function useUpdateBIRBracket() {
   const qc = useQueryClient()
-  return useMutation({ mutationFn: ({ id, data }: { id: string; data: BIRBracketUpdate }) => api.patch(`${API}/payroll/bir-brackets/${id}`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
+  return useMutation({ onError: () => {}, mutationFn: ({ id, data }: { id: string; data: BIRBracketUpdate }) => api.patch(`${API}/payroll/bir-brackets/${id}`, data).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-config'] }) })
 }
 
 export function useDeleteBIRBracket() {

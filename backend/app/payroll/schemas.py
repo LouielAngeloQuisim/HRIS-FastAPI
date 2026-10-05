@@ -362,7 +362,7 @@ class PayrollPreviewRequest(SQLModel):
 
 
 class PayrollGenerateRequest(PayrollPreviewRequest):
-    pass
+    request_id: uuid.UUID
 
 
 class PayrollPreviewResponse(SQLModel):

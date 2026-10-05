@@ -1,3 +1,4 @@
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -65,6 +66,7 @@ export function PhilHealthResourceForm({ item, onClose, open }: Props) {
   })
 
   const onSubmit = async (data: FormData) => {
+    form.clearErrors('root.server')
     try {
       if (item) {
         await updateMutation.mutateAsync({ id: item.id, data })
@@ -72,8 +74,8 @@ export function PhilHealthResourceForm({ item, onClose, open }: Props) {
         await createMutation.mutateAsync(data)
       }
       onClose()
-    } catch {
-      // error handled by mutation
+    } catch (error) {
+      form.setError('root.server', { message: saveErrorMessage(error) })
     }
   }
 
@@ -88,6 +90,7 @@ export function PhilHealthResourceForm({ item, onClose, open }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4 px-4 py-4'>
+            {form.formState.errors.root?.server?.message && <p role='alert'>{form.formState.errors.root.server.message}</p>}
             <FormField
               control={form.control}
               name='salary_min'

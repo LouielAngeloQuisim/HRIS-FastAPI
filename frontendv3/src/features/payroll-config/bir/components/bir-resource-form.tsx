@@ -1,3 +1,4 @@
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -26,10 +27,10 @@ import type { BIRBracketPublic } from '@/lib/api/types'
 const formSchema = z.object({
   period: z.enum(['daily', 'weekly', 'semi_monthly', 'monthly']),
   bracket_min: z.coerce.number<number>().min(0),
-  bracket_max: z.coerce.number<number>().min(0),
+  bracket_max: z.coerce.number<number>().min(0).nullable(),
   base_tax: z.coerce.number<number>().min(0),
   excess_rate: z.coerce.number<number>().min(0).max(100),
-  effective_date: z.string().min(1),
+  effective_date: z.string().min(1, 'Select an effective date.'),
 })
 type FormData = z.infer<typeof formSchema>
 
@@ -49,7 +50,7 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
       ? {
           period: item.period as FormData['period'],
           bracket_min: Number(item.bracket_min),
-          bracket_max: Number(item.bracket_max),
+          bracket_max: item.bracket_max === null ? null : Number(item.bracket_max),
           base_tax: Number(item.base_tax),
           excess_rate: Number(item.excess_rate),
           effective_date: item.effective_date,
@@ -57,7 +58,7 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
       : {
           period: 'monthly',
           bracket_min: 0,
-          bracket_max: 0,
+          bracket_max: null,
           base_tax: 0,
           excess_rate: 0,
           effective_date: '',
@@ -65,6 +66,7 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
   })
 
   const onSubmit = async (data: FormData) => {
+    form.clearErrors('root.server')
     try {
       if (item) {
         await updateMutation.mutateAsync({ id: item.id, data })
@@ -72,8 +74,8 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
         await createMutation.mutateAsync(data)
       }
       onClose()
-    } catch {
-      // error handled by mutation
+    } catch (error) {
+      form.setError('root.server', { message: saveErrorMessage(error) })
     }
   }
 
@@ -88,6 +90,7 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4 px-4 py-4'>
+            {form.formState.errors.root?.server?.message && <p role='alert'>{form.formState.errors.root.server.message}</p>}
             <FormField
               control={form.control}
               name='period'
@@ -95,7 +98,12 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
                 <FormItem>
                   <FormLabel>Period</FormLabel>
                   <FormControl>
-                    <Input {...field} data-testid="bir-period-input" />
+                    <select {...field} data-testid="bir-period-input" className='h-9 w-full rounded-md border bg-background px-3'>
+                      <option value='daily'>Daily</option>
+                      <option value='weekly'>Weekly</option>
+                      <option value='semi_monthly'>Semi-monthly</option>
+                      <option value='monthly'>Monthly</option>
+                    </select>
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -119,9 +127,9 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
               name='bracket_max'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Bracket Max (₱)</FormLabel>
+                  <FormLabel>Bracket Max (₱, optional)</FormLabel>
                   <FormControl>
-                    <Input type='number' step='0.01' {...field} data-testid={`bir-${field.name}-input`} />
+                    <Input type='number' step='0.01' {...field} value={field.value ?? ''} onChange={(event) => field.onChange(event.target.value === '' ? null : Number(event.target.value))} placeholder='No upper limit' data-testid={`bir-${field.name}-input`} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

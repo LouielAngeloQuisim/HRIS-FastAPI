@@ -28,7 +28,7 @@ def _effective_date(value: str | None) -> date:
 def _get_effective_bracket(session: Session, model: type[T], as_of: date) -> T | None:
     stmt = (
         select(model)
-        .where(model.effective_date <= as_of, model.is_deleted.is_(False))
+        .where(model.effective_date <= as_of, model.is_deleted.is_(False), model.is_active.is_(True))
         .order_by(model.effective_date.desc())
     )
     return session.exec(stmt).first()
@@ -139,6 +139,7 @@ def calculate_bir_tax(
             BIRBracket.period == period_type,
             BIRBracket.effective_date <= as_of,
             BIRBracket.is_deleted.is_(False),  # type: ignore[attr-defined]
+            BIRBracket.is_active.is_(True),  # type: ignore[attr-defined]
         )
         .order_by(BIRBracket.bracket_min)  # type: ignore[arg-type]
     )

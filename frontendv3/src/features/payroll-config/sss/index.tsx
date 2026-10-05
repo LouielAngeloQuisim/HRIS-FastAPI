@@ -76,11 +76,11 @@ export default function SSSConfigPage() {
                 <tr key={item.id} className='border-b last:border-0 hover:bg-muted/50'>
                   <td className='p-2'>{Number(item.msc_min).toLocaleString()}</td>
                   <td className='p-2'>{Number(item.msc_max).toLocaleString()}</td>
-                  <td className='p-2'>{item.employer_ss}%</td>
+                  <td className='p-2'>₱{Number(item.employer_ss).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td className='p-2'>₱{Number(item.employer_ec).toLocaleString()}</td>
-                  <td className='p-2'>{item.employer_mpf}%</td>
-                  <td className='p-2'>{item.employee_ss}%</td>
-                  <td className='p-2'>{item.employee_mpf}%</td>
+                  <td className='p-2'>₱{Number(item.employer_mpf).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className='p-2'>₱{Number(item.employee_ss).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className='p-2'>₱{Number(item.employee_mpf).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td className='p-2'>{item.effective_date}</td>
                   <td className='p-2 text-right'>
                     {canEdit && (

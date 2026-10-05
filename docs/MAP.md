@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
-Generated: 2026-10-03
-Source commit: be66143665418dea6e5ef3fbddc77e6124d577d3
+Generated: 2026-10-04
+Source commit: cac5b8aa5ca656af8fbe37cc531313963830870e
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 227 endpoints in 39 groups
+## Backend routes (`/api/*`): 228 endpoints in 39 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -217,7 +217,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/password-recovery-html-content/{email}`
 
-### `/api/v1/payroll` (45 routes)
+### `/api/v1/payroll` (46 routes)
 
 - `POST /api/v1/payroll/amortizations/{amortization_id}/pay`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/bir-brackets/`  `[perms: payroll:view]`
@@ -256,6 +256,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `POST /api/v1/payroll/runs/{run_id}/approve`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/runs/{run_id}/payslips`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/runs/{run_id}/void`  `[perms: payroll:edit]`
+- `DELETE /api/v1/payroll/salaries/{salary_id}`  `[perms: payroll:delete]`
 - `GET /api/v1/payroll/salaries/{salary_id}`  `[perms: payroll:view]`
 - `PATCH /api/v1/payroll/salaries/{salary_id}`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/sss-brackets/`  `[perms: payroll:view]`
@@ -376,7 +377,7 @@ is omitted here, as are `config` (engine/settings) and `email-templates`.
 - `reports`: routes.py
 - `user`: models.py, schemas.py, routes/, services.py, selectors.py
 
-## Frontend features (`frontendv3/src/features/`): 35 features
+## Frontend features (`frontendv3/src/features/`): 38 features
 
 API columns are modules imported from `@/lib/api/*` (grep-based, per-verified
 reliable in the source tree's single-line import style) with plumbing
@@ -397,10 +398,12 @@ reliable in the source tree's single-line import style) with plumbing
 - `dtr-adjustments`: api `daily-time-records`, `dtr-adjustments`, `save-error`; flags: route, form, test
 - `emp-tasks`: api `emp-tasks`, `employee-projects`, `save-error`; flags: route, form, test
 - `employee-projects`: api `employee-projects`, `employees`, `projects`, `save-error`; flags: route, form, test
-- `employees`: api `employees`; flags: route, test
+- `employees`: api `employees`, `save-error`; flags: route, form, test
 - `holidays`: api `holidays`; flags: route, form, test
 - `leave-calendar`: api `employees`, `leave-ledger`; flags: route, test
+- `leave-enrollment`: api `employees`, `leave-policies`, `save-error`; flags: test
 - `leave-ledger`: api `employees`, `leave-ledger`, `leave-policies`; flags: route, test
+- `leave-policies`: api `leave-policies`, `save-error`; flags: route, form, test
 - `leave-requests`: api `employees`, `leave-policies`, `leave-requests`, `save-error`; flags: route, form, test
 - `lots`: api `blocks`, `lots`, `save-error`; flags: route, form, test
 - `model-types`: api `model-types`; flags: route, form
@@ -414,6 +417,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `project-types`: api `project-types`; flags: route, form
 - `projects`: api `project-types`, `projects`, `subdivisions`; flags: route, form, test
 - `roles`: api `roles`; flags: route, form, test
+- `salary`: api `employees`, `payroll`, `save-error`; flags: form, test
 - `settings`: api `none`; flags: route, form
 - `shifts`: api `shifts`; flags: route, form
 - `subdivisions`: api `blocks`, `categories`, `lots`, `phases`, `project-types`, `projects`, `save-error`, `subdivisions`; flags: route, form, test
@@ -481,7 +485,7 @@ Backend domains with no same-named frontend feature: `audit`, `employee`, `item`
 routers for ~16 resources that each have their own frontend feature, and
 `attendance`/`leave`/`rbac` back multiple differently-named feature screens.)
 
-Frontend features with no same-named backend domain: `apps`, `blocks`, `categories`, `chats`, `daily-time-records`, `departments`, `divisions`, `dtr-adjustments`, `emp-tasks`, `employee-projects`, `employees`, `holidays`, `leave-calendar`, `leave-ledger`, `leave-requests`, `lots`, `model-types`, `models`, `owners`, `payroll-config`, `payroll-runs`, `phases`, `positions`, `project-types`, `projects`, `roles`, `settings`, `shifts`, `subdivisions`, `tasks`, `users`
+Frontend features with no same-named backend domain: `apps`, `blocks`, `categories`, `chats`, `daily-time-records`, `departments`, `divisions`, `dtr-adjustments`, `emp-tasks`, `employee-projects`, `employees`, `holidays`, `leave-calendar`, `leave-enrollment`, `leave-ledger`, `leave-policies`, `leave-requests`, `lots`, `model-types`, `models`, `owners`, `payroll-config`, `payroll-runs`, `phases`, `positions`, `project-types`, `projects`, `roles`, `salary`, `settings`, `shifts`, `subdivisions`, `tasks`, `users`
 (Many map to a differently-named backend domain, e.g. all `leave-*`/`holidays`
 features hit `app/leave/`, and the CRUD screens under `app/employee/`;
 `apps`/`chats`/`tasks`/`settings`/`users` are unwired template-demo features.)

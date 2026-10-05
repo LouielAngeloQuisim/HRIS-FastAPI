@@ -9,7 +9,7 @@ export default function LeaveLedgerPage() {
   const [employeeId, setEmployeeId] = useState('')
   const employees = useEmployees(1, 100)
   const [policyId, setPolicyId] = useState('')
-  const policies = useLeavePolicies()
+  const policies = useLeavePolicies(1, 100)
   const [leaveYear, setLeaveYear] = useState(new Date().getFullYear())
   const canView = useCan('emp_leaves', 'view')
 
@@ -103,8 +103,8 @@ export default function LeaveLedgerPage() {
                   <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
                     <td className="p-2">{item.created_at ? new Date(item.created_at).toLocaleDateString() : '—'}</td>
                     <td className="p-2 capitalize">{item.source.replace(/_/g, ' ')}</td>
-                    <td className={`p-2 text-right font-medium ${item.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {item.amount > 0 ? '+' : ''}{item.amount}
+                    <td className={`p-2 text-right font-medium ${Number(item.amount) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {Number(item.amount) > 0 ? '+' : ''}{item.amount}
                     </td>
                     <td className="p-2">{item.reference ?? '—'}</td>
                     <td className="p-2">{item.note ?? '—'}</td>

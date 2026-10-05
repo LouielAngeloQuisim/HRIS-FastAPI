@@ -15,9 +15,17 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 // Default: error state. Each test overrides via useEmployeesMock.
-const { useEmployeesMock } = vi.hoisted(() => ({ useEmployeesMock: vi.fn() }))
+const { useEmployeesMock, useCreateMock, useUpdateMock, useDeleteMock } = vi.hoisted(() => ({
+  useEmployeesMock: vi.fn(),
+  useCreateMock: vi.fn(),
+  useUpdateMock: vi.fn(),
+  useDeleteMock: vi.fn(),
+}))
 vi.mock('@/lib/api/employees', () => ({
   useEmployees: (...args: unknown[]) => useEmployeesMock(...args),
+  useCreateEmployee: () => ({ mutateAsync: useCreateMock, isPending: false }),
+  useUpdateEmployee: () => ({ mutateAsync: useUpdateMock, isPending: false }),
+  useDeleteEmployee: () => ({ mutateAsync: useDeleteMock, isPending: false }),
 }))
 
 // Isolate the page from the header/sidebar chrome.

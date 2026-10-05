@@ -13,7 +13,7 @@ vi.mock('@tanstack/react-router', () => ({
   getRouteApi: () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }),
 }))
 
-const { useLeaveRequestsMock, useApproveLeaveRequestMock, useRejectLeaveRequestMock, useSubmitLeaveRequestMock } = vi.hoisted(() => ({
+const { useLeaveRequestsMock, useApproveLeaveRequestMock, useRejectLeaveRequestMock, useSubmitLeaveRequestMock, useCancelLeaveRequestMock } = vi.hoisted(() => ({
   useLeaveRequestsMock: vi.fn(),
   useApproveLeaveRequestMock: vi.fn(() => ({
     mutateAsync: vi.fn(),
@@ -27,12 +27,14 @@ const { useLeaveRequestsMock, useApproveLeaveRequestMock, useRejectLeaveRequestM
     mutateAsync: vi.fn(),
     isPending: false,
   })),
+  useCancelLeaveRequestMock: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }))
 vi.mock('@/lib/api/leave-requests', () => ({
   useLeaveRequests: (...args: unknown[]) => useLeaveRequestsMock(...args),
   useApproveLeaveRequest: () => useApproveLeaveRequestMock(),
   useRejectLeaveRequest: () => useRejectLeaveRequestMock(),
   useSubmitLeaveRequest: () => useSubmitLeaveRequestMock(),
+  useCancelLeaveRequest: () => useCancelLeaveRequestMock(),
 }))
 
 vi.mock('@/components/layout/header', () => ({
@@ -100,6 +102,7 @@ describe('LeaveRequestsPage', () => {
     const screen = await render(<LeaveRequestsPage />)
     await expect.element(screen.getByRole('button', { name: 'Approve' })).toBeVisible()
     await expect.element(screen.getByRole('button', { name: 'Reject' })).toBeVisible()
+    await expect.element(screen.getByRole('button', { name: 'Cancel Request' })).toBeVisible()
   })
 
   it('does not show approve/reject for approved requests', async () => {
@@ -131,6 +134,8 @@ describe('LeaveRequestsPage', () => {
 
     const screen = await render(<LeaveRequestsPage />)
     await expect.element(screen.getByText('approved', { exact: true })).toBeVisible()
+    await expect.element(screen.getByRole('button', { name: 'Cancel Request' })).toBeVisible()
+    await expect.element(screen.getByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
   })
 
   it('approve button is disabled when mutation is pending', async () => {

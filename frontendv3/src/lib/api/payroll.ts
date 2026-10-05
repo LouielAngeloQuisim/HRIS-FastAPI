@@ -7,6 +7,10 @@ import type {
   PayrollRunPublic,
   PayrollRunDetail,
   PayrollEntryPreview,
+  EmployeeSalaryList,
+  EmployeeSalaryPublic,
+  EmployeeSalaryCreate,
+  EmployeeSalaryUpdate,
 } from './types'
 
 const API = ''
@@ -121,4 +125,64 @@ export function useApprovePayrollRun() {
 export function useVoidPayrollRun() {
   const qc = useQueryClient()
   return useMutation({ mutationFn: (id: string) => api.post<PayrollRunPublic>(`${API}/payroll/runs/${id}/void`).then(r => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-runs'] }) })
+}
+
+// -----------------------------------------------------------------------------
+// Employee Salary Management (PAY-03)
+// -----------------------------------------------------------------------------
+
+export const salaryKey = (employeeId: string) => ['salary', employeeId]
+
+export async function fetchEmployeeSalaries(employeeId: string): Promise<EmployeeSalaryList> {
+  const { data } = await api.get<EmployeeSalaryPublic[]>(`/payroll/employees/${employeeId}/salary`)
+  // Backend returns a raw array, not an envelope; normalize to the UI contract.
+  return { data, count: data.length }
+}
+
+export function useEmployeeSalaries(employeeId: string | undefined) {
+  return useQuery({
+    queryKey: salaryKey(employeeId ?? 'none'),
+    queryFn: () => fetchEmployeeSalaries(employeeId as string),
+    enabled: Boolean(employeeId),
+    placeholderData: keepPreviousData,
+  })
+}
+
+export async function createEmployeeSalary(salary: EmployeeSalaryCreate): Promise<EmployeeSalaryPublic> {
+  const response = await api.post<EmployeeSalaryPublic>(`/payroll/employees/${salary.employee_id}/salary`, salary)
+  return response.data
+}
+
+export async function updateEmployeeSalary({ salary_id, salary }: { salary_id: string; salary: EmployeeSalaryUpdate }): Promise<EmployeeSalaryPublic> {
+  const response = await api.patch<EmployeeSalaryPublic>(`/payroll/salaries/${salary_id}`, salary)
+  return response.data
+}
+
+export async function deleteEmployeeSalary(salary_id: string): Promise<{ message: string }> {
+  const response = await api.delete<{ message: string }>(`/payroll/salaries/${salary_id}`)
+  return response.data
+}
+
+export function useCreateSalary() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: createEmployeeSalary,
+    onSuccess: (_, { employee_id }) => qc.invalidateQueries({ queryKey: salaryKey(employee_id) }),
+  })
+}
+
+export function useUpdateSalary() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: updateEmployeeSalary,
+    onSuccess: (updated) => qc.invalidateQueries({ queryKey: salaryKey(updated.employee_id ?? '') }),
+  })
+}
+
+export function useDeleteSalary() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ salary_id }: { salary_id: string; employee_id: string }) => deleteEmployeeSalary(salary_id),
+    onSuccess: (_, { employee_id }) => qc.invalidateQueries({ queryKey: salaryKey(employee_id) }),
+  })
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -82,7 +82,7 @@ export function ResourceForm({ item, onClose, open }: Props) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  const defaults = {
+  const defaults = useMemo(() => ({
     employee_code: item?.employee_code ?? '',
     first_name: item?.first_name ?? '',
     middle_name: item?.middle_name ?? '',
@@ -113,12 +113,16 @@ export function ResourceForm({ item, onClose, open }: Props) {
     position_id: item?.position_id ?? '',
     division_id: item?.division_id ?? '',
     department_id: item?.department_id ?? '',
-  }
+  }), [item])
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: defaults,
   })
+
+  useEffect(() => {
+    if (open) form.reset(defaults)
+  }, [defaults, form, open])
 
   const loading = createMutation.isPending || updateMutation.isPending || deleting
 
@@ -127,7 +131,14 @@ export function ResourceForm({ item, onClose, open }: Props) {
     try {
       if (isEdit && item?.id) {
         const updateData = Object.fromEntries(
-          Object.entries(data).filter(([key, value]) => value !== defaults[key as keyof FormData])
+          Object.entries(data)
+            .filter(([key, value]) => value !== defaults[key as keyof FormData])
+            .map(([key, value]) => [
+              key,
+              value === '' && ['birthdate', 'date_hired', 'contract_expiry_date', 'date_separated', 'probationary_date', 'regularization_date', 'position_id', 'division_id', 'department_id'].includes(key)
+                ? null
+                : value,
+            ])
         ) as Partial<EmployeeRecordsUpdate>
         if (Object.keys(updateData).length === 0) {
           toast.warning('No changes were made.')
@@ -137,7 +148,17 @@ export function ResourceForm({ item, onClose, open }: Props) {
         await updateMutation.mutateAsync({ id: item.id, data: updateData })
         toast.success('Employee updated')
       } else {
-        await createMutation.mutateAsync(data as EmployeeRecordsCreate)
+        // Blank optional inputs (especially UUID, enum, and date fields) are
+        // invalid API values. Omit them so backend defaults/nulls apply.
+        const { employee_code, first_name, last_name, birthdate, ...optional } = data
+        const createData: EmployeeRecordsCreate = {
+          employee_code,
+          first_name,
+          last_name,
+          birthdate,
+          ...Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== '')),
+        }
+        await createMutation.mutateAsync(createData)
         toast.success('Employee created')
       }
       form.reset()

@@ -29,7 +29,7 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
     const updating = waitForWrite(page, 'employees', 'PATCH', employee.id)
     await page.getByTestId('resource-form-submit-button').click()
     await assertWrite(await updating, 200)
-    await expect(page.getByText('EmployeeEdited', { exact: true })).toBeVisible()
+    await expect(page.getByRole('row').filter({ hasText: code }).getByRole('link', { name: 'EmployeeEdited, Batch', exact: true })).toBeVisible()
 
     await page.getByTestId(`archive-employee-button-${employee.id}`).click()
     await expect(page.getByRole('alertdialog')).toBeVisible()
@@ -129,21 +129,24 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
   test('creates and archives a leave policy through the UI with API readback', async ({ page }) => {
     await page.goto('/leave-policies')
     const code = `LV${Date.now().toString(36)}`
+    const name = `Batch One Leave ${code}`
+    const updatedName = `${name} Updated`
     await page.getByTestId('add-leave-policy-button').click()
     await page.getByTestId('policy-form-code-input').fill(code)
-    await page.getByTestId('policy-form-name-input').fill('Batch One Leave')
+    await page.getByTestId('policy-form-name-input').fill(name)
     await page.getByTestId('policy-form-entitlement-input').fill('12.00')
     const creating = waitForWrite(page, 'leave-policies', 'POST')
     await page.getByTestId('policy-form-submit-button').click()
     const policy = await assertWrite(await creating, 201)
-    await expect(page.getByText('Batch One Leave', { exact: true })).toBeVisible()
+    const policyRow = page.getByRole('row').filter({ hasText: code })
+    await expect(policyRow.getByText(name, { exact: true })).toBeVisible()
 
     await page.getByTestId(`edit-leave-policy-button-${policy.id}`).click()
-    await page.getByTestId('policy-form-name-input').fill('Batch One Leave Updated')
+    await page.getByTestId('policy-form-name-input').fill(updatedName)
     const updating = waitForWrite(page, 'leave-policies', 'PATCH', policy.id)
     await page.getByTestId('policy-form-submit-button').click()
     await assertWrite(await updating, 200)
-    await expect(page.getByText('Batch One Leave Updated', { exact: true })).toBeVisible()
+    await expect(policyRow.getByText(updatedName, { exact: true })).toBeVisible()
 
     await page.getByTestId(`archive-leave-policy-button-${policy.id}`).click()
     await expect(page.getByRole('alertdialog')).toBeVisible()

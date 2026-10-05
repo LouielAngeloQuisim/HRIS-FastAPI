@@ -37,6 +37,6 @@ export class PayrollExecutionPage {
 
   async generateReviewedPayroll() {
     await this.page.getByTestId('proceed-to-review-button').click()
-    await expect(this.page.getByText('Payroll Run Generated')).toBeVisible()
+    await expect(this.page.getByRole('heading', { name: 'Payroll Run Generated' })).toBeVisible()
   }
 }

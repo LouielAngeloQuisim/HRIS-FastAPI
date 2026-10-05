@@ -1,47 +1,28 @@
 # Remaining QA Execution Status
 
-**Active batch:** 1 — employee, salary, and leave workflows (QA-05, PAY-03, QA-04)
-**Branch:** `fix/batch1-employee-leave-workflows`
-**Local and origin branch HEAD:** `cac5b8aa5ca656af8fbe37cc531313963830870e` (equal; uncommitted work remains)
-**PR:** [#75](https://github.com/LouielAngeloQuisim/HRIS-FastAPI/pull/75), OPEN, MERGEABLE; remote checks currently show backend/CI config/CodeQL passing and frontend/E2E failing on the pushed revision.
-**Checkpoint updated:** 2026-10-04 (Manila)
+Updated 2026-10-05, Asia/Manila.
 
-## Batch 1 status
+## Active batch
 
-The working tree contains the Batch 1 implementation and regression tests, but it is **not ready to hand off or merge**. No changes from this checkout have been committed or pushed. Preserve the current worktree; do not reset, clean, stash, or merge it.
+Batch 1: QA-05 employee CRUD, PAY-03 salary maintenance and missing-salary recovery, QA-04 leave workflows. Branch `fix/batch1-employee-leave-workflows`, PR [#75](https://github.com/LouielAngeloQuisim/HRIS-FastAPI/pull/75).
 
-| ID | Implementation | Current validation | Status |
-|---|---|---|---|
-| QA-05 | Employee create/edit/soft archive UI and regression tests | Employee form 8/8; employee row actions 2/2; new E2E journey written but not run successfully | Implemented; E2E pending |
-| PAY-03 | Effective-dated salary create/edit/archive UI; missing-salary recovery to salary setup and payroll review/generation | Salary form 8/8; payroll page 7/7; API contract 10/10; backend payroll suite included in 737 passing tests; E2E journey written but not run successfully | Implemented; E2E pending |
-| QA-04 | Leave policy CRUD, enrollment, request lifecycle actions, calendar/ledger flows | Policy form 7/7; delete dialog 4/4; enrollment dialog 3/3; leave requests page 5/5; leave backend suite included in 737 passing tests; lifecycle E2E written but not run successfully | Implemented; E2E pending |
+The implementation and regression fixes in the commit containing this checkpoint are locally validated. The previously pushed revision was `e9b8cc68d8cc92e9130bfce38983172f203c9021`; its hosted E2E failures exposed invalid empty employee fields, stale mounted form defaults, and browser locator/test setup defects. Those are corrected here. Hosted checks on the new revision and merge/deployment validation remain pending.
 
-## Verification evidence
+## Evidence
 
-Observed against local HEAD `cac5b8aa5ca656af8fbe37cc531313963830870e` and its uncommitted working tree:
+- `PATH=/tmp/hris-task-bin:$PATH bash scripts/verify.sh`: **RESULT: PASS (exit 0)**, uninterrupted on the final code revision.
+- Backend: **737 passed**, ruff clean, mypy 0 errors (98 files), migration upgrade clean and no drift.
+- Frontend: **116 files / 411 tests passed**, TypeScript 0 errors, ESLint 0 errors / 10 report-only warnings, build successful.
+- Generated MAP in sync; `git diff --check` clean.
+- Full Playwright suite against a disposable database: **59 passed, 0 failed, no retries**, one worker. This run covers all Batch 1 flows and existing journeys. A subsequent optional-empty-field no-change normalization and its Vitest assertion are covered by the final full gate; hosted E2E will confirm the pushed revision.
+- Browser journeys exercise employee create/edit/archive, salary lifecycle and missing-salary recovery through payroll generation, leave policy/enrollment, approve/reject/cancel with calendar and ledger readback, permission denial and reload persistence.
 
-- `uv run ruff check app` via `scripts/verify.sh`: clean.
-- `uv run mypy app`: 0 errors across 98 source files.
-- Disposable PostgreSQL 18 migration upgrade and `alembic check`: applied cleanly, no model/migration drift.
-- `uv run pytest tests/ -q`: **737 passed, 0 failed**, 1 warning.
-- `pnpm exec tsc -b`: 0 errors.
-- `pnpm exec eslint .`: 0 errors, 10 warnings (report-only).
-- `pnpm build`: successful.
-- `docs/MAP.md`: in sync with generator; `git diff --check`: clean.
-- Full frontend suite with bounded browser concurrency, `pnpm exec vitest run --browser.headless --no-file-parallelism --maxWorkers=1`: **116 files / 410 tests passed**.
-- All nine changed/added frontend unit-test files also passed individually, **54 tests total**.
+The existing `hris-ui-qa-e2e` PostgreSQL container on port 55603 was reused with a separate disposable database. Owned application servers and database were removed, and the container restored to its original stopped state. The full gate removed its own temporary PostgreSQL container. No production writes were made.
 
-The mandatory `bash scripts/verify.sh` was run. Its first browser-suite attempt timed out across unrelated and changed files while another Playwright MCP from the VS Code/Kilocode session was active. A second attempt pinned to one CPU reached the same browser screenshot/stability timeouts; it was stopped after those failures to avoid exhausting the WSL environment. The script therefore reported **FAIL** for Vitest on both attempts, even though the complete frontend suite subsequently passed with one worker. Do not report the full gate as PASS until `scripts/verify.sh` completes without interruption.
+## Scope and remaining work
 
-Local Playwright E2E journeys have been added for employee CRUD, salary lifecycle and payroll recovery/generation, leave policy/enrollment, and leave request approve/reject/cancel with calendar/ledger readback. They have **not** been successfully run against the isolated E2E stack in this session. No production writes were made. The existing `hris-ui-qa-e2e` container was left stopped; the verification script removed its own temporary postgres container.
+Batch 1 is tested locally; it is not yet marked deployed. Employee annex/attachment UI remains deferred by design. Batch 2 (PAY-01/02/04–08 statutory configuration and payroll persistence) and Batch 3 (QA-06 role lifecycle, QA-07 relationship labels) remain open. Do not describe the entire backlog as resolved.
 
-## Current worktree
+Unrelated untracked `DESKFLOW_PLAN.md`, `docs/bugs/`, and `scripts/__pycache__/` remain preserved and excluded from the PR. No test applies to this documentation-only checkpoint update.
 
-There are 28 modified tracked files, including backend salary update/archive, employee/leave/salary frontend flows, tests, `docs/MAP.md`, and E2E changes. Untracked items include the new Batch 1 Playwright spec/page object, `DESKFLOW_PLAN.md`, `docs/bugs/`, and `scripts/__pycache__/`. All pre-existing work remains preserved. Review `git status --short` before editing.
-
-## Next actions
-
-1. Run the Batch 1 Playwright journeys against an isolated disposable database when the competing Kilocode/VS Code browser workload is idle; diagnose real failures without weakening assertions or writing production data.
-2. Once E2E is green, rerun `bash scripts/verify.sh` to completion. Report any persistent timeout with raw output; the single-worker Vitest full-suite result is supplemental evidence, not a replacement for the required gate.
-3. Refresh PR #75 after all local fixes: commit only reviewed Batch 1 files, push, verify local/remote SHA equality, and confirm GitHub checks on that exact SHA. Do not merge or deploy until independently reviewed and explicitly authorized.
-4. Start Batch 2 (PAY-01/02/04–08) only after Batch 1 is validated and handed off.
+Next: push this commit, verify local/remote/PR head equality, check hosted CI, independently review and merge through the protected PR, then validate the deployment pipeline and read-only live smoke checks. Codex owns merge/deployment; Kilocode restrictions do not prohibit Codex delivery. Continue remaining batches in separate worktrees from current main after Batch 1 lands.

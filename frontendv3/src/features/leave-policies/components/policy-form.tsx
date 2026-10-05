@@ -1,4 +1,4 @@
-import { useRef, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, type FormEvent } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -106,7 +106,7 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
   const updateMutation = useUpdateLeavePolicy()
   const loading = createMutation.isPending || updateMutation.isPending
 
-  const defaults = {
+  const defaults = useMemo(() => ({
     ...DEFAULTS,
     code: initialData?.code ?? '',
     name: initialData?.name ?? '',
@@ -123,16 +123,22 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
     gender_scope: initialData?.gender_scope ?? 'all',
     marital_status_scope: initialData?.marital_status_scope ?? 'all',
     is_active: initialData?.is_active ?? true,
-  }
+  }), [initialData])
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: defaults,
   })
 
-  // Stable baseline for the "no changes" check: compare the payload against the
-  // form's original defaultValues by reference so array fields [] === [] match.
-  const baseline = useRef<FormData>(defaults).current
+  // Track the baseline alongside resets when the dialog switches between
+  // create and edit records, so only user-edited fields are sent.
+  const baseline = useRef<FormData>(defaults)
+
+  useEffect(() => {
+    if (!open) return
+    form.reset(defaults)
+    baseline.current = defaults
+  }, [baseline, defaults, form, open])
 
   const onSubmit = async (data: FormData) => {
     form.clearErrors('root.server')
@@ -157,7 +163,8 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
       if (isEdit && initialData?.id) {
         const updateData: Record<string, unknown> = {}
         Object.entries(payload).forEach(([key, value]) => {
-          if (deepEquals(value, baseline[key as keyof FormData])) return
+          const original = baseline.current[key as keyof FormData]
+          if (deepEquals(value, original) || (value === undefined && original === '')) return
           updateData[key] = value
         })
         if (Object.keys(updateData).length === 0) {

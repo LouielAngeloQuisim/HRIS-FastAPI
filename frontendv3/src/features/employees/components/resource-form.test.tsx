@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
@@ -56,6 +57,17 @@ const fullEmployee = (overrides: Partial<EmployeeRecordsPublic>): EmployeeRecord
   ...overrides,
 })
 
+function EmployeeFormLifecycleHarness() {
+  const [item, setItem] = useState<EmployeeRecordsPublic | null>(null)
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type='button' onClick={() => { setItem(fullEmployee({})); setOpen(true) }}>Load employee</button>
+      <ResourceForm item={item} open={open} onClose={() => setOpen(false)} />
+    </>
+  )
+}
+
 describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
   it('renders nothing (no dialog) when closed', async () => {
     const screen = await render(<ResourceForm item={null} open={false} onClose={vi.fn()} />)
@@ -111,6 +123,14 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
     await expect.element(screen.getByRole('option', { name: /Active/i })).toBeInTheDocument()
   })
 
+  it('resets to the selected employee when the mounted form changes from create to edit', async () => {
+    const screen = await render(<EmployeeFormLifecycleHarness />)
+    await userEvent.click(screen.getByRole('button', { name: 'Load employee' }))
+
+    await expect.element(screen.getByRole('textbox', { name: /Employee Code/i })).toHaveValue('EMP-001')
+    await expect.element(screen.getByRole('textbox', { name: /First Name/i })).toHaveValue('Jane')
+  })
+
   it('creates a new employee on submit and calls onClose', async () => {
     const onClose = vi.fn()
     const screen = await render(<ResourceForm item={null} open={true} onClose={onClose} />)
@@ -132,6 +152,11 @@ describe('Employees ResourceForm (§8.5 create/edit/modal)', () => {
       )
       expect(onClose).toHaveBeenCalled()
     })
+    const payload = createMock.mock.calls[createMock.mock.calls.length - 1]?.[0]
+    expect(payload).not.toHaveProperty('employee_status')
+    expect(payload).not.toHaveProperty('position_id')
+    expect(payload).not.toHaveProperty('division_id')
+    expect(payload).not.toHaveProperty('department_id')
   })
 
   it('updates an existing employee on submit with only changed fields', async () => {

@@ -36,14 +36,14 @@ VOID_STATUS = "void"
 
 
 def get_effective_brackets(*, session: Session, model: type[T], as_of: date) -> list[T]:
-    stmt = select(model).where(model.effective_date <= as_of, model.is_deleted.is_(False))
+    stmt = select(model).where(model.effective_date <= as_of, model.is_deleted.is_(False), model.is_active.is_(True))
     return list(session.exec(stmt).all())
 
 
 def get_latest_version(*, session: Session, model: type[T], as_of: date) -> T | None:
     stmt = (
         select(model)
-        .where(model.effective_date <= as_of, model.is_deleted.is_(False))
+        .where(model.effective_date <= as_of, model.is_deleted.is_(False), model.is_active.is_(True))
         .order_by(model.effective_date.desc())
     )
     return session.exec(stmt).first()
@@ -52,7 +52,7 @@ def get_latest_version(*, session: Session, model: type[T], as_of: date) -> T | 
 def get_active_bracket_by_type(
     *, session: Session, model: type[T], employee_id: uuid.UUID, as_of: date
 ) -> T | None:
-    stmt = select(model).where(model.is_deleted.is_(False))
+    stmt = select(model).where(model.is_deleted.is_(False), model.is_active.is_(True))
     rows = session.exec(stmt).all()
     for row in rows:
         if hasattr(row, "employee_id") and row.employee_id != employee_id:

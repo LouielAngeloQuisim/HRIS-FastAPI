@@ -287,6 +287,8 @@ class PayrollRun(SQLModel, table=True):
     marks legacy migrated history (Phase B6).
     """
 
+    generation_fingerprint: str | None = Field(default=None, max_length=64)
+
     __tablename__ = "payroll_run"
     __table_args__ = (Index("ix_payroll_run_created_by", "created_by"),)
 

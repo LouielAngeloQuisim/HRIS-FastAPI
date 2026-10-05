@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { SSSResourceForm } from './sss-resource-form'
@@ -14,11 +14,13 @@ vi.mock('@/lib/api/payroll-config', () => ({
 }))
 
 describe('SSSResourceForm validation', () => {
+  beforeEach(() => vi.clearAllMocks())
   it('renders form fields when open', async () => {
     const screen = await render(<SSSResourceForm item={null} open={true} onClose={() => {}} />)
     await expect.element(screen.getByRole('dialog')).toBeInTheDocument()
     await expect.element(screen.getByLabelText(/MSC Min/i)).toBeInTheDocument()
     await expect.element(screen.getByLabelText(/MSC Max/i)).toBeInTheDocument()
+    await expect.element(screen.getByLabelText('Employer SS (₱)', { exact: true })).toBeInTheDocument()
   })
 
   it('blocks submission when required fields are empty', async () => {
@@ -34,15 +36,15 @@ describe('SSSResourceForm validation', () => {
 
     await userEvent.fill(screen.getByLabelText(/MSC Min/i), '1000')
     await userEvent.fill(screen.getByLabelText(/MSC Max/i), '2000')
-    await userEvent.fill(screen.getByLabelText(/Employer SS/i), '10')
+    await userEvent.fill(screen.getByLabelText(/Employer SS/i), '1234.56')
     await userEvent.fill(screen.getByLabelText(/Employer EC/i), '30')
     await userEvent.fill(screen.getByLabelText(/Employer MPF/i), '0')
-    await userEvent.fill(screen.getByLabelText(/Employee SS/i), '5')
+    await userEvent.fill(screen.getByLabelText(/Employee SS/i), '567.89')
     await userEvent.fill(screen.getByLabelText(/Employee MPF/i), '0')
     await userEvent.fill(screen.getByLabelText(/Effective Date/i), '2024-01-01')
     await userEvent.click(screen.getByRole('button', { name: /Create/i }))
 
-    expect(createMock).toHaveBeenCalled()
+    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ employer_ss: 1234.56, employee_ss: 567.89 }))
   })
 
   it('submits update mutation when editing an existing item', async () => {
@@ -82,14 +84,16 @@ describe('SSSResourceForm validation', () => {
 
     await userEvent.fill(screen.getByLabelText(/MSC Min/i), '1000')
     await userEvent.fill(screen.getByLabelText(/MSC Max/i), '2000')
-    await userEvent.fill(screen.getByLabelText(/Employer SS/i), '10')
+    await userEvent.fill(screen.getByLabelText(/Employer SS/i), '1234.56')
     await userEvent.fill(screen.getByLabelText(/Employer EC/i), '30')
     await userEvent.fill(screen.getByLabelText(/Employer MPF/i), '0')
-    await userEvent.fill(screen.getByLabelText(/Employee SS/i), '5')
+    await userEvent.fill(screen.getByLabelText(/Employee SS/i), '567.89')
     await userEvent.fill(screen.getByLabelText(/Employee MPF/i), '0')
     await userEvent.fill(screen.getByLabelText(/Effective Date/i), '2024-01-01')
     await userEvent.click(screen.getByRole('button', { name: /Create/i }))
 
     expect(onClose).not.toHaveBeenCalled()
+    await expect.element(screen.getByRole('alert')).toBeInTheDocument()
+    await expect.element(screen.getByLabelText(/Effective Date/i)).toHaveValue('2024-01-01')
   })
 })

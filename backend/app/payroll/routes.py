@@ -38,7 +38,6 @@ from app.payroll.payroll_tables import (
     IntegrationMapping,
     Loan,
     LoanAmortization,
-    PayrollEntry,
     PayrollRun,
 )
 from app.payroll.schemas import (
@@ -399,10 +398,7 @@ async def preview_payroll_endpoint(
     request: PayrollPreviewRequest,
 ) -> PayrollPreviewResponse:
     """Preview payroll run without persisting entries."""
-    run = preview_payroll(session, request)
-    entries = session.exec(
-        select(PayrollEntry).where(PayrollEntry.payroll_run_id == run.id, PayrollEntry.is_deleted.is_(False))  # type: ignore[attr-defined]
-    ).all()
+    run, entries = preview_payroll(session, request)
     return PayrollPreviewResponse(payroll_run_id=run.id, entries=[PayrollEntryRead.model_validate(e) for e in entries])
 
 
@@ -1110,3 +1106,99 @@ async def get_employee_payslip_for_latest_run(
 # --------------------------------------------------------------------------- #
 
 routers = [router]
+
+
+@router.patch("/philhealth-brackets/{bracket_id}", response_model=PhilHealthBracketRead,
+              dependencies=[Depends(require_permission("payroll", "edit"))])
+async def update_philhealth_bracket(*, session: SessionDep, bracket_id: uuid.UUID,
+                               bracket: PhilHealthBracketCreate) -> PhilHealthBracketRead:
+    """Update configuration; previously generated payroll snapshots remain intact."""
+    row = session.get(PhilHealthBracket, bracket_id)
+    if row is None or row.is_deleted:
+        raise HTTPException(status_code=404, detail="PhilHealth bracket not found")
+    for key, value in bracket.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    row.updated_at = datetime.now(timezone.utc)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return PhilHealthBracketRead.model_validate(row)
+
+
+@router.delete("/philhealth-brackets/{bracket_id}", response_model=Message,
+               dependencies=[Depends(require_permission("payroll", "delete"))])
+async def delete_philhealth_bracket(*, session: SessionDep, bracket_id: uuid.UUID) -> Message:
+    """Deactivate configuration without deleting its historical row."""
+    row = session.get(PhilHealthBracket, bracket_id)
+    if row is None or row.is_deleted:
+        raise HTTPException(status_code=404, detail="PhilHealth bracket not found")
+    row.is_deleted = True
+    row.is_active = False
+    row.deleted_at = datetime.now(timezone.utc)
+    session.add(row)
+    session.commit()
+    return Message(message="PhilHealth bracket deactivated")
+
+
+@router.patch("/pagibig-brackets/{bracket_id}", response_model=PagIBIGBracketRead,
+              dependencies=[Depends(require_permission("payroll", "edit"))])
+async def update_pagibig_bracket(*, session: SessionDep, bracket_id: uuid.UUID,
+                               bracket: PagIBIGBracketCreate) -> PagIBIGBracketRead:
+    """Update configuration; previously generated payroll snapshots remain intact."""
+    row = session.get(PagIBIGBracket, bracket_id)
+    if row is None or row.is_deleted:
+        raise HTTPException(status_code=404, detail="Pag-IBIG bracket not found")
+    for key, value in bracket.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    row.updated_at = datetime.now(timezone.utc)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return PagIBIGBracketRead.model_validate(row)
+
+
+@router.delete("/pagibig-brackets/{bracket_id}", response_model=Message,
+               dependencies=[Depends(require_permission("payroll", "delete"))])
+async def delete_pagibig_bracket(*, session: SessionDep, bracket_id: uuid.UUID) -> Message:
+    """Deactivate configuration without deleting its historical row."""
+    row = session.get(PagIBIGBracket, bracket_id)
+    if row is None or row.is_deleted:
+        raise HTTPException(status_code=404, detail="Pag-IBIG bracket not found")
+    row.is_deleted = True
+    row.is_active = False
+    row.deleted_at = datetime.now(timezone.utc)
+    session.add(row)
+    session.commit()
+    return Message(message="Pag-IBIG bracket deactivated")
+
+
+@router.patch("/bir-brackets/{bracket_id}", response_model=BIRBracketRead,
+              dependencies=[Depends(require_permission("payroll", "edit"))])
+async def update_bir_bracket(*, session: SessionDep, bracket_id: uuid.UUID,
+                               bracket: BIRBracketCreate) -> BIRBracketRead:
+    """Update configuration; previously generated payroll snapshots remain intact."""
+    row = session.get(BIRBracket, bracket_id)
+    if row is None or row.is_deleted:
+        raise HTTPException(status_code=404, detail="BIR bracket not found")
+    for key, value in bracket.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    row.updated_at = datetime.now(timezone.utc)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return BIRBracketRead.model_validate(row)
+
+
+@router.delete("/bir-brackets/{bracket_id}", response_model=Message,
+               dependencies=[Depends(require_permission("payroll", "delete"))])
+async def delete_bir_bracket(*, session: SessionDep, bracket_id: uuid.UUID) -> Message:
+    """Deactivate configuration without deleting its historical row."""
+    row = session.get(BIRBracket, bracket_id)
+    if row is None or row.is_deleted:
+        raise HTTPException(status_code=404, detail="BIR bracket not found")
+    row.is_deleted = True
+    row.is_active = False
+    row.deleted_at = datetime.now(timezone.utc)
+    session.add(row)
+    session.commit()
+    return Message(message="BIR bracket deactivated")

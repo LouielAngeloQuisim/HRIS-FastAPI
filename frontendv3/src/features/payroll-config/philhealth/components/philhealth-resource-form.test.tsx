@@ -85,5 +85,7 @@ describe('PhilHealthResourceForm validation', () => {
     await userEvent.click(screen.getByRole('button', { name: /Create/i }))
 
     expect(onClose).not.toHaveBeenCalled()
+    await expect.element(screen.getByRole('alert')).toBeInTheDocument()
+    await expect.element(screen.getByLabelText(/Effective Date/i)).toHaveValue('2025-01-01')
   })
 })

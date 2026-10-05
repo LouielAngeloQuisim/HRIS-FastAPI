@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios'
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useCan } from '@/context/permissions-provider'
@@ -21,6 +22,8 @@ export default function PayrollPage() {
   const canCreate = useCan('payroll', 'add')
   const canApprove = useCan('payroll', 'edit')
 
+  const [generationUncertain, setGenerationUncertain] = useState(false)
+  const [generationId, setGenerationId] = useState(() => crypto.randomUUID())
   const [reviewDirty, setReviewDirty] = useState(false)
   const [step, setStep] = useState<Step>('preview')
   const [cutoffType, setCutoffType] = useState<CutoffType>('monthly')
@@ -64,6 +67,7 @@ export default function PayrollPage() {
       })
       setReviewDirty(false)
       setPreviewEntries(entries)
+      setGenerationId(crypto.randomUUID())
       setStep('review')
       toast.success(`Preview generated: ${entries.length} entries`)
     } catch (error) {
@@ -77,6 +81,7 @@ export default function PayrollPage() {
     if (!dateFrom || !dateTo) return
     try {
       const result = await generateMutation.mutateAsync({
+        request_id: generationId,
         cutoff_type: cutoffType,
         date_from: dateFrom,
         date_to: dateTo,
@@ -85,10 +90,13 @@ export default function PayrollPage() {
         entries: previewEntries.map(entry => ({ employee_id: entry.employee_id, overtime_pay: entry.overtime_pay })),
       })
       setRun(result)
+      setGenerationUncertain(false)
       setStep('result')
       toast.success('Payroll run generated')
-    } catch {
-      toast.error('Failed to generate payroll')
+    } catch (error) {
+      const status = isAxiosError(error) ? error.response?.status : undefined
+      setGenerationUncertain(status === undefined || status >= 500)
+      toast.error(saveErrorMessage(error))
     }
   }
 
@@ -214,13 +222,14 @@ export default function PayrollPage() {
         </div>
       )}
 
+      {generationUncertain && <p role='alert' data-testid='generation-outcome-unknown'>Generation outcome is unknown. Retry the same reviewed payroll to recover its result safely.</p>}
       {step === 'review' && (
         <div className='space-y-4'>
           <div className='flex items-center justify-between'>
             <h2 className='text-xl font-semibold'>Review Payroll Entries</h2>
             <div className='flex gap-2'>
-              <Button variant='outline' onClick={() => setStep('preview')}>Back</Button>
-              <Button data-testid='recalculate-payroll-button' onClick={recalculateReview} disabled={previewMutation.isPending}>Recalculate Review</Button>
+              <Button variant='outline' disabled={generationUncertain} onClick={() => setStep('preview')}>Back</Button>
+              <Button data-testid='recalculate-payroll-button' onClick={recalculateReview} disabled={previewMutation.isPending || generationUncertain}>Recalculate Review</Button>
               <Button data-testid='proceed-to-review-button' onClick={handleGenerate} disabled={generateMutation.isPending || previewMutation.isPending || reviewDirty || !canCreate || previewEntries.length === 0}>
                 {generateMutation.isPending ? 'Generating...' : 'Generate Payroll'}
               </Button>
@@ -262,6 +271,7 @@ export default function PayrollPage() {
                       {canEdit && (
                         <Input
                           type='number'
+                          disabled={generationUncertain}
                           className='w-24 text-right'
                           value={Number(entry.overtime_pay)}
                           onChange={(e) => updateEntry(idx, 'overtime_pay', e.target.value)}

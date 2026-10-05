@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-05
-Source commit: 4b94aac1539ab4ce558e77e85fc6d42ea8d2a39c
+Source commit: 0f7e8a092c48193ab9a89a7fd0693fe488f68e1b
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 244 endpoints in 39 groups
+## Backend routes (`/api/*`): 250 endpoints in 39 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -228,11 +228,13 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/password-recovery-html-content/{email}`
 
-### `/api/v1/payroll` (46 routes)
+### `/api/v1/payroll` (52 routes)
 
 - `POST /api/v1/payroll/amortizations/{amortization_id}/pay`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/bir-brackets/`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/bir-brackets/`  `[perms: payroll:add]`
+- `DELETE /api/v1/payroll/bir-brackets/{bracket_id}`  `[perms: payroll:delete]`
+- `PATCH /api/v1/payroll/bir-brackets/{bracket_id}`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/bir/calculate`
 - `POST /api/v1/payroll/calculate-contributions/`
 - `GET /api/v1/payroll/employees/{employee_id}/loans`  `[perms: payroll:view]`
@@ -255,9 +257,13 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `POST /api/v1/payroll/loans/{loan_id}/amortizations`  `[perms: payroll:add]`
 - `GET /api/v1/payroll/pagibig-brackets/`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/pagibig-brackets/`  `[perms: payroll:add]`
+- `DELETE /api/v1/payroll/pagibig-brackets/{bracket_id}`  `[perms: payroll:delete]`
+- `PATCH /api/v1/payroll/pagibig-brackets/{bracket_id}`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/pagibig/calculate`
 - `GET /api/v1/payroll/philhealth-brackets/`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/philhealth-brackets/`  `[perms: payroll:add]`
+- `DELETE /api/v1/payroll/philhealth-brackets/{bracket_id}`  `[perms: payroll:delete]`
+- `PATCH /api/v1/payroll/philhealth-brackets/{bracket_id}`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/philhealth/calculate`
 - `GET /api/v1/payroll/runs`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/runs/generate`  `[perms: payroll:add]`
@@ -426,7 +432,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `models`: api `model-types`, `models`, `save-error`; flags: route, form, test
 - `owners`: api `owners`; flags: route, form, test
 - `payroll`: api `departments`, `employees`, `payroll`, `save-error`; flags: route, test
-- `payroll-config`: api `auth`, `payroll-config`; flags: route, form, test
+- `payroll-config`: api `auth`, `payroll-config`, `save-error`; flags: route, form, test
 - `payroll-runs`: api `payroll`; flags: route, test
 - `phases`: api `phases`, `save-error`, `subdivisions`; flags: route, form, test
 - `positions`: api `departments`, `positions`; flags: route, form, test
@@ -440,7 +446,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 24 revisions, single head `7ab12cd44e91`
+## Migration chain (oldest -> newest): 25 revisions, single head `8c12ab55d901`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -469,6 +475,7 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 22. `54ff6e36652b` - add_payroll_tables
 23. `3f0e3e733925` - change employee_salary unique constraint to include effective_date
 24. `7ab12cd44e91` - add partial unique index for DTR import idempotency (QA-01)
+25. `8c12ab55d901` - Add durable payroll generation fingerprint.
 
 ### Migration anomalies (static findings, report-only)
 

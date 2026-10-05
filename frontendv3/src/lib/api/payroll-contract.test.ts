@@ -40,7 +40,7 @@ describe('payroll current backend contracts', () => {
     expect(await fetchPayrollRuns(0, 20)).toEqual({ data: rows, count: 1 })
     expect(get).toHaveBeenCalledWith('/payroll/runs', { params: { skip: 0, limit: 20 } })
   })
-  it('extracts preview entries from the persisted backend response envelope', async () => {
+  it('extracts preview entries from the transient backend response envelope', async () => {
     const entries = [{ employee_id: 'employee', gross_pay: '12500.00' }]
     post.mockResolvedValueOnce({ data: { payroll_run_id: 'preview-run', entries } })
     const request = { cutoff_type: 'monthly' as const, date_from: '2026-10-01', date_to: '2026-10-31' }
@@ -50,7 +50,7 @@ describe('payroll current backend contracts', () => {
   it('generates through the add-authorized endpoint and carries reviewed overrides', async () => {
     const request = { cutoff_type: 'monthly' as const, date_from: '2026-10-01', date_to: '2026-10-31', entries: [{ employee_id: 'employee', overtime_pay: '500.25' }] }
     post.mockResolvedValueOnce({ data: { id: 'generated-run', status: 'draft' } })
-    expect(await generatePayroll(request)).toEqual({ id: 'generated-run', status: 'draft' })
-    expect(post).toHaveBeenCalledWith('/payroll/runs/generate', request)
+    expect(await generatePayroll({ ...request, request_id: 'generation-request' })).toEqual({ id: 'generated-run', status: 'draft' })
+    expect(post).toHaveBeenCalledWith('/payroll/runs/generate', { ...request, request_id: 'generation-request' })
   })
 })

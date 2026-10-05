@@ -98,7 +98,7 @@ export async function previewPayroll(data: PayrollPreviewPayload): Promise<Payro
   return response.data.entries
 }
 
-export async function generatePayroll(data: PayrollPreviewPayload): Promise<PayrollRunPublic> {
+export async function generatePayroll(data: PayrollPreviewPayload & { request_id: string }): Promise<PayrollRunPublic> {
   const response = await api.post<PayrollRunPublic>('/payroll/runs/generate', data)
   return response.data
 }
@@ -106,6 +106,7 @@ export async function generatePayroll(data: PayrollPreviewPayload): Promise<Payr
 export function usePreviewPayroll() {
   return useMutation({
     mutationFn: previewPayroll,
+    onError: () => {}, // The payroll page displays the actionable error once.
   })
 }
 
@@ -113,6 +114,7 @@ export function useGeneratePayroll() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: generatePayroll,
+    onError: () => {}, // The page owns generation and unknown-outcome errors.
     onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-runs'] }),
   })
 }

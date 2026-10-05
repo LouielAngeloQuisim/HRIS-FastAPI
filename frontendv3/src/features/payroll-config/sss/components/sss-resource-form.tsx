@@ -1,3 +1,4 @@
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -26,12 +27,12 @@ import type { SSSBracketPublic } from '@/lib/api/types'
 const formSchema = z.object({
   msc_min: z.coerce.number<number>().min(0),
   msc_max: z.coerce.number<number>().min(0),
-  employer_ss: z.coerce.number<number>().min(0).max(100),
+  employer_ss: z.coerce.number<number>().min(0),
   employer_ec: z.coerce.number<number>().min(0),
-  employer_mpf: z.coerce.number<number>().min(0).max(100),
-  employee_ss: z.coerce.number<number>().min(0).max(100),
-  employee_mpf: z.coerce.number<number>().min(0).max(100),
-  effective_date: z.string().min(1),
+  employer_mpf: z.coerce.number<number>().min(0),
+  employee_ss: z.coerce.number<number>().min(0),
+  employee_mpf: z.coerce.number<number>().min(0),
+  effective_date: z.string().min(1, 'Select an effective date.'),
 })
 type FormData = z.infer<typeof formSchema>
 
@@ -71,6 +72,7 @@ export function SSSResourceForm({ item, onClose, open }: Props) {
   })
 
   const onSubmit = async (data: FormData) => {
+    form.clearErrors('root.server')
     try {
       if (item) {
         await updateMutation.mutateAsync({ id: item.id, data })
@@ -78,8 +80,8 @@ export function SSSResourceForm({ item, onClose, open }: Props) {
         await createMutation.mutateAsync(data)
       }
       onClose()
-    } catch {
-      // error handled by mutation
+    } catch (error) {
+      form.setError('root.server', { message: saveErrorMessage(error) })
     }
   }
 
@@ -94,6 +96,7 @@ export function SSSResourceForm({ item, onClose, open }: Props) {
         </SheetHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4 px-4 py-4'>
+            {form.formState.errors.root?.server?.message && <p role='alert'>{form.formState.errors.root.server.message}</p>}
             <FormField
               control={form.control}
               name='msc_min'
@@ -125,7 +128,7 @@ export function SSSResourceForm({ item, onClose, open }: Props) {
               name='employer_ss'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Employer SS (%)</FormLabel>
+                  <FormLabel>Employer SS (₱)</FormLabel>
                   <FormControl>
                     <Input type='number' step='0.01' {...field} data-testid={`sss-${field.name}-input`} />
                   </FormControl>
@@ -151,7 +154,7 @@ export function SSSResourceForm({ item, onClose, open }: Props) {
               name='employer_mpf'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Employer MPF (%)</FormLabel>
+                  <FormLabel>Employer MPF (₱)</FormLabel>
                   <FormControl>
                     <Input type='number' step='0.01' {...field} data-testid={`sss-${field.name}-input`} />
                   </FormControl>
@@ -164,7 +167,7 @@ export function SSSResourceForm({ item, onClose, open }: Props) {
               name='employee_ss'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Employee SS (%)</FormLabel>
+                  <FormLabel>Employee SS (₱)</FormLabel>
                   <FormControl>
                     <Input type='number' step='0.01' {...field} data-testid={`sss-${field.name}-input`} />
                   </FormControl>
@@ -177,7 +180,7 @@ export function SSSResourceForm({ item, onClose, open }: Props) {
               name='employee_mpf'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Employee MPF (%)</FormLabel>
+                  <FormLabel>Employee MPF (₱)</FormLabel>
                   <FormControl>
                     <Input type='number' step='0.01' {...field} data-testid={`sss-${field.name}-input`} />
                   </FormControl>

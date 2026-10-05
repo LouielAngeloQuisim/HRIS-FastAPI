@@ -11,8 +11,8 @@ export default function PagIBIGConfigPage() {
   const pageSize = 20
   const canView = useCan('pagibig_config', 'view')
   const canCreate = useCan('pagibig_config', 'add')
-  const canEdit = false // Current backend exposes list/create only.
-  const canDelete = false // Current backend exposes list/create only.
+  const canEdit = useCan('pagibig_config', 'edit')
+  const canDelete = useCan('pagibig_config', 'delete')
 
   const { data, isPending, isError, refetch } = usePagIBIGBrackets((page - 1) * pageSize, pageSize)
 
@@ -31,7 +31,6 @@ export default function PagIBIGConfigPage() {
 
   return (
     <div className='space-y-4'>
-      <p className='text-sm text-muted-foreground'>Existing brackets can be viewed and new brackets added. Editing and deletion are not yet available.</p>
       <div className='flex items-center justify-between'>
         <div>
           <h1 className='text-2xl font-bold'>Pag-IBIG Configuration</h1>

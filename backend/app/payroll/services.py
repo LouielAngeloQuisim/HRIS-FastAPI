@@ -3,12 +3,15 @@
 Core computation pipeline, preview/generation consistency guarantee, and rate-change logic.
 """
 
+import hashlib
+import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.employee.models import EmployeeRecords
@@ -264,7 +267,7 @@ def preview_payroll(
     session: Session,
     request: PayrollPreviewRequest,
     _created_by_id: uuid.UUID | None = None,
-) -> PayrollRun:
+) -> tuple[PayrollRun, list[PayrollEntry]]:
     """Preview payroll entries without persisting them.
 
     Computes exact entries for a payroll cutoff based on effective dates, government rates, and employee salary config.
@@ -281,8 +284,7 @@ def preview_payroll(
         adjustment_type=request.adjustment_type,
         created_by=None,
     )
-    session.add(draft_run)
-    session.flush()
+    entries: list[PayrollEntry] = []
 
     # Select employees
     if request.department_id:
@@ -317,7 +319,7 @@ def preview_payroll(
             override = override_map.get(salary.employee_id)
             entry = _compute_employee_entry(session, salary.employee_id, draft_run, override)
             entry.payroll_run_id = draft_run.id
-            session.add(entry)
+            entries.append(entry)
         except HTTPException:
             raise
 
@@ -327,8 +329,7 @@ def preview_payroll(
             detail="No employees with active salary records found for the given criteria",
         )
 
-    session.commit()
-    return draft_run
+    return draft_run, entries
 
 
 def generate_payroll(
@@ -337,10 +338,27 @@ def generate_payroll(
     created_by_id: uuid.UUID,
 ) -> PayrollRun:
     """Generate payroll run with persisted entries (status=draft)."""
-    preview_run = preview_payroll(session, PayrollPreviewRequest(**request.model_dump()), created_by_id)
+    payload = request.model_dump(mode="json", exclude={"request_id"})
+    fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    # Serialize matching identities across real PostgreSQL sessions before the
+    # lookup. The run primary key is the durable generation request identity.
+    lock_key = int.from_bytes(request.request_id.bytes[:8], "big", signed=True)
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+    existing = session.get(PayrollRun, request.request_id)
+    if existing is not None:
+        if existing.created_by != created_by_id or existing.generation_fingerprint != fingerprint or existing.is_deleted:
+            raise HTTPException(status_code=409, detail="Generation identity already used for a different request")
+        return existing
 
+    preview_run, entries = preview_payroll(session, PayrollPreviewRequest(**payload), created_by_id)
+    preview_run.id = request.request_id
+    preview_run.generation_fingerprint = fingerprint
     preview_run.created_by = created_by_id
     session.add(preview_run)
+    session.flush()
+    for entry in entries:
+        entry.payroll_run_id = preview_run.id
+    session.add_all(entries)
     session.commit()
     session.refresh(preview_run)
     return preview_run

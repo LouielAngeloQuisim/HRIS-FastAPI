@@ -83,7 +83,7 @@ describe('BIRConfigPage', () => {
     await expect.element(allowed.getByRole('button', { name: /Add BIR Bracket/i })).toBeInTheDocument()
   })
 
-  it('does not offer edit/delete operations absent from the current backend', async () => {
+  it('offers authorized edit and deactivation operations', async () => {
     useBIRBracketsMock.mockReturnValue({
       data: SAMPLE,
       isPending: false,
@@ -93,8 +93,8 @@ describe('BIRConfigPage', () => {
 
     useCanMock.mockImplementation((_m: string, action: string) => action === 'view' || action === 'edit' || action === 'delete')
     const { getByTestId } = await render(<BIRConfigPage />)
-    await expect.element(getByTestId('edit-bir-button-1')).not.toBeInTheDocument()
-    await expect.element(getByTestId('delete-bir-button-1')).not.toBeInTheDocument()
+    await expect.element(getByTestId('edit-bir-button-1')).toBeInTheDocument()
+    await expect.element(getByTestId('delete-bir-button-1')).toBeInTheDocument()
   })
 
   it('shows error state with retry when query fails', async () => {
@@ -112,4 +112,12 @@ describe('BIRConfigPage', () => {
     await userEvent.click(getByRole('button', { name: /try again/i }))
     expect(refetch).toHaveBeenCalled()
   })
+  it('hides configuration mutations from a view-only caller', async () => {
+    useBIRBracketsMock.mockReturnValue({ data: SAMPLE, isPending: false, isError: false, refetch: vi.fn() })
+    useCanMock.mockImplementation((_module: string, action: string) => action === 'view')
+    const screen = await render(<BIRConfigPage />)
+    await expect.element(screen.getByTestId('edit-bir-button-1')).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId('delete-bir-button-1')).not.toBeInTheDocument()
+  })
+
 })

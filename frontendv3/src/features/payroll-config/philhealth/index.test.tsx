@@ -83,7 +83,7 @@ describe('PhilHealthConfigPage', () => {
     await expect.element(allowed.getByRole('button', { name: /Add PhilHealth Bracket/i })).toBeInTheDocument()
   })
 
-  it('does not offer edit/delete operations absent from the current backend', async () => {
+  it('offers authorized edit and deactivation operations', async () => {
     usePhilHealthBracketsMock.mockReturnValue({
       data: SAMPLE,
       isPending: false,
@@ -93,8 +93,8 @@ describe('PhilHealthConfigPage', () => {
 
     useCanMock.mockImplementation((_m: string, action: string) => action === 'view' || action === 'edit' || action === 'delete')
     const { getByTestId } = await render(<PhilHealthConfigPage />)
-    await expect.element(getByTestId('edit-philhealth-button-1')).not.toBeInTheDocument()
-    await expect.element(getByTestId('delete-philhealth-button-1')).not.toBeInTheDocument()
+    await expect.element(getByTestId('edit-philhealth-button-1')).toBeInTheDocument()
+    await expect.element(getByTestId('delete-philhealth-button-1')).toBeInTheDocument()
   })
 
   it('shows error state with retry when query fails', async () => {
@@ -112,4 +112,12 @@ describe('PhilHealthConfigPage', () => {
     await userEvent.click(getByRole('button', { name: /try again/i }))
     expect(refetch).toHaveBeenCalled()
   })
+  it('hides configuration mutations from a view-only caller', async () => {
+    usePhilHealthBracketsMock.mockReturnValue({ data: SAMPLE, isPending: false, isError: false, refetch: vi.fn() })
+    useCanMock.mockImplementation((_module: string, action: string) => action === 'view')
+    const screen = await render(<PhilHealthConfigPage />)
+    await expect.element(screen.getByTestId('edit-philhealth-button-1')).not.toBeInTheDocument()
+    await expect.element(screen.getByTestId('delete-philhealth-button-1')).not.toBeInTheDocument()
+  })
+
 })

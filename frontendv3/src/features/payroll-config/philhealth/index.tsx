@@ -11,8 +11,8 @@ export default function PhilHealthConfigPage() {
   const pageSize = 20
   const canView = useCan('philhealth_config', 'view')
   const canCreate = useCan('philhealth_config', 'add')
-  const canEdit = false // Current backend exposes list/create only.
-  const canDelete = false // Current backend exposes list/create only.
+  const canEdit = useCan('philhealth_config', 'edit')
+  const canDelete = useCan('philhealth_config', 'delete')
 
   const { data, isPending, isError, refetch } = usePhilHealthBrackets((page - 1) * pageSize, pageSize)
 
@@ -31,7 +31,6 @@ export default function PhilHealthConfigPage() {
 
   return (
     <div className='space-y-4'>
-      <p className='text-sm text-muted-foreground'>Existing brackets can be viewed and new brackets added. Editing and deletion are not yet available.</p>
       <div className='flex items-center justify-between'>
         <div>
           <h1 className='text-2xl font-bold'>PhilHealth Configuration</h1>

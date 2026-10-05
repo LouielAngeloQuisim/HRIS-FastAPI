@@ -11,8 +11,8 @@ export default function BIRConfigPage() {
   const pageSize = 20
   const canView = useCan('bir_config', 'view')
   const canCreate = useCan('bir_config', 'add')
-  const canEdit = false // Current backend exposes list/create only.
-  const canDelete = false // Current backend exposes list/create only.
+  const canEdit = useCan('bir_config', 'edit')
+  const canDelete = useCan('bir_config', 'delete')
 
   const { data, isPending, isError, refetch } = useBIRBrackets((page - 1) * pageSize, pageSize)
 
@@ -31,7 +31,6 @@ export default function BIRConfigPage() {
 
   return (
     <div className='space-y-4'>
-      <p className='text-sm text-muted-foreground'>Existing brackets can be viewed and new brackets added. Editing and deletion are not yet available.</p>
       <div className='flex items-center justify-between'>
         <div>
           <h1 className='text-2xl font-bold'>BIR Configuration</h1>
@@ -75,7 +74,7 @@ export default function BIRConfigPage() {
                 <tr key={item.id} className='border-b last:border-0 hover:bg-muted/50'>
                   <td className='p-2'>{item.period}</td>
                   <td className='p-2'>{Number(item.bracket_min).toLocaleString()}</td>
-                  <td className='p-2'>{item.bracket_max ? Number(item.bracket_max).toLocaleString() : '—'}</td>
+                  <td className='p-2'>{item.bracket_max === null ? 'No upper limit' : Number(item.bracket_max).toLocaleString()}</td>
                   <td className='p-2'>{Number(item.base_tax).toLocaleString()}</td>
                   <td className='p-2'>{item.excess_rate}%</td>
                   <td className='p-2'>{item.effective_date}</td>

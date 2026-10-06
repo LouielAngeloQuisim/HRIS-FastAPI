@@ -18,7 +18,7 @@ dependencies = [
     "pydantic-settings>=2.15.0,<3.0.0",
     "sentry-sdk[fastapi]>=2.70.0",
     "pyjwt<3.0.0,>=2.8.0",
-    "pwdlib[argon2,bcrypt]>=0.3.0",
+    "pwdlib[argon2,bcrypt]>=0.3.1",
     "pymysql>=1.1.0",
 ]
 

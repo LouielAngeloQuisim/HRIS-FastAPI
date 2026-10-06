@@ -98,7 +98,7 @@ requires-dist = [
     { name = "pymysql", specifier = ">=1.1.0" },
     { name = "python-multipart", specifier = ">=0.0.32,<1.0.0" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.70.0" },
-    { name = "sqlmodel", specifier = ">=0.0.21,<1.0.0" },
+    { name = "sqlmodel", specifier = ">=0.0.47,<1.0.0" },
     { name = "tenacity", specifier = ">=8.2.3,<9.0.0" },
 ]
 
@@ -1533,15 +1533,16 @@ wheels = [
 
 [[package]]
 name = "sqlmodel"
-version = "0.0.31"
+version = "0.0.47"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "sqlalchemy" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/b8/e7cd6def4a773f25d6e29ffce63ccbfd6cf9488b804ab6fb9b80d334b39d/sqlmodel-0.0.31.tar.gz", hash = "sha256:2d41a8a9ee05e40736e2f9db8ea28cbfe9b5d4e5a18dd139e80605025e0c516c", size = 94952, upload-time = "2025-12-28T12:35:01.436Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/60/aa4cb68f03fa6bd1ca9e9a9ca89c3bc6c67f50981d0abcd9d6364609516d/sqlmodel-0.0.47.tar.gz", hash = "sha256:3606430ea6db7f00c8ae2157458b9766644ea3ad365c601e26a86cf23f5910d5", size = 98136, upload-time = "2026-09-23T17:31:07.921Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/72/5aa5be921800f6418a949a73c9bb7054890881143e6bc604a93d228a95a3/sqlmodel-0.0.31-py3-none-any.whl", hash = "sha256:6d946d56cac4c2db296ba1541357cee2e795d68174e2043cd138b916794b1513", size = 27093, upload-time = "2025-12-28T12:35:00.108Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/b3/988928029b0e68de7ac587c2e1ccd379aa18e7c0aa7cc426628145a032fe/sqlmodel-0.0.47-py3-none-any.whl", hash = "sha256:165294386c3e4b25fa02f151ca1abb0cbf5fdb76f6093a38aca33fdc30dfd485", size = 31314, upload-time = "2026-09-23T17:31:06.8Z" },
 ]
 
 [[package]]

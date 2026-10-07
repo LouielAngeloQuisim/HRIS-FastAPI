@@ -19,6 +19,10 @@ from app.payroll.models import (
 T = TypeVar("T", bound=Any)
 
 
+class StatutoryScheduleUnavailable(ValueError):
+    """The requested effective statutory schedule is absent or incomplete."""
+
+
 def _effective_date(value: str | None) -> date:
     if value:
         return datetime.fromisoformat(value).date()
@@ -104,7 +108,9 @@ def calculate_sss_employee_share(
     as_of = _effective_date(effective_date)
     bracket = _get_effective_sss_bracket(session, msc, as_of)
     if not bracket:
-        return Decimal("0.00")
+        raise StatutoryScheduleUnavailable(
+            f"No complete active SSS schedule is effective on {as_of.isoformat()}"
+        )
     if msc < bracket.msc_min:
         return Decimal("0.00")
     return bracket.employee_ss + bracket.employee_mpf
@@ -116,7 +122,9 @@ def calculate_sss_employer_share(
     as_of = _effective_date(effective_date)
     bracket = _get_effective_sss_bracket(session, msc, as_of)
     if not bracket:
-        return Decimal("0.00")
+        raise StatutoryScheduleUnavailable(
+            f"No complete active SSS schedule is effective on {as_of.isoformat()}"
+        )
     if msc < bracket.msc_min:
         return Decimal("0.00")
     return bracket.employer_ss + bracket.employer_ec + bracket.employer_mpf
@@ -131,7 +139,9 @@ def calculate_philhealth_employee_share(
     as_of = _effective_date(effective_date)
     bracket = _get_effective_bracket(session, PhilHealthBracket, as_of)
     if not bracket:
-        return Decimal("0.00")
+        raise StatutoryScheduleUnavailable(
+            f"No active PhilHealth schedule is effective on {as_of.isoformat()}"
+        )
     if salary < bracket.salary_min:
         basis = bracket.salary_min
     elif salary > bracket.salary_max:
@@ -158,7 +168,9 @@ def calculate_pagibig_employee_share(
     as_of = _effective_date(effective_date)
     bracket = _get_effective_pagibig_bracket(session, salary, as_of)
     if not bracket:
-        return Decimal("0.00")
+        raise StatutoryScheduleUnavailable(
+            f"No complete active Pag-IBIG schedule is effective on {as_of.isoformat()}"
+        )
     if salary < bracket.salary_min:
         return Decimal("0.00")
     basis = salary if salary <= bracket.salary_max else bracket.salary_max
@@ -172,7 +184,9 @@ def calculate_pagibig_employer_share(
     as_of = _effective_date(effective_date)
     bracket = _get_effective_pagibig_bracket(session, salary, as_of)
     if not bracket:
-        return Decimal("0.00")
+        raise StatutoryScheduleUnavailable(
+            f"No complete active Pag-IBIG schedule is effective on {as_of.isoformat()}"
+        )
     if salary < bracket.salary_min:
         return Decimal("0.00")
     basis = salary if salary <= bracket.salary_max else bracket.salary_max
@@ -202,7 +216,9 @@ def calculate_bir_tax(
     )
     brackets = session.exec(stmt).all()
     if not brackets:
-        return Decimal("0.00")
+        raise StatutoryScheduleUnavailable(
+            f"No active BIR {period_type} tax table is effective on {as_of.isoformat()}"
+        )
     latest_effective_date = max(bracket.effective_date for bracket in brackets)
     current_brackets = [bracket for bracket in brackets if bracket.effective_date == latest_effective_date]
     bracket = next(
@@ -215,7 +231,9 @@ def calculate_bir_tax(
         None,
     )
     if bracket is None:
-        return Decimal("0.00")
+        raise StatutoryScheduleUnavailable(
+            f"BIR {period_type} tax table has no bracket for taxable compensation {taxable_income}"
+        )
     taxable_excess = max(Decimal("0"), taxable_income - bracket.bracket_min)
     return (bracket.base_tax + taxable_excess * bracket.excess_rate / Decimal("100.0")).quantize(
         Decimal("0.01")

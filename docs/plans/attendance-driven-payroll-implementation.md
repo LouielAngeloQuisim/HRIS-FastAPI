@@ -20,6 +20,7 @@ Status: in progress; not release-ready. Verification was run on 2026-10-07 again
 - Review/finalization endpoints validate reviewer separation and snapshots. Finalization checks changed or newly added attendance, salary, shift/pay-group assignments, leave, holidays, policies and overlapping approved/paid runs. These guards are not a substitute for the missing complete calculation and are not reachable for the current blocked drafts.
 - A monthly contribution ledger now records one base collection per employee/scheme/calendar-month, with reasoned correction rows. The confirmed company policy must explicitly select one collection in the final period; finalization stages the ledger atomically and rejects early-period deductions, missing/mismatched monthly snapshots, non-official source hosts and duplicate collections. Current attendance drafts do not yet produce the required verified contribution snapshot, so this guard does not enable finalization.
 - Payroll run details now expose the new workflow state, per-entry blockers and calculation lines, reviewer actions with fingerprint checks, reason-required exclusions, and a separate final-approver action. Backend permissions and reviewer/preparer separation remain authoritative; this UI cannot bypass a blocked draft.
+- The legacy bracket calculators now fail with a configuration conflict when the requested effective SSS, PhilHealth, Pag-IBIG or pay-period BIR schedule is missing or does not cover the input. They no longer present absent schedule data as a valid zero deduction. Monthly contribution finalization also takes deterministic PostgreSQL transaction locks per employee/scheme/month before checking the ledger; the unique indexes remain a final integrity guard.
 - PostgreSQL outbox models and an opt-in worker create PDFs from frozen snapshots only after an authorized finalization; delivery is disabled by default. The worker treats ambiguous SMTP outcomes as uncertain rather than retrying automatically.
 
 ## Remaining before the requested workflow is complete
@@ -37,11 +38,11 @@ Status: in progress; not release-ready. Verification was run on 2026-10-07 again
 
 Verification completed on 2026-10-07 against isolated local test data:
 
-- `bash scripts/verify.sh` on the current working tree: `RESULT: PASS (exit 0)`; 861 backend tests passed (838 warnings), Ruff and mypy passed, Alembic reported no drift, TypeScript had 0 errors, 430 Vitest tests passed across 122 files, and the frontend build passed. ESLint reported 2 errors and 8 warnings; it is report-only and those findings remain for follow-up. MAP was in sync.
+- `bash scripts/verify.sh` on the current working tree before the latest fail-closed schedule change: `RESULT: PASS (exit 0)`; 861 backend tests passed (838 warnings), Ruff and mypy passed, Alembic reported no drift, TypeScript had 0 errors, 430 Vitest tests passed across 122 files, and the frontend build passed. ESLint reported 2 errors and 8 warnings; it is report-only and those findings remain for follow-up. MAP was in sync.
+- After the fail-closed schedule change and concurrent monthly-collection regression: `bash scripts/verify.sh` returned `RESULT: PASS (exit 0)`; 862 backend tests passed (838 warnings), Ruff and mypy passed, Alembic reported no drift, TypeScript had 0 errors, 430 Vitest tests passed across 122 files, and the frontend build passed. ESLint remains 2 errors and 8 warnings, report-only. MAP was in sync.
 - `bash scripts/run-e2e-qa.sh payroll`: 8/8 payroll Playwright journeys passed with one worker and zero retries against an isolated PostgreSQL database. This covers statutory page configuration CRUD, blocked payroll readiness, and blocked-draft review visibility; it does not prove successful payroll finalization or payslip delivery.
 - ESLint reported 2 errors and 8 warnings; it remains report-only in the repository gate. Pytest reported 838 warnings. These results are reported rather than hidden.
 - `git diff --check` passed after the final documentation update.
-- ESLint reported 2 errors and 8 warnings; it is report-only per the current repository gate. These have not been represented as clean.
 
 ## Sample-company simulation and source status
 

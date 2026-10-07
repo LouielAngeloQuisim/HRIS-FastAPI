@@ -249,14 +249,14 @@ class TestGovernmentCalculators:
             params={"msc": 100.0},
             headers=superuser_token_headers,
         )
-        assert response.status_code in [200, 404, 400, 422], response.text
+        assert response.status_code in [200, 404, 400, 409, 422], response.text
 
         response = client.post(
             f"{API}/philhealth/calculate",
             params={"salary": 0.0},
             headers=superuser_token_headers,
         )
-        assert response.status_code in [200, 404, 400, 422], response.text
+        assert response.status_code in [200, 404, 400, 409, 422], response.text
 
     def test_contribution_calculations_endpoint(self, client: TestClient, superuser_token_headers: dict[str, str]) -> None:
         response = client.post(
@@ -299,7 +299,7 @@ class TestPayrollApiHealth:
             params={"msc": 1000.0},
             headers=superuser_token_headers,
         )
-        assert response.status_code in [200, 404, 400]
+        assert response.status_code in [200, 404, 400, 409]
 
     def test_endpoints_responsive(self, client: TestClient, superuser_token_headers: dict[str, str]) -> None:
         public_endpoints: list[tuple[str, dict[str, float | str]]] = [
@@ -311,7 +311,7 @@ class TestPayrollApiHealth:
         ]
         for endpoint, params in public_endpoints:
             response = client.post(endpoint, params=params, headers=superuser_token_headers)
-            assert response.status_code in [200, 404, 400, 422], f"Endpoint {endpoint} returned {response.status_code}: {response.text}"
+            assert response.status_code in [200, 404, 400, 409, 422], f"Endpoint {endpoint} returned {response.status_code}: {response.text}"
 
         protected_endpoints = [
             (f"{API}/sss-brackets/", "get", None),

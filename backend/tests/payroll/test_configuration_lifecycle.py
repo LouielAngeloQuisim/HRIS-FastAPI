@@ -48,6 +48,7 @@ def test_inactive_configuration_is_not_used_by_calculator(db: Session, slug: str
     from decimal import Decimal
 
     from app.payroll.calc import (
+        StatutoryScheduleUnavailable,
         calculate_bir_tax,
         calculate_pagibig_employee_share,
         calculate_philhealth_employee_share,
@@ -57,9 +58,9 @@ def test_inactive_configuration_is_not_used_by_calculator(db: Session, slug: str
     db.add(row)
     db.commit()
     calculators = {'bir': calculate_bir_tax, 'pagibig': calculate_pagibig_employee_share, 'philhealth': calculate_philhealth_employee_share}
-    if slug == 'bir':
-        amount = calculators[slug](db, Decimal('150000'), 'monthly', '2026-02-01')
-    else:
-        amount = calculators[slug](db, Decimal('20000'), '2026-02-01')
-    assert amount == Decimal('0.00')
+    with pytest.raises(StatutoryScheduleUnavailable):
+        if slug == 'bir':
+            calculators[slug](db, Decimal('150000'), 'monthly', '2026-02-01')
+        else:
+            calculators[slug](db, Decimal('20000'), '2026-02-01')
     assert db.get(model, row.id) is not None

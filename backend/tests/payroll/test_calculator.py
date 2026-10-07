@@ -201,16 +201,12 @@ class TestSSSCalculation:
         assert data["employer_share"] == 1026.0
         assert data["total"] == 1526.0
 
-    def test_below_range_zero(self, client: TestClient, superuser_token_headers, sss_brackets):
+    def test_uncovered_sss_salary_is_a_configuration_conflict(self, client: TestClient, superuser_token_headers, sss_brackets):
         response = client.post(f"{API}/sss/calculate",
                                params={"msc": 1000.0, "effective_date": "2024-01-01"},
                                headers=superuser_token_headers)
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert set(data) == SSS_KEYS
-        assert data["employee_share"] == 0.0
-        assert data["employer_share"] == 0.0
-        assert data["total"] == 0.0
+        assert response.status_code == 409, response.text
+        assert "No complete active SSS schedule" in response.text
 
     def test_above_range_clamps_to_max(self, client: TestClient, superuser_token_headers, sss_brackets):
         response = client.post(f"{API}/sss/calculate",
@@ -245,14 +241,11 @@ class TestSSSCalculation:
         assert data["employee_share"] == 500.0
         assert data["employer_share"] == 1026.0
 
-    def test_boundary_row_just_below_minimum(self, client: TestClient, superuser_token_headers, sss_brackets):
+    def test_salary_just_below_schedule_is_not_silently_zeroed(self, client: TestClient, superuser_token_headers, sss_brackets):
         response = client.post(f"{API}/sss/calculate",
                                params={"msc": 1999.99, "effective_date": "2024-01-01"},
                                headers=superuser_token_headers)
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert data["employee_share"] == 0.0
-        assert data["employer_share"] == 0.0
+        assert response.status_code == 409, response.text
 
     def test_rejects_non_positive_msc(self, client: TestClient, superuser_token_headers, sss_brackets):
         response = client.post(f"{API}/sss/calculate",
@@ -581,15 +574,14 @@ class TestBIRCalculation:
         assert expected[0] == 4687.49
         assert expected[0] == expected[1]
 
-    def test_valid_period_with_no_brackets_yields_zero(self, client: TestClient, superuser_token_headers, bir_brackets):
-        # "weekly" is valid enum but no weekly rows → 0.0 tax.
+    def test_valid_period_with_no_brackets_is_a_configuration_conflict(self, client: TestClient, superuser_token_headers, bir_brackets):
+        # "weekly" is valid but only a monthly schedule is configured. A
+        # missing table must never be indistinguishable from a zero-tax result.
         response = client.post(f"{API}/bir/calculate",
                                params={"taxable_income": 25000.0, "period_type": "weekly"},
                                headers=superuser_token_headers)
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert set(data) == BIR_KEYS
-        assert data["tax_amount"] == 0.0
+        assert response.status_code == 409, response.text
+        assert "No active BIR weekly tax table" in response.text
 
     def test_rejects_non_positive_taxable_income(self, client: TestClient, superuser_token_headers, bir_brackets):
         response = client.post(f"{API}/bir/calculate",
@@ -729,25 +721,15 @@ class TestBatchContributionCalculation:
         assert c["taxable_income"] == 13925.0
         assert c["bir"] == 2960.41
 
-    def test_calculate_contributions_low_gross_pay(self, client: TestClient, superuser_token_headers,
+    def test_calculate_contributions_with_incomplete_sss_schedule_fails_closed(self, client: TestClient, superuser_token_headers,
                                                     sss_brackets, philhealth_brackets, pagibig_brackets,
                                                     bir_brackets):
         response = client.post(f"{API}/calculate-contributions/",
                                params={"gross_pay": 1000.0, "period_type": "monthly",
                                        "effective_date": "2024-01-01"},
                                headers=superuser_token_headers)
-        assert response.status_code == 200, response.text
-        c = response.json()["contributions"]
-        assert set(c) == BATCH_CONTRIBUTION_KEYS
-        assert c["sss_employee"] == 0.0
-        assert c["sss_employer"] == 0.0
-        assert c["philhealth_employee"] == 250.0
-        assert c["philhealth_employer"] == 250.0
-        assert c["pagibig_employee"] == 10.0
-        assert c["pagibig_employer"] == 20.0
-        assert _dec(c["taxable_income"]) == Decimal("1000.00") - Decimal("250.00") - Decimal("10.00")
-        assert c["taxable_income"] == 740.0
-        assert c["bir"] == 148.0
+        assert response.status_code == 409, response.text
+        assert "No complete active SSS schedule" in response.text
 
     def test_rejects_non_positive_gross_pay(self, client: TestClient, superuser_token_headers):
         response = client.post(f"{API}/calculate-contributions/",

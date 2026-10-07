@@ -33,6 +33,7 @@ from app.payroll.attendance_calculator import (
     calculate_attendance_earnings,
 )
 from app.payroll.calc import (
+    StatutoryScheduleUnavailable,
     calculate_all_contributions,
     calculate_bir_tax,
     calculate_pagibig_employee_share,
@@ -179,6 +180,26 @@ def _stage_monthly_contribution_ledger(
         return
     month = run.date_to.replace(day=1)
     schemes = ("sss", "philhealth", "pagibig")
+    # Finalizing two different runs for the same employee/month at once must
+    # serialize before either transaction checks the ledger. The unique index
+    # remains the last line of defense for writers outside this workflow.
+    for employee_id in sorted(
+        {
+            entry.employee_id
+            for entry in entries
+            if entry.review_state != "excluded" and entry.employee_id is not None
+        },
+        key=lambda value: value.hex,
+    ):
+        for scheme in schemes:
+            lock_key = int.from_bytes(
+                hashlib.sha256(
+                    f"payroll-contribution:{employee_id}:{scheme}:{month.isoformat()}".encode()
+                ).digest()[:8],
+                "big",
+                signed=True,
+            )
+            session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
     for entry in entries:
         if entry.review_state == "excluded":
             continue
@@ -900,7 +921,14 @@ def finalize_payroll_run(
                 next_attempt_at=delivery_due_at.astimezone(timezone.utc),
             )
         )
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Payroll finalization conflicted with another run or an existing monthly contribution; refresh and review again.",
+        ) from exc
     reviewed, excluded, unresolved = _payroll_review_counts(session, run_id)
     return PayrollReviewActionResult(
         run_id=run_id,
@@ -3102,9 +3130,12 @@ async def calculate_contributions_endpoint(
     _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate all government contributions for a given gross pay amount."""
-    result = calculate_all_contributions(
-        session, gross_pay, period_type, effective_date
-    )
+    try:
+        result = calculate_all_contributions(
+            session, gross_pay, period_type, effective_date
+        )
+    except StatutoryScheduleUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"contributions": {k: float(v) for k, v in result.items()}}
 
 
@@ -3117,8 +3148,11 @@ async def calculate_sss(
     _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate total SSS contribution (employee + employer) for a given MSC."""
-    employee = calculate_sss_employee_share(session, msc, effective_date)
-    employer = calculate_sss_employer_share(session, msc, effective_date)
+    try:
+        employee = calculate_sss_employee_share(session, msc, effective_date)
+        employer = calculate_sss_employer_share(session, msc, effective_date)
+    except StatutoryScheduleUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "employee_share": float(employee),
         "employer_share": float(employer),
@@ -3135,8 +3169,11 @@ async def calculate_philhealth(
     _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate PhilHealth contribution (employee + employer)."""
-    employee = calculate_philhealth_employee_share(session, salary, effective_date)
-    employer = calculate_philhealth_employer_share(session, salary, effective_date)
+    try:
+        employee = calculate_philhealth_employee_share(session, salary, effective_date)
+        employer = calculate_philhealth_employer_share(session, salary, effective_date)
+    except StatutoryScheduleUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "employee_share": float(employee),
         "employer_share": float(employer),
@@ -3153,8 +3190,11 @@ async def calculate_pagibig(
     _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate Pag-IBIG contribution (employee + employer)."""
-    employee = calculate_pagibig_employee_share(session, salary, effective_date)
-    employer = calculate_pagibig_employer_share(session, salary, effective_date)
+    try:
+        employee = calculate_pagibig_employee_share(session, salary, effective_date)
+        employer = calculate_pagibig_employer_share(session, salary, effective_date)
+    except StatutoryScheduleUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "employee_share": float(employee),
         "employer_share": float(employer),
@@ -3173,7 +3213,10 @@ async def calculate_bir(
     _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate BIR withholding tax."""
-    tax = calculate_bir_tax(session, taxable_income, period_type)
+    try:
+        tax = calculate_bir_tax(session, taxable_income, period_type)
+    except StatutoryScheduleUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"tax_amount": float(tax)}
 
 

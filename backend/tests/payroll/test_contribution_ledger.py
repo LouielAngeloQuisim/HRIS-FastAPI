@@ -3,6 +3,9 @@
 import uuid
 from datetime import date
 from decimal import Decimal
+from threading import Event
+from time import sleep
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi import HTTPException
@@ -10,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config.settings import settings
+from app.config.database import engine
 from app.employee.models import EmployeeRecords
 from app.payroll.models import (
     PayrollContributionLedger,
@@ -218,3 +222,103 @@ def test_first_period_cannot_withhold_monthly_contributions(db: Session) -> None
             actor_id=actor.id,
         )
     db.rollback()
+
+
+def test_concurrent_finalization_serializes_monthly_contribution_collection(
+    db: Session,
+) -> None:
+    actor = db.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).one()
+    employee = EmployeeRecords(
+        employee_code=f"LEDGER-RACE-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Ledger Race",
+        birthdate=date(1990, 1, 1),
+    )
+    db.add(employee)
+    db.flush()
+    entries = [_entry(db, employee.id, actor.id, day=16) for _ in range(2)]
+    for entry in entries:
+        entry.deductions = {
+            "sss_employee": "1000.00",
+            "philhealth_employee": "325.00",
+            "pagibig_employee": "200.00",
+        }
+        entry.input_snapshot = {
+            "monthly_contributions": {
+                "month": "2026-10",
+                "schemes": {
+                    scheme: {
+                        "basis": "26000.00",
+                        "employee": amount,
+                        "employer": amount,
+                        "source_references": [
+                            {
+                                "sss": "https://www.sss.gov.ph/sss-contribution-table/",
+                                "philhealth": "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
+                                "pagibig": "https://www.pagibigfund.gov.ph/",
+                            }[scheme]
+                        ],
+                    }
+                    for scheme, amount in (
+                        ("sss", "1000.00"),
+                        ("philhealth", "325.00"),
+                        ("pagibig", "200.00"),
+                    )
+                },
+            }
+        }
+    db.commit()
+    entry_ids = [entry.id for entry in entries]
+    run_ids = [entry.payroll_run_id for entry in entries]
+    staged = Event()
+    release_first = Event()
+    second_started = Event()
+
+    def first_transaction() -> None:
+        with Session(engine) as session:
+            run = session.get(PayrollRun, run_ids[0])
+            entry = session.get(PayrollEntry, entry_ids[0])
+            assert run is not None and entry is not None
+            _stage_monthly_contribution_ledger(
+                session=session, run=run, entries=[entry], actor_id=actor.id
+            )
+            staged.set()
+            assert release_first.wait(timeout=5)
+            session.commit()
+
+    def second_transaction() -> int:
+        assert staged.wait(timeout=5)
+        second_started.set()
+        with Session(engine) as session:
+            run = session.get(PayrollRun, run_ids[1])
+            entry = session.get(PayrollEntry, entry_ids[1])
+            assert run is not None and entry is not None
+            with pytest.raises(HTTPException, match="already has"):
+                _stage_monthly_contribution_ledger(
+                    session=session, run=run, entries=[entry], actor_id=actor.id
+                )
+            session.rollback()
+        return 409
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(first_transaction)
+            second = executor.submit(second_transaction)
+            assert staged.wait(timeout=5)
+            assert second_started.wait(timeout=5)
+            sleep(0.1)
+            assert not second.done(), "second finalizer bypassed the transaction lock"
+            release_first.set()
+            first.result(timeout=5)
+            assert second.result(timeout=5) == 409
+    finally:
+        release_first.set()
+
+    rows = db.exec(
+        select(PayrollContributionLedger).where(
+            PayrollContributionLedger.employee_id == employee.id,
+            PayrollContributionLedger.contribution_month == date(2026, 10, 1),
+            PayrollContributionLedger.sequence == 0,
+        )
+    ).all()
+    assert len(rows) == 3

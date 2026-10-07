@@ -1057,6 +1057,7 @@ export interface BIRBracketPublic {
   base_tax: string
   excess_rate: string
   effective_date: string
+  source_reference: string | null
   is_active: boolean
   is_deleted: boolean
   created_at: string | null
@@ -1070,6 +1071,7 @@ export interface BIRBracketCreate {
   base_tax: number
   excess_rate: number
   effective_date: string
+  source_reference?: string | null
   is_active?: boolean
 }
 
@@ -1080,6 +1082,7 @@ export interface BIRBracketUpdate {
   base_tax?: number
   excess_rate?: number
   effective_date?: string
+  source_reference?: string | null
   is_active?: boolean
 }
 

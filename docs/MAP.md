@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-07
-Source commit: 89a01d801ff2f2fb1492669fc189a0d00c14a1cd
+Source commit: 64a48a1822ff4c93f7c3af1b576a0d9b526f337d
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
@@ -480,7 +480,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 36 revisions, single head `7c8d9e0f1a2b`
+## Migration chain (oldest -> newest): 37 revisions, single head `8d9e0f1a2b3c`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -521,6 +521,7 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 34. `9d04b5c6d7e8` - Add payroll review snapshots and durable payslip-delivery outbox.
 35. `67e279f8c3cc` - Add monthly payroll contribution ledger
 36. `7c8d9e0f1a2b` - Add compensation-to-MSC mapping fields to SSS schedules.
+37. `8d9e0f1a2b3c` - Record source references and seed BIR Annex E when no schedule exists.
 
 ### Migration anomalies (static findings, report-only)
 

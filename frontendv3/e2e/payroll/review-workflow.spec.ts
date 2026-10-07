@@ -83,12 +83,6 @@ test('blocked attendance payroll draft is visible in the review screen but canno
     salary_min: '0.01', salary_max: '10000.00', employee_rate: '2',
     employer_rate: '2', effective_date: '2024-02-01',
   })
-  for (const period of ['daily', 'weekly', 'semi_monthly', 'monthly']) {
-    await createResource(page, 'bir-brackets/', {
-      period, bracket_min: '0', bracket_max: null, base_tax: '0',
-      excess_rate: '0', effective_date: '2023-01-01',
-    })
-  }
   const confirmedPolicy = await page.request.post(`${apiUrl}/payroll/policies/${policy.id}/confirm`, {
     headers: await bearer(page),
   })

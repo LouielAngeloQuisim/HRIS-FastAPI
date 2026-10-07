@@ -31,6 +31,7 @@ const formSchema = z.object({
   base_tax: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.'),
   excess_rate: z.coerce.number<number>().min(0, 'Enter 0 or a positive value.').max(100, 'Enter a percentage between 0 and 100.'),
   effective_date: z.string().min(1, 'Select an effective date.'),
+  source_reference: z.string().url('Enter a valid source URL.').refine((value) => value.startsWith('https://'), 'Use a secure HTTPS source URL.').or(z.literal('')),
 })
 type FormData = z.infer<typeof formSchema>
 
@@ -54,6 +55,7 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
           base_tax: Number(item.base_tax),
           excess_rate: Number(item.excess_rate),
           effective_date: item.effective_date,
+          source_reference: item.source_reference ?? '',
         }
       : {
           period: 'monthly',
@@ -62,6 +64,7 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
           base_tax: 0,
           excess_rate: 0,
           effective_date: '',
+          source_reference: '',
         },
   })
 
@@ -69,9 +72,9 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
     form.clearErrors('root.server')
     try {
       if (item) {
-        await updateMutation.mutateAsync({ id: item.id, data })
+        await updateMutation.mutateAsync({ id: item.id, data: { ...data, source_reference: data.source_reference || null } })
       } else {
-        await createMutation.mutateAsync(data)
+        await createMutation.mutateAsync({ ...data, source_reference: data.source_reference || null })
       }
       onClose()
     } catch (error) {
@@ -169,6 +172,19 @@ export function BIRResourceForm({ item, onClose, open }: Props) {
                   <FormLabel>Effective Date</FormLabel>
                   <FormControl>
                     <Input type='date' {...field} data-testid="bir-effective-date-input" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='source_reference'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Source reference URL (optional)</FormLabel>
+                  <FormControl>
+                    <Input type='url' {...field} placeholder='https://www.bir.gov.ph/...' data-testid='bir-source-reference-input' />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

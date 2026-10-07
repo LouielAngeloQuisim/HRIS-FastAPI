@@ -31,6 +31,7 @@ const SAMPLE = {
       base_tax: 0,
       excess_rate: 20,
       effective_date: '2024-01-01',
+      source_reference: null,
     },
   ],
   count: 1,
@@ -51,6 +52,25 @@ describe('BIRConfigPage', () => {
     await expect.element(getByRole('cell', { name: '20,833', exact: true })).toBeInTheDocument()
     await expect.element(getByRole('cell', { name: '20%' })).toBeInTheDocument()
     await expect.element(getByText('1 bracket records')).toBeInTheDocument()
+  })
+
+  it('labels rows without provenance as unverified legacy values', async () => {
+    useBIRBracketsMock.mockReturnValue({ data: SAMPLE, isPending: false, isError: false, refetch: vi.fn() })
+    useCanMock.mockReturnValue(true)
+    const { getByText } = await render(<BIRConfigPage />)
+    await expect.element(getByText('No source recorded')).toBeInTheDocument()
+  })
+
+  it('shows secure source references as links', async () => {
+    useBIRBracketsMock.mockReturnValue({
+      data: { ...SAMPLE, data: [{ ...SAMPLE.data[0], source_reference: 'https://bir.gov.ph/table.pdf' }] },
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    useCanMock.mockReturnValue(true)
+    const { getByRole } = await render(<BIRConfigPage />)
+    await expect.element(getByRole('link', { name: 'View source' })).toHaveAttribute('href', 'https://bir.gov.ph/table.pdf')
   })
 
   it('shows permission denial when canView is false', async () => {

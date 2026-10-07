@@ -134,7 +134,7 @@ export POSTGRES_PASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' <<<"$qa_container_
 [[ -n "$POSTGRES_PASSWORD" ]] || { echo 'QA container has no configured POSTGRES_PASSWORD' >&2; exit 2; }
 export LOGIN_RATE_LIMIT_ATTEMPTS=1000 E2E_SEED_ALLOWED=true E2E_EXTERNAL_SERVERS=true
 export BACKEND_CORS_ORIGINS='["http://127.0.0.1:5173"]' FRONTEND_HOST=http://127.0.0.1:5173
-export E2E_BASE_URL=http://127.0.0.1:5173 E2E_API_URL=http://127.0.0.1:8000/api/v1 VITE_API_URL=http://127.0.0.1:8000
+export E2E_BASE_URL=http://127.0.0.1:5173 E2E_API_URL=http://127.0.0.1:8000/api/v1 VITE_API_URL=http://127.0.0.1:8000 VITE_ENABLE_DEVTOOLS=false
 export E2E_ADMIN_EMAIL=admin@example.com E2E_ADMIN_PASSWORD=e2e-admin-placeholder E2E_USER_EMAIL=user@example.com E2E_USER_PASSWORD=e2e-user-placeholder
 export LD_LIBRARY_PATH="$ROOT/frontendv3/.playwright-libs/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 qa_database_created=1

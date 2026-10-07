@@ -58,9 +58,11 @@ def test_inactive_configuration_is_not_used_by_calculator(db: Session, slug: str
     db.add(row)
     db.commit()
     calculators = {'bir': calculate_bir_tax, 'pagibig': calculate_pagibig_employee_share, 'philhealth': calculate_philhealth_employee_share}
-    with pytest.raises(StatutoryScheduleUnavailable):
-        if slug == 'bir':
-            calculators[slug](db, Decimal('150000'), 'monthly', '2026-02-01')
-        else:
+    if slug == 'bir':
+        # The official active Annex E table remains authoritative; this newly
+        # created inactive row must not override it for the same period.
+        assert calculators[slug](db, Decimal('150000'), 'monthly', '2026-02-01') == Decimal('29375.05')
+    else:
+        with pytest.raises(StatutoryScheduleUnavailable):
             calculators[slug](db, Decimal('20000'), '2026-02-01')
     assert db.get(model, row.id) is not None

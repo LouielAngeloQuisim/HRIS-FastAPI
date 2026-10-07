@@ -19,6 +19,12 @@ for (const [kind, fields, change] of [
     await loginAsAdmin()
     const config = new StatutoryConfigurationPage(page, kind)
     await config.open()
+    if (kind === 'bir') {
+      await expect(page.getByRole('link', { name: 'View source' }).first()).toHaveAttribute(
+        'href',
+        'https://bir-cdn.bir.gov.ph/local/pdf/Annex%20E%20RR%2011-2018.pdf',
+      )
+    }
     await page.getByTestId(`add-${kind}-button`).click()
     await config.fill({ ...fields, effective_date: '2028-01-01' })
     const created = await config.submit('POST')

@@ -106,7 +106,7 @@ BATCH_CONTRIBUTION_KEYS = {
 PUBLIC_KEYS = {"id", "salary_min", "salary_max", "effective_date", "is_active", "is_deleted", "rate", "created_at", "updated_at"}
 BIR_PUBLIC_KEYS = {
     "id", "period", "bracket_min", "bracket_max", "base_tax", "excess_rate",
-    "effective_date", "is_active", "is_deleted", "created_at", "updated_at",
+    "effective_date", "source_reference", "is_active", "is_deleted", "created_at", "updated_at",
 }
 PAGIBIG_PUBLIC_KEYS = {"id", "salary_min", "salary_max", "effective_date", "is_active", "is_deleted", "employee_rate", "employer_rate", "created_at", "updated_at"}
 SSS_PUBLIC_KEYS = {
@@ -654,7 +654,11 @@ class TestBIRCalculation:
         # "weekly" is valid but only a monthly schedule is configured. A
         # missing table must never be indistinguishable from a zero-tax result.
         response = client.post(f"{API}/bir/calculate",
-                               params={"taxable_income": 25000.0, "period_type": "weekly"},
+                               params={
+                                   "taxable_income": 25000.0,
+                                   "period_type": "weekly",
+                                   "effective_date": "2022-12-31",
+                               },
                                headers=superuser_token_headers)
         assert response.status_code == 409, response.text
         assert "No active BIR weekly tax table" in response.text
@@ -666,6 +670,15 @@ class TestBIRCalculation:
         assert response.status_code == 422, response.text
         body = response.json()
         assert body["error"]["message"] == "Request validation failed"
+
+    def test_rejects_malformed_effective_date(self, client: TestClient, superuser_token_headers, bir_brackets):
+        response = client.post(
+            f"{API}/bir/calculate",
+            params={"taxable_income": 25000.0, "period_type": "monthly", "effective_date": "not-a-date"},
+            headers=superuser_token_headers,
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["error"]["message"] == "Request validation failed"
 
 
 # --------------------------------------------------------------------------- #

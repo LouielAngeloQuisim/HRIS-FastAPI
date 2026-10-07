@@ -158,6 +158,7 @@ class BIRBracketBase(SQLModel):
     base_tax: Decimal
     excess_rate: Decimal
     effective_date: date
+    source_reference: str | None = Field(default=None, max_length=512)
 
 
 class BIRBracketCreate(BIRBracketBase):
@@ -171,6 +172,7 @@ class BIRBracketUpdate(SQLModel):
     base_tax: Decimal | None = None
     excess_rate: Decimal | None = None
     effective_date: date | None = None
+    source_reference: str | None = Field(default=None, max_length=512)
     is_active: bool | None = None
 
 

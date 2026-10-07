@@ -212,7 +212,7 @@ class PagIBIGBracket(SQLModel, table=True):
 class BIRBracket(SQLModel, table=True):
     """BIR withholding tax bracket row (TRAIN, per payment period).
 
-    Source: BIR RR 11-2018 as amended (2023-2025 adjusted brackets). ``period``
+    Source: BIR RR 11-2018 Annex E (effective 2023 onward). ``period``
     selects the daily/weekly/semi_monthly/monthly table; ``bracket_max`` is
     nullable for the open-ended top bracket. Tax = base_tax + excess × rate.
     """
@@ -233,6 +233,7 @@ class BIRBracket(SQLModel, table=True):
     base_tax: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
     excess_rate: Decimal = Field(sa_column=Numeric(6, 3))  # type: ignore
     effective_date: date
+    source_reference: str | None = Field(default=None, max_length=512)
     is_active: bool = Field(default=True)
     is_deleted: bool = Field(default=False)
     deleted_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore

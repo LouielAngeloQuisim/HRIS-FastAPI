@@ -3623,12 +3623,18 @@ async def calculate_bir(
     period_type: str = Query(
         default="monthly", description="Pay period type for BIR bracket lookup"
     ),
+    effective_date: date | None = Query(default=None),
     session: SessionDep,
     _current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Calculate BIR withholding tax."""
     try:
-        tax = calculate_bir_tax(session, taxable_income, period_type)
+        tax = calculate_bir_tax(
+            session,
+            taxable_income,
+            period_type,
+            effective_date.isoformat() if effective_date else None,
+        )
     except StatutoryScheduleUnavailable as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"tax_amount": float(tax)}

@@ -538,3 +538,182 @@ def test_daily_and_hourly_pay_bases_are_calculated_for_nonfinal_periods(
         blocker["code"] for blocker in entry["blockers"]
     }
     assert "bir_withholding" in entry["deductions"]
+
+
+@pytest.mark.parametrize(
+    ("year", "pay_type", "basic_rate"),
+    [
+        (2027, PayType.DAILY, "1000.00"),
+        (2028, PayType.HOURLY, "125.00"),
+    ],
+)
+def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+    year: int,
+    pay_type: PayType,
+    basic_rate: str,
+) -> None:
+    employee = EmployeeRecords(
+        employee_code=f"MONTHLY-CONT-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Contribution",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2020, 1, 1),
+    )
+    group = PayrollPayGroup(
+        code=f"MC-{uuid.uuid4().hex[:8]}",
+        name="QA contribution twice-monthly",
+        cadence="semi_monthly",
+        first_period_end_day=15,
+        second_period_end_day=31,
+        weekend_rule="next_business_day",
+    )
+    shift = Shift(
+        code=f"MC-{uuid.uuid4().hex[:8]}",
+        name="Weekday eight-hour shift",
+        start_time="08:00",
+        end_time="17:00",
+        total_hours_minus_lunch=480,
+    )
+    db.add_all([employee, group, shift])
+    db.flush()
+    base_rate = Decimal(basic_rate)
+    updated_rate = base_rate * Decimal("1.2")
+    db.add_all(
+        [
+            EmployeeSalary(
+                employee_id=employee.id,
+                basic_rate=basic_rate,
+                effective_date=date(year, 1, 1),
+                pay_type=pay_type,
+            ),
+            EmployeeSalary(
+                employee_id=employee.id,
+                basic_rate=updated_rate,
+                effective_date=date(year, 10, 16),
+                pay_type=pay_type,
+            ),
+            EmployeePayGroupAssignment(
+                employee_id=employee.id,
+                pay_group_id=group.id,
+                effective_from=date(year, 1, 1),
+            ),
+            EmployeeShiftAssignment(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                effective_from=date(year, 1, 1),
+            ),
+            EmployeeTaxYearDeclaration(
+                employee_id=employee.id,
+                tax_year=year,
+                tax_classification="ordinary",
+                opening_as_of=date(2025, 12, 31),
+                taxable_compensation_ytd="0.00",
+                tax_withheld_ytd="0.00",
+                previous_employer_included=False,
+                is_verified=True,
+            ),
+            PayrollPolicyVersion(
+                version=930_000 + int(uuid.uuid4().hex[:6], 16),
+                effective_from=date(year, 1, 1),
+                effective_to=date(year, 12, 31),
+                policy={
+                    "timezone": "Asia/Manila",
+                    "monthly_divisor": "22",
+                    "daily_partial_work": "pro_rated",
+                    "paid_leave": False,
+                    "paid_holidays": False,
+                    "break_minutes": 60,
+                    "grace_minutes": 0,
+                    "overtime_rule": {"multiplier": "1.25"},
+                    "premium_rules": {},
+                    "allowance_tax_treatment": {},
+                    "rounding_mode": "half_up",
+                    "contribution_collection": {
+                        "frequency": "once_monthly",
+                        "collection_period": "last_period",
+                    },
+                    "statutory_sources_reviewed": [
+                        "https://www.sss.gov.ph/pay-contribution/",
+                        "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
+                        "https://www.pagibigfund.gov.ph/document/pdf/circulars/provident/HDMF%20Circular%20No.%20274.pdf",
+                    ],
+                },
+                confirmed=True,
+            ),
+        ]
+    )
+    for day in range(1, 32):
+        work_date = date(year, 10, day)
+        if work_date.weekday() >= 5:
+            continue
+        db.add(
+            DailyTimeRecord(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                login_date=datetime(year, 10, day, tzinfo=timezone.utc),
+                logout_date=datetime(year, 10, day, tzinfo=timezone.utc)
+                + timedelta(hours=9),
+                work_date=work_date,
+                rendered_minutes=480,
+                overtime_minutes=0,
+                is_absent=False,
+                is_time_calculated=True,
+            )
+        )
+    db.commit()
+
+    response = client.post(
+        f"{API}/runs/prepare-attendance-draft",
+        json={
+            "pay_group_id": str(group.id),
+            "date_from": f"{year}-10-16",
+            "date_to": f"{year}-10-31",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 201, response.text
+    entry = next(
+        row
+        for row in response.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    period_days = sum(
+        1 for day in range(16, 32) if date(year, 10, day).weekday() < 5
+    )
+    hours_per_shift = (
+        Decimal(8) if pay_type == PayType.HOURLY else Decimal(1)
+    )
+    daily_basis_before_change = base_rate * hours_per_shift
+    daily_basis_after_change = updated_rate * hours_per_shift
+    days_before_change = sum(
+        1 for day in range(1, 16) if date(year, 10, day).weekday() < 5
+    )
+    days_after_change = period_days
+    expected_period_gross = daily_basis_after_change * Decimal(days_after_change)
+    assert Decimal(entry["gross_pay"]) == expected_period_gross, entry["blockers"]
+    assert not any(
+        blocker["code"].startswith("monthly_contribution_")
+        or blocker["code"] == "statutory_schedule_unavailable"
+        for blocker in entry["blockers"]
+    ), entry["blockers"]
+    bases = entry["input_snapshot"]["monthly_contributions"]["schemes"]
+    expected_actual = (
+        daily_basis_before_change * Decimal(days_before_change)
+        + daily_basis_after_change * Decimal(days_after_change)
+    ).quantize(Decimal("0.01"))
+    expected_philhealth_basis = (
+        daily_basis_before_change
+        * Decimal("22")
+        * Decimal("15")
+        / Decimal("31")
+        + daily_basis_after_change
+        * Decimal("22")
+        * Decimal("16")
+        / Decimal("31")
+    ).quantize(Decimal("0.01"))
+    assert bases["sss"]["basis"] == str(expected_actual)
+    assert bases["philhealth"]["basis"] == str(expected_philhealth_basis)
+    assert bases["pagibig"]["basis"] == str(expected_actual)

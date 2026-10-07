@@ -320,12 +320,7 @@ def _monthly_contribution_snapshot(
     contribution_month: date,
     source_urls: Sequence[str],
 ) -> dict[str, Any]:
-    """Calculate the three monthly contribution shares from active schedules.
-
-    This currently supports a fixed monthly salary basis. Daily/hourly and
-    mid-month compensation changes are blocked by the caller until their
-    statutory monthly assessment basis is available.
-    """
+    """Calculate the three monthly contribution shares from active schedules."""
     effective_date = contribution_month.replace(day=calendar.monthrange(
         contribution_month.year, contribution_month.month
     )[1])
@@ -374,6 +369,7 @@ def _monthly_contribution_snapshot(
     }
 
 
+
     schedule_rows = {scheme: sources(model) for scheme, model in scheme_models.items()}
     if any(not rows for rows in schedule_rows.values()):
         raise StatutoryScheduleUnavailable(
@@ -416,6 +412,114 @@ def _monthly_contribution_snapshot(
             for scheme, (basis, employee, employer) in amount_lines.items()
         },
     }
+
+
+def _philhealth_monthly_basic_salary_basis(
+    *,
+    session: Session,
+    employee_id: uuid.UUID,
+    salaries: Sequence[EmployeeSalary],
+    contribution_month: date,
+    monthly_divisor: Decimal,
+) -> Decimal:
+    """Return the contract basic-salary monthly equivalent, independent of attendance.
+
+    PhilHealth's published MBS definition excludes overtime and deductions for
+    absences/undertime. For daily/hourly rates this uses the explicitly confirmed
+    company monthly divisor and effective shift schedule, not actual worked days.
+    A missing effective salary or shift is a blocker rather than a guessed rate.
+    """
+    days_in_month = calendar.monthrange(
+        contribution_month.year, contribution_month.month
+    )[1]
+    month_end = contribution_month.replace(day=days_in_month)
+    assignments = session.exec(
+        select(EmployeeShiftAssignment).where(
+            EmployeeShiftAssignment.employee_id == employee_id,
+            EmployeeShiftAssignment.effective_from <= month_end,
+            (col(EmployeeShiftAssignment.effective_to).is_(None))
+            | (col(EmployeeShiftAssignment.effective_to) >= contribution_month),
+            col(EmployeeShiftAssignment.is_deleted).is_(False),
+        )
+    ).all()
+    shift_ids = {assignment.shift_id for assignment in assignments}
+    shifts = (
+        {
+            shift.id: shift
+            for shift in session.exec(
+                select(Shift).where(
+                    col(Shift.id).in_(shift_ids), col(Shift.is_deleted).is_(False)
+                )
+            ).all()
+        }
+        if shift_ids
+        else {}
+    )
+    effective_salaries = [
+        salary for salary in salaries if salary.effective_date <= month_end
+    ]
+    if not effective_salaries:
+        raise StatutoryScheduleUnavailable(
+            "An effective salary is required for the contribution month"
+        )
+
+    if effective_salaries[0].effective_date > contribution_month:
+        raise StatutoryScheduleUnavailable(
+            "An effective salary is required from the first day of the contribution month"
+        )
+
+    monthly_weighted = Decimal("0")
+    for index, salary in enumerate(effective_salaries):
+        segment_start = max(contribution_month, salary.effective_date)
+        next_salary_date = (
+            effective_salaries[index + 1].effective_date
+            if index + 1 < len(effective_salaries)
+            else month_end + timedelta(days=1)
+        )
+        segment_end = min(month_end, next_salary_date - timedelta(days=1))
+        if segment_start > segment_end:
+            continue
+        segment_days = (segment_end - segment_start).days + 1
+        pay_type = str(getattr(salary.pay_type, "value", salary.pay_type))
+        if pay_type == "monthly":
+            equivalent = salary.basic_rate
+        elif pay_type in {"daily", "hourly"}:
+            scheduled_minutes: list[Decimal] = []
+            cursor = segment_start
+            while cursor <= segment_end:
+                assignment = next(
+                    (
+                        row for row in assignments
+                        if row.effective_from <= cursor
+                        and (row.effective_to is None or row.effective_to >= cursor)
+                    ),
+                    None,
+                )
+                shift = shifts.get(assignment.shift_id) if assignment else None
+                if shift is None:
+                    raise StatutoryScheduleUnavailable(
+                        f"An effective shift is required to convert the {pay_type} PhilHealth basic salary on {cursor.isoformat()}"
+                    )
+                if cursor.isoweekday() in {int(value) for value in shift.days_of_week}:
+                    scheduled_minutes.append(Decimal(str(shift.total_hours_minus_lunch)))
+                cursor += timedelta(days=1)
+            if not scheduled_minutes:
+                raise StatutoryScheduleUnavailable(
+                    f"No scheduled workdays are available to convert the {pay_type} PhilHealth basic salary from {segment_start.isoformat()}"
+                )
+            average_minutes = sum(scheduled_minutes, Decimal("0")) / Decimal(
+                len(scheduled_minutes)
+            )
+            daily_equivalent = salary.basic_rate
+            if pay_type == "hourly":
+                daily_equivalent = salary.basic_rate * average_minutes / Decimal(60)
+            equivalent = daily_equivalent * monthly_divisor
+        else:
+            raise StatutoryScheduleUnavailable(
+                f"Unsupported salary basis {pay_type!r} for PhilHealth monthly conversion"
+            )
+        monthly_weighted += equivalent * Decimal(segment_days) / Decimal(days_in_month)
+    return monthly_weighted.quantize(Decimal("0.01"))
 
 
 def _same_calendar_day(value: date | datetime | str, expected: date) -> bool:
@@ -2813,31 +2917,12 @@ def prepare_attendance_payroll_draft(
         )[1]
         if final_period_of_month:
             month_start = obj_in.date_to.replace(day=1)
-            salary_changes_in_month = [
-                salary
-                for salary in employee_salaries
-                if salary.effective_date > month_start
-            ]
             effective_salary = employee_salaries[-1] if employee_salaries else None
             if effective_salary is None:
                 blockers.append(
                     PayrollPreflightBlocker(
                         code="monthly_contribution_salary_missing",
                         message="A monthly salary is required to calculate this employee's once-monthly statutory contributions.",
-                    )
-                )
-            elif str(getattr(effective_salary.pay_type, "value", effective_salary.pay_type)) != "monthly":
-                blockers.append(
-                    PayrollPreflightBlocker(
-                        code="monthly_contribution_basis_unsupported",
-                        message="Once-monthly statutory contributions currently require a fixed monthly salary basis; daily/hourly conversion must be configured first.",
-                    )
-                )
-            elif salary_changes_in_month:
-                blockers.append(
-                    PayrollPreflightBlocker(
-                        code="monthly_contribution_salary_changed",
-                        message="A salary change during the contribution month needs an approved split-basis rule before contributions can be calculated.",
                     )
                 )
             else:
@@ -2855,28 +2940,66 @@ def prepare_attendance_payroll_draft(
                         raise StatutoryScheduleUnavailable(
                             "Additional allowances need an approved scheme-specific contribution treatment"
                         )
-                    if full_month.approved_overtime:
-                        raise StatutoryScheduleUnavailable(
-                            "Approved overtime needs an approved scheme-specific contribution treatment"
-                        )
-                    sss_basis = full_month.regular_earnings
+                    sss_basis = (
+                        full_month.regular_earnings
+                        + full_month.approved_overtime
+                        if full_month.regular_earnings is not None
+                        and full_month.approved_overtime is not None
+                        else None
+                    )
                     if sss_basis is None or sss_basis <= 0:
                         raise StatutoryScheduleUnavailable(
-                            "Full-month eligible earnings are required for the SSS compensation basis"
+                            "Full-month regular and approved overtime earnings are required for the SSS compensation basis"
                         )
+                    pagibig_basis = sss_basis
                     policy_sources = policy.policy.get("statutory_sources_reviewed", [])
                     if not isinstance(policy_sources, list):
                         raise StatutoryScheduleUnavailable(
                             "Confirmed payroll policy has no reviewed statutory source list"
                         )
+                    month_policy_rows = session.exec(
+                        select(PayrollPolicyVersion).where(
+                            PayrollPolicyVersion.effective_from <= obj_in.date_to,
+                            (col(PayrollPolicyVersion.effective_to).is_(None))
+                            | (col(PayrollPolicyVersion.effective_to) >= month_start),
+                            col(PayrollPolicyVersion.confirmed).is_(True),
+                        )
+                    ).all()
+                    divisors = {
+                        Decimal(str(row.policy["monthly_divisor"]))
+                        for row in month_policy_rows
+                        if row.policy.get("monthly_divisor") is not None
+                    }
+                    if len(divisors) != 1:
+                        raise StatutoryScheduleUnavailable(
+                            "One confirmed monthly divisor must apply throughout the contribution month for daily/hourly PhilHealth conversion"
+                        )
+                    philhealth_basis = _philhealth_monthly_basic_salary_basis(
+                        session=session,
+                        employee_id=roster_entry.employee_id,
+                        salaries=employee_salaries,
+                        contribution_month=month_start,
+                        monthly_divisor=next(iter(divisors)),
+                    )
+                    if philhealth_basis <= 0:
+                        raise StatutoryScheduleUnavailable(
+                            "A positive contractual monthly basic-salary equivalent is required for PhilHealth"
+                        )
                     monthly_contributions = _monthly_contribution_snapshot(
                         session=session,
                         sss_monthly_compensation=sss_basis,
-                        philhealth_basic_salary=effective_salary.basic_rate,
-                        pagibig_monthly_salary=effective_salary.basic_rate,
+                        philhealth_basic_salary=philhealth_basis,
+                        pagibig_monthly_salary=pagibig_basis,
                         contribution_month=month_start,
                         source_urls=policy_sources,
                     )
+                    monthly_contributions["basis_method"] = {
+                        "sss": "actual full-month regular earnings plus approved overtime; indexed by the effective SSS schedule",
+                        "philhealth": (
+                            "contractual fixed-basic monthly equivalent; monthly salary is weighted by calendar days, while daily/hourly rates use the confirmed monthly divisor and effective scheduled shift minutes; overtime and absence deductions excluded"
+                        ),
+                        "pagibig": "full-month regular earnings plus approved overtime; allowances remain blocked until their fund-salary treatment is configured",
+                    }
                 except StatutoryScheduleUnavailable as exc:
                     blockers.append(
                         PayrollPreflightBlocker(

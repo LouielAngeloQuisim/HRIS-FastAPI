@@ -5,6 +5,7 @@ contribution/tax/share relationships, validation-error envelope, and list-endpoi
 """
 from __future__ import annotations
 
+import uuid
 from collections.abc import Generator
 from datetime import date
 from decimal import Decimal
@@ -14,9 +15,21 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+from app.attendance.models import EmployeeShiftAssignment, Shift
 from app.config.settings import settings
-from app.payroll.models import BIRBracket, PagIBIGBracket, PhilHealthBracket, SSSBracket
-from app.payroll.routes import _monthly_contribution_snapshot
+from app.employee.models import EmployeeRecords
+from app.payroll.models import (
+    BIRBracket,
+    EmployeeSalary,
+    PagIBIGBracket,
+    PayType,
+    PhilHealthBracket,
+    SSSBracket,
+)
+from app.payroll.routes import (
+    _monthly_contribution_snapshot,
+    _philhealth_monthly_basic_salary_basis,
+)
 
 # --------------------------------------------------------------------------- #
 # Helpers / constants
@@ -83,6 +96,61 @@ def test_monthly_contribution_snapshot_uses_each_effective_schedule(
     for row in (philhealth_row, pagibig_row):
         db.delete(row)
     db.flush()
+
+
+@pytest.mark.parametrize(
+    ("pay_type", "rate", "expected"),
+    [
+        (PayType.DAILY, "1000.00", "22000.00"),
+        (PayType.HOURLY, "125.00", "22000.00"),
+    ],
+)
+def test_philhealth_monthly_basic_salary_converts_time_based_rates_without_attendance(
+    db: Session, pay_type: PayType, rate: str, expected: str
+) -> None:
+    employee = EmployeeRecords(
+        employee_code=f"PH-MBS-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="MBS",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2020, 1, 1),
+    )
+    shift = Shift(
+        code=f"PH-MBS-{uuid.uuid4().hex[:8]}",
+        name="Weekday eight-hour shift",
+        start_time="08:00",
+        end_time="17:00",
+        total_hours_minus_lunch=480,
+    )
+    db.add_all([employee, shift])
+    db.flush()
+    salary = EmployeeSalary(
+        employee_id=employee.id,
+        basic_rate=Decimal(rate),
+        effective_date=date(2026, 10, 1),
+        pay_type=pay_type,
+    )
+    db.add_all(
+        [
+            salary,
+            EmployeeShiftAssignment(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                effective_from=date(2026, 10, 1),
+            ),
+        ]
+    )
+    db.flush()
+
+    basis = _philhealth_monthly_basic_salary_basis(
+        session=db,
+        employee_id=employee.id,
+        salaries=[salary],
+        contribution_month=date(2026, 10, 1),
+        monthly_divisor=Decimal("22"),
+    )
+
+    assert basis == Decimal(expected)
 
 
 # Actual response-shape constants verified against routes.py handlers

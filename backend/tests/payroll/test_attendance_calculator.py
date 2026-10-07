@@ -65,3 +65,34 @@ def test_daily_partial_work_is_policy_driven_and_absence_is_deducted_once() -> N
         overtime_multiplier=Decimal("1"),
     )
     assert absent.attendance_deduction == Decimal("1000.00")
+
+
+def test_monthly_salary_period_base_deducts_unpaid_absence_once() -> None:
+    scheduled_dates = [
+        date(2026, 10, day)
+        for day in range(1, 16)
+        if date(2026, 10, day).weekday() < 5
+    ]
+    absent_date = date(2026, 10, 5)
+    days = [
+        _day(
+            work_date=work_date,
+            pay_type="monthly",
+            basic_rate=Decimal("26000"),
+            worked_minutes=0 if work_date == absent_date else 480,
+            absence=work_date == absent_date,
+        )
+        for work_date in scheduled_dates
+    ]
+    result = calculate_attendance_earnings(
+        days,
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    # 11 scheduled dates produce a half-month base of 13,000.00. One unpaid
+    # absence deducts 26,000 / 22 once, leaving 11,818.18.
+    assert result.regular == Decimal("13000.00")
+    assert result.attendance_deduction == Decimal("1181.82")
+    assert result.regular - result.attendance_deduction == Decimal("11818.18")

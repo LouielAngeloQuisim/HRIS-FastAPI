@@ -67,14 +67,13 @@ export POSTGRES_SERVER=127.0.0.1
 
 # ------------------------------------------------------------- throwaway db
 pick_free_port() {
-  local p
-  for p in 55432 55433 55434 55435 55436 55437 55438 55439 55440; do
-    if ! (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
-      printf '%s' "$p"
-      return 0
-    fi
-  done
-  return 1
+  python3 - <<'PY'
+import socket
+
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
 }
 
 start_throwaway_db() {

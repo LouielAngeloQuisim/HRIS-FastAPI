@@ -123,10 +123,12 @@ def calculate_attendance_earnings(
                 payable_days += 1
         elif day.pay_type == "monthly":
             daily_rate = day.basic_rate / monthly_divisor
+            # Accrue the scheduled-period base first; deduct unpaid absences
+            # separately so an absent day is not subtracted twice.
+            regular += daily_rate
             if day.absence:
                 deduction += daily_rate
             else:
-                regular += daily_rate
                 payable_days += 1
         else:
             raise CalculationBlocker(f"Unsupported salary basis on {day.work_date}")

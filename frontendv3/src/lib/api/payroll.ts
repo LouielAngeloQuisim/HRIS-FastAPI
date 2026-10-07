@@ -268,6 +268,22 @@ export interface PayrollDeliveryStatus {
   last_action_reason: string | null
 }
 
+export async function downloadPayrollPayslip(
+  runId: string,
+  entryId: string
+): Promise<void> {
+  const response = await api.get<Blob>(
+    `/payroll/runs/${runId}/entries/${entryId}/payslip.pdf`,
+    { responseType: 'blob' }
+  )
+  const objectUrl = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = `payslip-${entryId}.pdf`
+  link.click()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+}
+
 export function usePayrollDeliveryStatus(runId: string, enabled = true) {
   return useQuery({
     queryKey: ['payroll-delivery-status', runId],

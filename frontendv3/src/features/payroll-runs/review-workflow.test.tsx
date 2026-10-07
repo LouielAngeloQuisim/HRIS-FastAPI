@@ -11,6 +11,7 @@ const {
   deliveryStatusMock,
   correctAddressMock,
   resendDeliveryMock,
+  downloadPayslipMock,
   useCanMock,
 } = vi.hoisted(() => ({
   usePayrollRunMock: vi.fn(),
@@ -20,6 +21,7 @@ const {
   deliveryStatusMock: vi.fn(),
   correctAddressMock: vi.fn(),
   resendDeliveryMock: vi.fn(),
+  downloadPayslipMock: vi.fn(),
   useCanMock: vi.fn(),
 }))
 
@@ -40,6 +42,7 @@ vi.mock('@/lib/api/payroll', () => ({
     isPending: false,
   }),
   usePayrollDeliveryStatus: (...args: unknown[]) => deliveryStatusMock(...args),
+  downloadPayrollPayslip: (...args: unknown[]) => downloadPayslipMock(...args),
   useCorrectPayrollDeliveryAddress: () => ({
     mutateAsync: correctAddressMock,
     isPending: false,
@@ -129,6 +132,7 @@ describe('PayrollRunDetail review workflow', () => {
     })
     correctAddressMock.mockResolvedValue({})
     resendDeliveryMock.mockResolvedValue({})
+    downloadPayslipMock.mockResolvedValue(undefined)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
@@ -239,6 +243,10 @@ describe('PayrollRunDetail review workflow', () => {
     await expect
       .element(screen.getByText('Ava Worker (EMP-104)', { exact: true }))
       .toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Download PDF' }))
+    await expect
+      .poll(() => downloadPayslipMock)
+      .toHaveBeenCalledWith('run-1', 'entry-1')
     await userEvent.type(
       screen.getByLabelText('Action reason'),
       'HR verified address'

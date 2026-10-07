@@ -11,6 +11,7 @@ import {
   usePayrollDeliveryStatus,
   useCorrectPayrollDeliveryAddress,
   useResendPayrollDelivery,
+  downloadPayrollPayslip,
 } from '@/lib/api/payroll'
 import { useCan } from '@/context/permissions-provider'
 import { Button } from '@/components/ui/button'
@@ -173,6 +174,16 @@ export function PayrollRunDetail() {
       toast.success('Payslip delivery retry scheduled.')
     } catch {
       toast.error('Retry request failed. Reload and verify delivery status.')
+    }
+  }
+
+  const handleDownloadPayslip = async (entryId: string) => {
+    try {
+      await downloadPayrollPayslip(runId, entryId)
+    } catch {
+      toast.error(
+        'Payslip download failed. Verify the run is finalized and retry.'
+      )
     }
   }
 
@@ -489,6 +500,16 @@ export function PayrollRunDetail() {
                         </span>{' '}
                         · Attempts: {job.attempts}
                       </p>
+                      {data.workflow_status === 'finalized' && (
+                        <Button
+                          variant='outline'
+                          onClick={() =>
+                            handleDownloadPayslip(job.payroll_entry_id)
+                          }
+                        >
+                          Download PDF
+                        </Button>
+                      )}
                       {job.sent_at && (
                         <p className='text-sm'>
                           Sent: {new Date(job.sent_at).toLocaleString()}

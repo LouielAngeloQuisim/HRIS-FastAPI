@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
@@ -5197,6 +5197,54 @@ async def list_payslips_for_run(
             )
         )
     return payslips
+
+
+@router.get(
+    "/runs/{run_id}/entries/{entry_id}/payslip.pdf",
+    dependencies=[Depends(require_permission("payroll", "view"))],
+)
+def download_finalized_payslip_pdf(
+    *,
+    session: SessionDep,
+    request: Request,
+    run_id: uuid.UUID,
+    entry_id: uuid.UUID,
+) -> Response:
+    """Download only the finalized, frozen payslip document for an entry."""
+    entry = session.get(PayrollEntry, entry_id)
+    if entry is None or entry.payroll_run_id != run_id or entry.is_deleted:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    run = session.get(PayrollRun, run_id)
+    if run is None or run.is_deleted:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    if run.workflow_status != "finalized" or run.frozen_snapshot is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Payslips are available only after the payroll run is finalized",
+        )
+    delivery = session.exec(
+        select(PayrollDeliveryOutbox)
+        .where(PayrollDeliveryOutbox.payroll_entry_id == entry_id)
+        .order_by(col(PayrollDeliveryOutbox.document_version).desc())
+    ).first()
+    if delivery is None or not delivery.content_snapshot:
+        raise HTTPException(status_code=404, detail="Frozen payslip document not found")
+
+    from app.payroll.delivery_worker import render_payslip_pdf
+
+    request.state.audit_module = "payroll"
+    request.state.audit_action = "payslip_download"
+    pdf = render_payslip_pdf(delivery.content_snapshot)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="payslip-{entry_id}.pdf"',
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get(

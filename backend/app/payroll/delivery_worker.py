@@ -14,6 +14,7 @@ import socket
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Any
 
@@ -34,8 +35,11 @@ POLL_SECONDS = 15
 
 def _money(value: object) -> str:
     try:
-        return f"PHP {float(str(value)):,.2f}"
-    except (TypeError, ValueError):
+        amount = Decimal(str(value))
+        if not amount.is_finite():
+            return "Unavailable"
+        return f"PHP {amount:,.2f}"
+    except (InvalidOperation, TypeError, ValueError):
         return "Unavailable"
 
 
@@ -54,17 +58,20 @@ def render_payslip_pdf(snapshot: dict[str, Any]) -> bytes:
     pdf.drawString(48, 720, f"Employee: {str(employee.get('name', 'Employee'))[:100]}")
     pdf.drawString(48, 704, f"Employee code: {str(employee.get('code', ''))[:64]}")
     period = run.get("period", {})
-    pdf.drawString(48, 688, f"Earning period: {period.get('from', '')} to {period.get('to', '')}")
+    pdf.drawString(
+        48, 688, f"Earning period: {period.get('from', '')} to {period.get('to', '')}"
+    )
     pdf.drawString(48, 672, f"Payment date: {run.get('payment_date', '')}")
     pdf.line(48, 658, 564, 658)
     y = 638
-    for label, amount in (
-        ("Gross earnings", amounts.get("gross")),
-    ):
+    for label, amount in (("Gross earnings", amounts.get("gross")),):
         pdf.drawString(48, y, label)
         pdf.drawRightString(564, y, _money(amount))
         y -= 22
-    for heading, key in (("Earnings breakdown", "earnings"), ("Deduction breakdown", "deduction_lines")):
+    for heading, key in (
+        ("Earnings breakdown", "earnings"),
+        ("Deduction breakdown", "deduction_lines"),
+    ):
         pdf.setFont("Helvetica-Bold", 10)
         pdf.drawString(48, y, heading)
         y -= 16
@@ -80,14 +87,19 @@ def render_payslip_pdf(snapshot: dict[str, Any]) -> bytes:
                 pdf.drawRightString(564, y, _money(amount))
                 y -= 14
         y -= 6
-    for label, amount in (("Total deductions", amounts.get("deductions")), ("Net pay", amounts.get("net"))):
+    for label, amount in (
+        ("Total deductions", amounts.get("deductions")),
+        ("Net pay", amounts.get("net")),
+    ):
         pdf.setFont("Helvetica-Bold", 10 if label == "Net pay" else 9)
         pdf.drawString(48, y, label)
         pdf.drawRightString(564, y, _money(amount))
         y -= 22
     pdf.line(48, y + 10, 564, y + 10)
     pdf.setFont("Helvetica", 8)
-    pdf.drawString(48, 54, "This payslip is not evidence of a bank transfer or payment.")
+    pdf.drawString(
+        48, 54, "This payslip is not evidence of a bank transfer or payment."
+    )
     pdf.save()
     return output.getvalue()
 
@@ -95,10 +107,15 @@ def render_payslip_pdf(snapshot: dict[str, Any]) -> bytes:
 def _claim_due_jobs(*, now: datetime | None = None, limit: int = 25) -> list[uuid.UUID]:
     current = now or datetime.now(timezone.utc)
     with Session(engine) as session:
-        expired = session.exec(select(PayrollDeliveryOutbox).where(
-            PayrollDeliveryOutbox.status == "processing",
-            col(PayrollDeliveryOutbox.claimed_until) < current,
-        ).with_for_update(skip_locked=True).limit(limit)).all()
+        expired = session.exec(
+            select(PayrollDeliveryOutbox)
+            .where(
+                PayrollDeliveryOutbox.status == "processing",
+                col(PayrollDeliveryOutbox.claimed_until) < current,
+            )
+            .with_for_update(skip_locked=True)
+            .limit(limit)
+        ).all()
         for job in expired:
             job.status = "uncertain"
             job.claimed_until = None
@@ -107,13 +124,21 @@ def _claim_due_jobs(*, now: datetime | None = None, limit: int = 25) -> list[uui
         if expired:
             session.flush()
 
-        due = session.exec(select(PayrollDeliveryOutbox).where(
-            col(PayrollDeliveryOutbox.status).in_(["scheduled", "failed"]),
-            col(PayrollDeliveryOutbox.next_attempt_at) <= current,
-            PayrollDeliveryOutbox.attempts < MAX_ATTEMPTS,
-            col(PayrollDeliveryOutbox.recipient_snapshot).is_not(None),
-        ).order_by(col(PayrollDeliveryOutbox.next_attempt_at), col(PayrollDeliveryOutbox.created_at))
-          .with_for_update(skip_locked=True).limit(limit)).all()
+        due = session.exec(
+            select(PayrollDeliveryOutbox)
+            .where(
+                col(PayrollDeliveryOutbox.status).in_(["scheduled", "failed"]),
+                col(PayrollDeliveryOutbox.next_attempt_at) <= current,
+                PayrollDeliveryOutbox.attempts < MAX_ATTEMPTS,
+                col(PayrollDeliveryOutbox.recipient_snapshot).is_not(None),
+            )
+            .order_by(
+                col(PayrollDeliveryOutbox.next_attempt_at),
+                col(PayrollDeliveryOutbox.created_at),
+            )
+            .with_for_update(skip_locked=True)
+            .limit(limit)
+        ).all()
         for job in due:
             job.status = "processing"
             job.claimed_until = current + LEASE
@@ -131,20 +156,31 @@ def _render_email(snapshot: dict[str, Any]) -> tuple[str, str]:
     name = html.escape(str(employee.get("name", "Employee")))
     period = snapshot.get("run", {}).get("period", {})
     subject = f"Payroll payslip: {period.get('from', '')} to {period.get('to', '')}"
-    return subject, f"<p>Hello {name},</p><p>Your payslip for {html.escape(str(period.get('from', '')))} to {html.escape(str(period.get('to', '')))} is attached.</p><p>This document is not evidence of a bank transfer or payment.</p>"
+    return (
+        subject,
+        f"<p>Hello {name},</p><p>Your payslip for {html.escape(str(period.get('from', '')))} to {html.escape(str(period.get('to', '')))} is attached.</p><p>This document is not evidence of a bank transfer or payment.</p>",
+    )
 
 
 def _send_job(job_id: uuid.UUID) -> None:
     with Session(engine) as session:
-        job = session.exec(select(PayrollDeliveryOutbox).where(
-            PayrollDeliveryOutbox.id == job_id,
-            PayrollDeliveryOutbox.status == "processing",
-        ).with_for_update()).first()
+        job = session.exec(
+            select(PayrollDeliveryOutbox)
+            .where(
+                PayrollDeliveryOutbox.id == job_id,
+                PayrollDeliveryOutbox.status == "processing",
+            )
+            .with_for_update()
+        ).first()
         if job is None:
             return
         if not settings.emails_enabled or not job.recipient_snapshot:
             job.status = "blocked_email"
-            job.last_error_code = "email_transport_not_configured" if job.recipient_snapshot else "recipient_missing"
+            job.last_error_code = (
+                "email_transport_not_configured"
+                if job.recipient_snapshot
+                else "recipient_missing"
+            )
             job.claimed_until = None
             session.add(job)
             session.commit()
@@ -161,12 +197,17 @@ def _send_job(job_id: uuid.UUID) -> None:
     message = Message(
         subject=subject,
         html=body,
-        mail_from=(settings.EMAILS_FROM_NAME or settings.PROJECT_NAME, str(settings.EMAILS_FROM_EMAIL)),
-        attachments=[{
-            "filename": "payslip.pdf",
-            "mime_type": "application/pdf",
-            "data": pdf_bytes,
-        }],
+        mail_from=(
+            settings.EMAILS_FROM_NAME or settings.PROJECT_NAME,
+            str(settings.EMAILS_FROM_EMAIL),
+        ),
+        attachments=[
+            {
+                "filename": "payslip.pdf",
+                "mime_type": "application/pdf",
+                "data": pdf_bytes,
+            }
+        ],
     )
     smtp: dict[str, object] = {"host": settings.SMTP_HOST, "port": settings.SMTP_PORT}
     if settings.SMTP_TLS:
@@ -187,12 +228,18 @@ def _send_job(job_id: uuid.UUID) -> None:
         # These errors happen before SMTP can accept a message. Retry with
         # exponential backoff, bounded to five attempts.
         with Session(engine) as session:
-            job = session.exec(select(PayrollDeliveryOutbox).where(PayrollDeliveryOutbox.id == job_id).with_for_update()).first()
+            job = session.exec(
+                select(PayrollDeliveryOutbox)
+                .where(PayrollDeliveryOutbox.id == job_id)
+                .with_for_update()
+            ).first()
             if job is not None and job.status == "processing":
                 job.status = "failed"
                 job.last_error_code = type(exc).__name__
                 job.claimed_until = None
-                job.next_attempt_at = datetime.now(timezone.utc) + timedelta(minutes=min(60, 2 ** attempts))
+                job.next_attempt_at = datetime.now(timezone.utc) + timedelta(
+                    minutes=min(60, 2**attempts)
+                )
                 session.add(job)
                 session.commit()
         logger.warning("Payslip delivery connection failed for job %s", job_id)
@@ -201,7 +248,11 @@ def _send_job(job_id: uuid.UUID) -> None:
         # SMTP may have accepted the DATA before the client lost its response.
         # Retrying automatically could send the same payslip twice.
         with Session(engine) as session:
-            job = session.exec(select(PayrollDeliveryOutbox).where(PayrollDeliveryOutbox.id == job_id).with_for_update()).first()
+            job = session.exec(
+                select(PayrollDeliveryOutbox)
+                .where(PayrollDeliveryOutbox.id == job_id)
+                .with_for_update()
+            ).first()
             if job is not None and job.status == "processing":
                 job.status = "uncertain"
                 job.last_error_code = type(exc).__name__[:64]
@@ -212,7 +263,11 @@ def _send_job(job_id: uuid.UUID) -> None:
         return
 
     with Session(engine) as session:
-        job = session.exec(select(PayrollDeliveryOutbox).where(PayrollDeliveryOutbox.id == job_id).with_for_update()).first()
+        job = session.exec(
+            select(PayrollDeliveryOutbox)
+            .where(PayrollDeliveryOutbox.id == job_id)
+            .with_for_update()
+        ).first()
         if job is not None and job.status == "processing":
             job.status = "sent"
             job.sent_at = datetime.now(timezone.utc)
@@ -238,7 +293,9 @@ def run_worker(*, once: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--once", action="store_true", help="Process one due batch and exit")
+    parser.add_argument(
+        "--once", action="store_true", help="Process one due batch and exit"
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     run_worker(once=args.once)

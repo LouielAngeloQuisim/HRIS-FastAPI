@@ -15,6 +15,7 @@ from app.employee.models import EmployeeRecords
 from app.payroll.delivery_worker import (
     MAX_ATTEMPTS,
     _claim_due_jobs,
+    _money,
     _send_job,
     render_payslip_pdf,
     run_worker,
@@ -45,6 +46,13 @@ def test_payslip_pdf_is_rendered_from_the_snapshot() -> None:
     pdf = render_payslip_pdf(_snapshot())
     assert pdf.startswith(b"%PDF-")
     assert len(pdf) > 500
+
+
+def test_payslip_currency_formatting_uses_decimal_half_even_rounding() -> None:
+    assert _money("1.005") == "PHP 1.00"
+    assert _money("1.015") == "PHP 1.02"
+    assert _money("invalid") == "Unavailable"
+    assert _money("NaN") == "Unavailable"
 
 
 def _delivery_job(db: Session) -> PayrollDeliveryOutbox:

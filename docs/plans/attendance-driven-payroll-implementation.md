@@ -47,10 +47,10 @@ Status: in progress; not release-ready. Verification was run on 2026-10-08 again
 
 Verification completed on 2026-10-08 against isolated local test data:
 
-- `bash scripts/verify.sh`: `RESULT: PASS (exit 0)`; 907 backend tests passed (847 warnings), Ruff and mypy passed, Alembic reported no drift, TypeScript had 0 errors, 435 Vitest tests passed across 122 files, the frontend build passed, and generated `docs/MAP.md` was in sync after recording the new PDF route. ESLint reported 3 errors and 8 warnings; it remains report-only.
+- `bash scripts/verify.sh`: `RESULT: PASS (exit 0)`; 908 backend tests passed (847 warnings), Ruff and mypy passed, Alembic reported no drift, TypeScript had 0 errors, 435 Vitest tests passed across 122 files, the frontend build passed, and generated `docs/MAP.md` was in sync after recording the new PDF route. ESLint reported 3 errors and 8 warnings; it remains report-only.
 - `bash scripts/run-e2e-qa.sh hris/batch1-workflows.spec.ts`: 6/6 passed with one worker and zero retries, including tax-profile save and reload. `bash scripts/run-e2e-qa.sh payroll`: 8/8 passed with one worker and zero retries, proving statutory configuration, readiness blockers, permission denial, restored pages, and blocked-draft review visibility. This browser suite does not enable or exercise actual finalization or email delivery.
 - The payslip endpoint tests prove draft access is rejected and finalized frozen PDF content is served privately with request auditing; the payroll review UI test covers the finalized delivery download action. No email was sent.
-- Delivery worker tests cover due-job claims, bounded attempts, expired-lease uncertainty, disabled-worker behavior, successful PDF attachment and SMTP ambiguity. They use a test database and mocked transport; they do not replace a full test-mail-sink acceptance run.
+- Delivery worker tests cover due-job claims, bounded attempts, expired-lease uncertainty, disabled-worker behavior, successful PDF attachment, SMTP ambiguity and Decimal-based payslip formatting. They use a test database and mocked transport; they do not replace a full test-mail-sink acceptance run.
 - Payroll browser coverage exercises statutory configuration, blocked payroll readiness and blocked-draft review visibility; it does not prove successful payroll finalization or payslip delivery.
 - `git diff --check` passed after the current changes.
 - ESLint reported 3 errors and 8 warnings; Pytest reported 844 warnings. These results are reported rather than hidden.

@@ -586,6 +586,52 @@ class TestBIRCalculation:
 
 class TestBatchContributionCalculation:
 
+    def test_sss_selects_matching_row_from_effective_schedule(
+        self, db: Session
+    ) -> None:
+        """All MSC bands on one effective date must be considered together."""
+        rows = [
+            SSSBracket(
+                msc_min=5000, msc_max=10000, employer_ss=1000,
+                employer_ec=10, employer_mpf=0, employee_ss=500,
+                employee_mpf=0, effective_date="2025-01-01", is_active=True,
+            ),
+            SSSBracket(
+                msc_min=10001, msc_max=20000, employer_ss=2000,
+                employer_ec=30, employer_mpf=0, employee_ss=1000,
+                employee_mpf=0, effective_date="2025-01-01", is_active=True,
+            ),
+            SSSBracket(
+                msc_min=20001, msc_max=35000, employer_ss=3500,
+                employer_ec=30, employer_mpf=350, employee_ss=1000,
+                employee_mpf=350, effective_date="2025-01-01", is_active=True,
+            ),
+        ]
+        db.add_all(rows)
+        db.commit()
+        try:
+            from app.payroll.calc import (
+                calculate_sss_employee_share,
+                calculate_sss_employer_share,
+            )
+
+            assert calculate_sss_employee_share(
+                db, Decimal("15000"), "2025-02-01"
+            ) == Decimal("1000")
+            assert calculate_sss_employer_share(
+                db, Decimal("15000"), "2025-02-01"
+            ) == Decimal("2030")
+            assert calculate_sss_employee_share(
+                db, Decimal("35000"), "2025-02-01"
+            ) == Decimal("1350")
+            assert calculate_sss_employer_share(
+                db, Decimal("40000"), "2025-02-01"
+            ) == Decimal("3880")
+        finally:
+            for row in rows:
+                db.delete(row)
+            db.commit()
+
     def test_calculate_contributions(self, client: TestClient, superuser_token_headers,
                                       sss_brackets, philhealth_brackets, pagibig_brackets,
                                       bir_brackets):

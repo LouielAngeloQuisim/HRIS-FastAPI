@@ -167,12 +167,13 @@ class _SMTPCollector(socketserver.ThreadingTCPServer):
         super().__init__(("127.0.0.1", 0), Handler)
 
 
-def test_delivery_sends_frozen_pdf_to_local_smtp_sink(
+def test_worker_claims_scheduled_job_and_sends_frozen_pdf_to_local_smtp_sink(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
     delivery_job: PayrollDeliveryOutbox,
 ) -> None:
     monkeypatch.setattr(settings, "EMAILS_FROM_EMAIL", "noreply@example.test")
+    monkeypatch.setattr(settings, "PAYSLIP_DELIVERY_ENABLED", True)
     monkeypatch.setattr(settings, "SMTP_TLS", False)
     monkeypatch.setattr(settings, "SMTP_SSL", False)
     monkeypatch.setattr(settings, "SMTP_USER", "")
@@ -183,8 +184,14 @@ def test_delivery_sends_frozen_pdf_to_local_smtp_sink(
         monkeypatch.setattr(settings, "SMTP_PORT", sink.server_address[1])
         worker_thread = threading.Thread(target=sink.serve_forever, daemon=True)
         worker_thread.start()
+        delivery_job.status = "scheduled"
+        delivery_job.attempts = 0
+        delivery_job.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        delivery_job.claimed_until = None
+        db.add(delivery_job)
+        db.commit()
         try:
-            _send_job(delivery_job.id)
+            run_worker(once=True)
         finally:
             sink.shutdown()
             worker_thread.join(timeout=2)

@@ -8,12 +8,18 @@ const {
   startReviewMock,
   reviewEntryMock,
   finalizeMock,
+  deliveryStatusMock,
+  correctAddressMock,
+  resendDeliveryMock,
   useCanMock,
 } = vi.hoisted(() => ({
   usePayrollRunMock: vi.fn(),
   startReviewMock: vi.fn(),
   reviewEntryMock: vi.fn(),
   finalizeMock: vi.fn(),
+  deliveryStatusMock: vi.fn(),
+  correctAddressMock: vi.fn(),
+  resendDeliveryMock: vi.fn(),
   useCanMock: vi.fn(),
 }))
 
@@ -33,6 +39,15 @@ vi.mock('@/lib/api/payroll', () => ({
     mutateAsync: finalizeMock,
     isPending: false,
   }),
+  usePayrollDeliveryStatus: (...args: unknown[]) => deliveryStatusMock(...args),
+  useCorrectPayrollDeliveryAddress: () => ({
+    mutateAsync: correctAddressMock,
+    isPending: false,
+  }),
+  useResendPayrollDelivery: () => ({
+    mutateAsync: resendDeliveryMock,
+    isPending: false,
+  }),
 }))
 
 vi.mock('@/context/permissions-provider', () => ({
@@ -48,6 +63,8 @@ const entry = {
   id: 'entry-1',
   payroll_run_id: 'run-1',
   employee_id: 'employee-1',
+  employee_name: null as string | null,
+  employee_code: null as string | null,
   basic_rate: '26000.00',
   rate_date_from: '2026-10-01',
   rate_date_to: '2026-10-31',
@@ -83,6 +100,8 @@ const run = (workflow_status: string, reviewEntry = entry) => ({
   status: 'draft' as const,
   adjustment_type: 'regular' as const,
   workflow_status,
+  payroll_finalization_enabled: true,
+  payslip_delivery_enabled: false,
   pay_group_id: 'group-1',
   policy_version_id: 'policy-1',
   created_by: 'preparer-1',
@@ -102,6 +121,14 @@ describe('PayrollRunDetail review workflow', () => {
     startReviewMock.mockResolvedValue({})
     reviewEntryMock.mockResolvedValue({})
     finalizeMock.mockResolvedValue({})
+    deliveryStatusMock.mockReturnValue({
+      data: [],
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    correctAddressMock.mockResolvedValue({})
+    resendDeliveryMock.mockResolvedValue({})
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
@@ -173,5 +200,60 @@ describe('PayrollRunDetail review workflow', () => {
       screen.getByRole('button', { name: 'Finalize and schedule payslips' })
     )
     await expect.poll(() => finalizeMock).toHaveBeenCalledWith(undefined)
+  })
+
+  it('shows employee identity and lets payroll editors retry a failed payslip with a reason', async () => {
+    usePayrollRunMock.mockReturnValue({
+      data: run('finalized', {
+        ...entry,
+        employee_name: 'Ava Worker',
+        employee_code: 'EMP-104',
+        review_state: 'reviewed',
+        blockers: [],
+      }),
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    deliveryStatusMock.mockReturnValue({
+      data: [
+        {
+          id: 'delivery-1',
+          payroll_entry_id: 'entry-1',
+          document_version: 1,
+          recipient_snapshot: 'ava@example.test',
+          status: 'failed',
+          attempts: 2,
+          next_attempt_at: null,
+          sent_at: null,
+          last_error_code: 'smtp_rejected',
+          last_action_reason: null,
+        },
+      ],
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+
+    const screen = await render(<PayrollRunDetail />)
+    await expect
+      .element(screen.getByText('Ava Worker (EMP-104)', { exact: true }))
+      .toBeVisible()
+    await userEvent.type(
+      screen.getByLabelText('Action reason'),
+      'HR verified address'
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Retry delivery' })
+    )
+    await expect
+      .poll(() => resendDeliveryMock)
+      .toHaveBeenCalledWith({
+        jobId: 'delivery-1',
+        payload: {
+          reason: 'HR verified address',
+          confirm_duplicate_risk: false,
+        },
+      })
   })
 })

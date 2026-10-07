@@ -4235,8 +4235,39 @@ async def get_payroll_run(
     if not run:
         raise HTTPException(status_code=404, detail="Payroll run not found")
 
-    entry_list = [PayrollEntryRead.model_validate(e) for e in entries]
-    return PayrollRunRead.model_validate(run, update={"entries": entry_list})
+    employee_ids = {entry.employee_id for entry in entries if entry.employee_id}
+    employees = (
+        session.exec(
+            select(EmployeeRecords).where(col(EmployeeRecords.id).in_(employee_ids))
+        ).all()
+        if employee_ids
+        else []
+    )
+    employee_by_id = {employee.id: employee for employee in employees}
+    entry_list = []
+    for entry in entries:
+        employee = employee_by_id.get(entry.employee_id)
+        entry_list.append(
+            PayrollEntryRead.model_validate(
+                entry,
+                update={
+                    "employee_name": (
+                        f"{employee.first_name} {employee.last_name}".strip()
+                        if employee
+                        else None
+                    ),
+                    "employee_code": employee.employee_code if employee else None,
+                },
+            )
+        )
+    return PayrollRunRead.model_validate(
+        run,
+        update={
+            "entries": entry_list,
+            "payroll_finalization_enabled": settings.PAYROLL_FINALIZATION_ENABLED,
+            "payslip_delivery_enabled": settings.PAYSLIP_DELIVERY_ENABLED,
+        },
+    )
 
 
 @router.post(

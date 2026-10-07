@@ -393,6 +393,8 @@ class PayrollRunPublic(SQLModel):
     created_at: datetime | None
     updated_at: datetime | None
     workflow_status: str = "draft"
+    payroll_finalization_enabled: bool = False
+    payslip_delivery_enabled: bool = False
     pay_group_id: uuid.UUID | None = None
     policy_version_id: uuid.UUID | None = None
     payment_date: date | None = None
@@ -411,6 +413,8 @@ class PayrollEntryPublic(SQLModel):
     id: uuid.UUID
     payroll_run_id: uuid.UUID | None
     employee_id: uuid.UUID | None
+    employee_name: str | None = None
+    employee_code: str | None = None
     basic_rate: Decimal
     rate_date_from: date
     rate_date_to: date

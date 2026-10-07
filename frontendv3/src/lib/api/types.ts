@@ -1109,6 +1109,8 @@ export interface PayrollRunPublic {
   status: PayrollRunStatus
   adjustment_type: PayrollAdjustmentType
   workflow_status?: string
+  payroll_finalization_enabled?: boolean
+  payslip_delivery_enabled?: boolean
   pay_group_id?: string | null
   policy_version_id?: string | null
   payment_date?: string | null
@@ -1127,6 +1129,8 @@ export interface PayrollEntryPublic {
   id: string
   payroll_run_id: string
   employee_id: string
+  employee_name?: string | null
+  employee_code?: string | null
   basic_rate: string
   rate_date_from: string
   rate_date_to: string

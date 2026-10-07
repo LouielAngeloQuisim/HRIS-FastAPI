@@ -8,6 +8,9 @@ import {
   useFinalizePayrollRun,
   useReviewPayrollEntry,
   useStartPayrollReview,
+  usePayrollDeliveryStatus,
+  useCorrectPayrollDeliveryAddress,
+  useResendPayrollDelivery,
 } from '@/lib/api/payroll'
 import { useCan } from '@/context/permissions-provider'
 import { Button } from '@/components/ui/button'
@@ -34,8 +37,17 @@ export function PayrollRunDetail() {
   const startReviewMutation = useStartPayrollReview(runId)
   const reviewEntryMutation = useReviewPayrollEntry(runId)
   const finalizeMutation = useFinalizePayrollRun(runId)
+  const deliveryQuery = usePayrollDeliveryStatus(
+    runId,
+    data?.workflow_status === 'finalized'
+  )
+  const addressMutation = useCorrectPayrollDeliveryAddress(runId)
+  const resendMutation = useResendPayrollDelivery(runId)
   const [exclusionReasons, setExclusionReasons] = useState<
     Record<string, string>
+  >({})
+  const [deliveryInputs, setDeliveryInputs] = useState<
+    Record<string, { email: string; reason: string }>
   >({})
 
   if (!canView) {
@@ -114,6 +126,53 @@ export function PayrollRunDetail() {
       toast.error(
         'The entry could not be reviewed. Reload and resolve any changed inputs or blockers.'
       )
+    }
+  }
+
+  const handleDeliveryAddress = async (jobId: string) => {
+    const input = deliveryInputs[jobId]
+    if (!input?.email.trim() || input.reason.trim().length < 5) {
+      toast.error(
+        'Enter a recipient email and a reason of at least 5 characters.'
+      )
+      return
+    }
+    try {
+      await addressMutation.mutateAsync({
+        jobId,
+        payload: { email: input.email.trim(), reason: input.reason.trim() },
+      })
+      toast.success('Payslip recipient updated; delivery is scheduled.')
+    } catch {
+      toast.error('Recipient update failed. Reload and verify delivery status.')
+    }
+  }
+
+  const handleDeliveryResend = async (jobId: string, uncertain: boolean) => {
+    const input = deliveryInputs[jobId]
+    if (!input || input.reason.trim().length < 5) {
+      toast.error('Enter a reason of at least 5 characters before retrying.')
+      return
+    }
+    if (
+      uncertain &&
+      !window.confirm(
+        'The prior email may already have been delivered. Resending can send a duplicate payslip. Continue?'
+      )
+    ) {
+      return
+    }
+    try {
+      await resendMutation.mutateAsync({
+        jobId,
+        payload: {
+          reason: input?.reason.trim() ?? '',
+          confirm_duplicate_risk: uncertain,
+        },
+      })
+      toast.success('Payslip delivery retry scheduled.')
+    } catch {
+      toast.error('Retry request failed. Reload and verify delivery status.')
     }
   }
 
@@ -227,11 +286,16 @@ export function PayrollRunDetail() {
                   data.workflow_status === 'ready_for_finalization' && (
                     <Button
                       onClick={handleFinalize}
-                      disabled={finalizeMutation.isPending}
+                      disabled={
+                        finalizeMutation.isPending ||
+                        !data.payroll_finalization_enabled
+                      }
                     >
                       {finalizeMutation.isPending
                         ? 'Finalizing…'
-                        : 'Finalize and schedule payslips'}
+                        : data.payroll_finalization_enabled
+                          ? 'Finalize and schedule payslips'
+                          : 'Finalization disabled'}
                     </Button>
                   )}
               </div>
@@ -250,6 +314,14 @@ export function PayrollRunDetail() {
                     not confirm a bank payout.
                   </p>
                 )}
+              {data.workflow_status === 'ready_for_finalization' &&
+                canFinalize &&
+                !data.payroll_finalization_enabled && (
+                  <p role='status' className='text-sm text-amber-700'>
+                    Finalization is disabled until statutory configuration and
+                    HR-approved parallel payroll comparisons are accepted.
+                  </p>
+                )}
               <div className='space-y-3'>
                 {data.entries.map((entry) => (
                   <article
@@ -260,7 +332,13 @@ export function PayrollRunDetail() {
                     <div className='flex flex-wrap items-center justify-between gap-2'>
                       <div>
                         <p className='font-medium'>
-                          Employee {entry.employee_id}
+                          {entry.employee_name ??
+                            `Employee ${entry.employee_id}`}
+                          {entry.employee_code && (
+                            <span className='ml-2 text-xs text-muted-foreground'>
+                              {entry.employee_code}
+                            </span>
+                          )}
                         </p>
                         <p className='text-xs text-muted-foreground'>
                           Review state: {entry.review_state}
@@ -344,6 +422,182 @@ export function PayrollRunDetail() {
               </div>
             </section>
           )}
+          {data.workflow_status === 'finalized' && (
+            <section
+              className='space-y-3 rounded-lg border p-4'
+              aria-label='Payslip delivery'
+            >
+              <div>
+                <h2 className='font-semibold'>Payslip delivery</h2>
+                <p className='text-sm text-muted-foreground'>
+                  Email status is separate from payroll approval and does not
+                  confirm payment.
+                </p>
+              </div>
+              {!data.payslip_delivery_enabled && (
+                <p role='status' className='text-sm text-amber-700'>
+                  Email delivery is disabled by system configuration. Delivery
+                  jobs remain queued until an operator enables the worker after
+                  acceptance.
+                </p>
+              )}
+              {deliveryQuery.isPending && (
+                <p className='text-sm'>Loading delivery status…</p>
+              )}
+              {deliveryQuery.isError && (
+                <div className='flex items-center gap-2 text-sm'>
+                  <span>Could not load delivery status.</span>
+                  <Button
+                    variant='outline'
+                    onClick={() => deliveryQuery.refetch()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
+              {deliveryQuery.data?.length === 0 && (
+                <p className='text-sm text-muted-foreground'>
+                  No payslip delivery jobs are recorded for this run.
+                </p>
+              )}
+              <div className='space-y-3'>
+                {deliveryQuery.data?.map((job) => {
+                  const input = deliveryInputs[job.id] ?? {
+                    email: job.recipient_snapshot ?? '',
+                    reason: '',
+                  }
+                  const employee = data.entries.find(
+                    (entry) => entry.id === job.payroll_entry_id
+                  )
+                  return (
+                    <article
+                      key={job.id}
+                      className='space-y-2 rounded-md border p-3'
+                      data-testid={`delivery-${job.id}`}
+                    >
+                      <p className='font-medium'>
+                        {employee?.employee_name ??
+                          `Employee ${employee?.employee_id ?? job.payroll_entry_id}`}
+                        {employee?.employee_code
+                          ? ` (${employee.employee_code})`
+                          : ''}
+                      </p>
+                      <p className='text-sm'>
+                        Status:{' '}
+                        <span className='font-medium'>
+                          {job.status.replace(/_/g, ' ')}
+                        </span>{' '}
+                        · Attempts: {job.attempts}
+                      </p>
+                      {job.sent_at && (
+                        <p className='text-sm'>
+                          Sent: {new Date(job.sent_at).toLocaleString()}
+                        </p>
+                      )}
+                      {job.next_attempt_at && job.status === 'scheduled' && (
+                        <p className='text-sm'>
+                          Scheduled:{' '}
+                          {new Date(job.next_attempt_at).toLocaleString()}
+                        </p>
+                      )}
+                      {job.last_error_code && (
+                        <p className='text-sm text-destructive'>
+                          Last delivery error: {job.last_error_code}
+                        </p>
+                      )}
+                      {(job.status === 'blocked_email' ||
+                        job.status === 'failed') &&
+                        canEdit && (
+                          <label className='grid gap-1 text-sm'>
+                            Correct recipient email
+                            <input
+                              type='email'
+                              value={input.email}
+                              onChange={(event) =>
+                                setDeliveryInputs((current) => ({
+                                  ...current,
+                                  [job.id]: {
+                                    ...input,
+                                    email: event.target.value,
+                                  },
+                                }))
+                              }
+                              className='h-9 rounded border bg-background px-3'
+                            />
+                          </label>
+                        )}
+                      {(job.status === 'failed' ||
+                        job.status === 'uncertain' ||
+                        job.status === 'blocked_email') &&
+                        canEdit && (
+                          <>
+                            <label className='grid gap-1 text-sm'>
+                              Action reason
+                              <input
+                                value={input.reason}
+                                maxLength={1024}
+                                onChange={(event) =>
+                                  setDeliveryInputs((current) => ({
+                                    ...current,
+                                    [job.id]: {
+                                      ...input,
+                                      reason: event.target.value,
+                                    },
+                                  }))
+                                }
+                                className='h-9 rounded border bg-background px-3'
+                              />
+                            </label>
+                            <div className='flex flex-wrap gap-2'>
+                              {(job.status === 'blocked_email' ||
+                                job.status === 'failed') && (
+                                <Button
+                                  variant='outline'
+                                  onClick={() => handleDeliveryAddress(job.id)}
+                                  disabled={
+                                    addressMutation.isPending ||
+                                    input.reason.trim().length < 5 ||
+                                    !input.email.trim()
+                                  }
+                                >
+                                  Correct email and schedule
+                                </Button>
+                              )}
+                              {(job.status === 'failed' ||
+                                job.status === 'uncertain') && (
+                                <Button
+                                  variant='outline'
+                                  onClick={() =>
+                                    handleDeliveryResend(
+                                      job.id,
+                                      job.status === 'uncertain'
+                                    )
+                                  }
+                                  disabled={
+                                    resendMutation.isPending ||
+                                    input.reason.trim().length < 5 ||
+                                    !job.recipient_snapshot
+                                  }
+                                >
+                                  {job.status === 'uncertain'
+                                    ? 'Confirm duplicate risk and resend'
+                                    : 'Retry delivery'}
+                                </Button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      {job.last_action_reason && (
+                        <p className='text-xs text-muted-foreground'>
+                          Last action: {job.last_action_reason}
+                        </p>
+                      )}
+                    </article>
+                  )
+                })}
+              </div>
+            </section>
+          )}
           <div className='grid gap-4 sm:grid-cols-4'>
             <div className='rounded-lg border p-3'>
               <p className='text-sm text-muted-foreground'>Status</p>
@@ -385,7 +639,7 @@ export function PayrollRunDetail() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Employee ID</TableHead>
+                  <TableHead>Employee</TableHead>
                   <TableHead className='text-right'>Basic Rate</TableHead>
                   <TableHead className='text-right'>Gross Pay</TableHead>
                   <TableHead className='text-right'>Deductions</TableHead>
@@ -395,7 +649,16 @@ export function PayrollRunDetail() {
               <TableBody>
                 {data.entries.map((entry) => (
                   <TableRow key={entry.id} className='hover:bg-muted/50'>
-                    <TableCell>{entry.employee_id}</TableCell>
+                    <TableCell>
+                      <div>
+                        {entry.employee_name ?? `Employee ${entry.employee_id}`}
+                      </div>
+                      {entry.employee_code && (
+                        <div className='text-xs text-muted-foreground'>
+                          {entry.employee_code}
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className='text-right'>
                       {formatCurrency(entry.basic_rate)}
                     </TableCell>

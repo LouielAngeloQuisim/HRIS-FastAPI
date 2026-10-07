@@ -1,10 +1,10 @@
+import { isAxiosError } from 'axios'
 import {
   keepPreviousData,
   useQuery,
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query'
-import { isAxiosError } from 'axios'
 import { api } from './client'
 import type {
   CutoffType,
@@ -46,14 +46,17 @@ export type EmployeeTaxYearDeclarationInput = Pick<
   | 'source_reference'
 > & { is_verified: boolean }
 
-export function useEmployeeTaxYearDeclaration(employeeId: string, taxYear: number) {
+export function useEmployeeTaxYearDeclaration(
+  employeeId: string,
+  taxYear: number
+) {
   return useQuery({
     queryKey: ['payroll-tax-year-declaration', employeeId, taxYear],
     queryFn: async () => {
       try {
         return (
           await api.get<EmployeeTaxYearDeclaration>(
-            `/payroll/employees/${employeeId}/tax-year-declarations/${taxYear}`,
+            `/payroll/employees/${employeeId}/tax-year-declarations/${taxYear}`
           )
         ).data
       } catch (error) {
@@ -65,14 +68,17 @@ export function useEmployeeTaxYearDeclaration(employeeId: string, taxYear: numbe
   })
 }
 
-export function useSaveEmployeeTaxYearDeclaration(employeeId: string, taxYear: number) {
+export function useSaveEmployeeTaxYearDeclaration(
+  employeeId: string,
+  taxYear: number
+) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (payload: EmployeeTaxYearDeclarationInput) =>
       api
         .put<EmployeeTaxYearDeclaration>(
           `/payroll/employees/${employeeId}/tax-year-declarations/${taxYear}`,
-          payload,
+          payload
         )
         .then((response) => response.data),
     onSuccess: () =>
@@ -246,6 +252,77 @@ export function useFinalizePayrollRun(runId: string) {
         .post<PayrollReviewActionResult>(`/payroll/runs/${runId}/finalize`)
         .then((r) => r.data),
     runId
+  )
+}
+
+export interface PayrollDeliveryStatus {
+  id: string
+  payroll_entry_id: string
+  document_version: number
+  recipient_snapshot: string | null
+  status: 'scheduled' | 'sent' | 'failed' | 'uncertain' | 'blocked_email'
+  attempts: number
+  next_attempt_at: string | null
+  sent_at: string | null
+  last_error_code: string | null
+  last_action_reason: string | null
+}
+
+export function usePayrollDeliveryStatus(runId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['payroll-delivery-status', runId],
+    queryFn: () =>
+      api
+        .get<PayrollDeliveryStatus[]>(
+          `/payroll/runs/${runId}/delivery-status`,
+          {
+            params: { skip: 0, limit: 200 },
+          }
+        )
+        .then((response) => response.data),
+    enabled: Boolean(runId && enabled),
+  })
+}
+
+function usePayrollDeliveryAction<TPayload>(
+  runId: string,
+  action: (jobId: string, payload: TPayload) => Promise<PayrollDeliveryStatus>
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ jobId, payload }: { jobId: string; payload: TPayload }) =>
+      action(jobId, payload),
+    onSuccess: async () => {
+      await qc.invalidateQueries({
+        queryKey: ['payroll-delivery-status', runId],
+      })
+    },
+  })
+}
+
+export function useCorrectPayrollDeliveryAddress(runId: string) {
+  return usePayrollDeliveryAction(
+    runId,
+    (jobId, payload: { email: string; reason: string }) =>
+      api
+        .post<PayrollDeliveryStatus>(
+          `/payroll/runs/${runId}/delivery/${jobId}/address`,
+          payload
+        )
+        .then((response) => response.data)
+  )
+}
+
+export function useResendPayrollDelivery(runId: string) {
+  return usePayrollDeliveryAction(
+    runId,
+    (jobId, payload: { reason: string; confirm_duplicate_risk: boolean }) =>
+      api
+        .post<PayrollDeliveryStatus>(
+          `/payroll/runs/${runId}/delivery/${jobId}/resend`,
+          payload
+        )
+        .then((response) => response.data)
   )
 }
 

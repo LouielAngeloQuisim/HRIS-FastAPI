@@ -1,323 +1,411 @@
-import { isAxiosError } from 'axios'
 import { useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { toast } from 'sonner'
+import {
+  usePayrollAttendanceCalculationPreview,
+  usePayrollRunPreflight,
+  usePayrollSetup,
+  usePrepareAttendancePayrollDraft,
+  type PayrollAttendanceCalculationPreview,
+  type PayrollRunPreflight,
+} from '@/lib/api/payroll'
+import { saveErrorMessage } from '@/lib/api/save-error'
 import { useCan } from '@/context/permissions-provider'
-import { usePreviewPayroll, useGeneratePayroll, useApprovePayrollRun, useVoidPayrollRun } from '@/lib/api/payroll'
-import { useEmployees } from '@/lib/api/employees'
-import { useDepartments } from '@/lib/api/departments'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { toast } from 'sonner'
-import { saveErrorMessage } from '@/lib/api/save-error'
-import type { CutoffType, PayrollEntryPreview, PayrollRunPublic } from '@/lib/api/types'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
-type Step = 'preview' | 'review' | 'result'
+const PAGE_SIZE = 100
 
 export default function PayrollPage() {
   const canView = useCan('payroll', 'view')
-  const canEdit = useCan('payroll', 'edit')
-  const canCreate = useCan('payroll', 'add')
-  const canApprove = useCan('payroll', 'edit')
-
-  const [generationUncertain, setGenerationUncertain] = useState(false)
-  const [generationId, setGenerationId] = useState(() => crypto.randomUUID())
-  const [reviewDirty, setReviewDirty] = useState(false)
-  const [step, setStep] = useState<Step>('preview')
-  const [cutoffType, setCutoffType] = useState<CutoffType>('monthly')
+  const canAdd = useCan('payroll', 'add')
+  const setup = usePayrollSetup()
+  const preflightMutation = usePayrollRunPreflight()
+  const calculationMutation = usePayrollAttendanceCalculationPreview()
+  const prepareMutation = usePrepareAttendancePayrollDraft()
+  const [payGroupId, setPayGroupId] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('__all__')
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>('__all__')
-  const [previewEntries, setPreviewEntries] = useState<PayrollEntryPreview[]>([])
-  const [run, setRun] = useState<PayrollRunPublic | null>(null)
-  const [missingSalary, setMissingSalary] = useState(false)
-  const navigate = useNavigate()
+  const [page, setPage] = useState(0)
+  const [preflight, setPreflight] = useState<PayrollRunPreflight | null>(null)
+  const [calculation, setCalculation] =
+    useState<PayrollAttendanceCalculationPreview | null>(null)
+  const [preparedRunId, setPreparedRunId] = useState<string | null>(null)
 
-  const { data: employeesData } = useEmployees(1, 100)
-  const { data: departmentsData } = useDepartments(1, 100)
-  const previewMutation = usePreviewPayroll()
-  const generateMutation = useGeneratePayroll()
-  const approveMutation = useApprovePayrollRun()
-  const voidMutation = useVoidPayrollRun()
-
-  if (!canView) {
-    return (
-      <div className='flex flex-1 flex-col items-center justify-center gap-4'>
-        <p className='text-muted-foreground'>You do not have permission to view payroll.</p>
-      </div>
-    )
+  const clearResults = () => {
+    setPreflight(null)
+    setCalculation(null)
+    setPreparedRunId(null)
+    setPage(0)
   }
 
-  const handlePreview = async () => {
-    if (!dateFrom || !dateTo || dateFrom > dateTo) {
-      toast.error('Select a valid date range with the end on or after the start.')
+  const checkReadiness = async (targetPage = page) => {
+    if (!payGroupId || !dateFrom || !dateTo) {
+      toast.error('Select a pay group and earning period.')
       return
     }
-    setMissingSalary(false)
     try {
-      const entries = await previewMutation.mutateAsync({
-        cutoff_type: cutoffType,
+      const result = await preflightMutation.mutateAsync({
+        pay_group_id: payGroupId,
         date_from: dateFrom,
         date_to: dateTo,
-        employee_ids: selectedEmployeeId && selectedEmployeeId !== '__all__' ? [selectedEmployeeId] : undefined,
-        department_id: selectedDepartmentId === '__all__' ? undefined : selectedDepartmentId,
+        skip: targetPage * PAGE_SIZE,
+        limit: PAGE_SIZE,
       })
-      setReviewDirty(false)
-      setPreviewEntries(entries)
-      setGenerationId(crypto.randomUUID())
-      setStep('review')
-      toast.success(`Preview generated: ${entries.length} entries`)
+      setPreflight(result)
+      setPage(targetPage)
+      toast.success(
+        `Readiness checked: ${result.ready_count} ready, ${result.blocked_count} blocked on this page.`
+      )
     } catch (error) {
-      const message = saveErrorMessage(error)
-      setMissingSalary(/no active salary record|no employees with active salary records/i.test(message))
-      toast.error(message)
-    }
-  }
-
-  const handleGenerate = async () => {
-    if (!dateFrom || !dateTo) return
-    try {
-      const result = await generateMutation.mutateAsync({
-        request_id: generationId,
-        cutoff_type: cutoffType,
-        date_from: dateFrom,
-        date_to: dateTo,
-        employee_ids: selectedEmployeeId && selectedEmployeeId !== '__all__' ? [selectedEmployeeId] : undefined,
-        department_id: selectedDepartmentId === '__all__' ? undefined : selectedDepartmentId,
-        entries: previewEntries.map(entry => ({ employee_id: entry.employee_id, overtime_pay: entry.overtime_pay })),
-      })
-      setRun(result)
-      setGenerationUncertain(false)
-      setStep('result')
-      toast.success('Payroll run generated')
-    } catch (error) {
-      const status = isAxiosError(error) ? error.response?.status : undefined
-      setGenerationUncertain(status === undefined || status >= 500)
+      setPreflight(null)
       toast.error(saveErrorMessage(error))
     }
   }
 
-  const handleApprove = async () => {
-    if (!run) return
-    try {
-      await approveMutation.mutateAsync(run.id)
-      setRun({ ...run, status: 'approved' })
-      toast.success('Payroll run approved')
-    } catch {
-      toast.error('Failed to approve payroll run')
+  const previewAttendanceEarnings = async () => {
+    if (!payGroupId || !dateFrom || !dateTo) {
+      toast.error('Select a pay group and earning period.')
+      return
     }
-  }
-
-  const handleVoid = async () => {
-    if (!run) return
     try {
-      await voidMutation.mutateAsync(run.id)
-      setRun({ ...run, status: 'void' })
-      toast.success('Payroll run voided')
-    } catch {
-      toast.error('Failed to void payroll run')
-    }
-  }
-
-  const updateEntry = (index: number, field: keyof PayrollEntryPreview, value: unknown) => {
-    setReviewDirty(true)
-    setPreviewEntries(prev => prev.map((e, i) => i === index ? { ...e, [field]: value } : e))
-  }
-
-  const recalculateReview = async () => {
-    try {
-      const entries = await previewMutation.mutateAsync({ cutoff_type: cutoffType, date_from: dateFrom, date_to: dateTo,
-        employee_ids: selectedEmployeeId === '__all__' ? undefined : [selectedEmployeeId],
-        department_id: selectedDepartmentId === '__all__' ? undefined : selectedDepartmentId,
-        entries: previewEntries.map(entry => ({ employee_id: entry.employee_id, overtime_pay: entry.overtime_pay })),
+      const result = await calculationMutation.mutateAsync({
+        pay_group_id: payGroupId,
+        date_from: dateFrom,
+        date_to: dateTo,
+        skip: page * PAGE_SIZE,
+        limit: PAGE_SIZE,
       })
-      setPreviewEntries(entries)
-      setReviewDirty(false)
-    } catch { toast.error('Failed to recalculate payroll review') }
+      setCalculation(result)
+      toast.success(
+        `Provisional earnings previewed for ${result.entries.length} employees.`
+      )
+    } catch (error) {
+      setCalculation(null)
+      toast.error(saveErrorMessage(error))
+    }
   }
 
-  const formatCurrency = (value: string | number) => {
-    const num = typeof value === 'string' ? Number(value) : value
-    return Number.isFinite(num) ? `₱${num.toLocaleString()}` : '₱0.00'
+  const prepareDraft = async () => {
+    if (!payGroupId || !dateFrom || !dateTo) return
+    try {
+      const run = await prepareMutation.mutateAsync({
+        pay_group_id: payGroupId,
+        date_from: dateFrom,
+        date_to: dateTo,
+      })
+      setPreparedRunId(run.id)
+      toast.success(
+        `Blocked draft ${run.id.slice(0, 8)} is saved for traceability.`
+      )
+    } catch (error) {
+      toast.error(saveErrorMessage(error))
+    }
+  }
+
+  if (!canView) {
+    return (
+      <div className='p-6 text-muted-foreground'>
+        You do not have permission to view payroll.
+      </div>
+    )
   }
 
   return (
-    <div className='space-y-4'>
-      <div>
-        <h1 className='text-2xl font-bold'>Payroll Execution</h1>
-        <p className='text-muted-foreground'>Generate and approve payroll runs</p>
-        <p className='text-sm text-muted-foreground'>Preview and recalculation currently save draft runs. Review Payroll Runs before generating again.</p>
-      </div>
+    <main className='space-y-5 p-6'>
+      <header>
+        <h1 className='text-2xl font-bold'>Payroll readiness</h1>
+        <p className='text-muted-foreground'>
+          Check the expected employee roster, attendance, compensation setup and
+          blockers for one configured earning period.
+        </p>
+      </header>
 
-      {step === 'preview' && (
-        <div className='space-y-4 rounded-lg border p-4'>
-          <div className='grid gap-4 sm:grid-cols-3'>
-            <div className='space-y-2'>
-              <Label htmlFor='cutoff-type'>Cutoff Type</Label>
-              <Select value={cutoffType} onValueChange={(v) => setCutoffType(v as CutoffType)}>
-                <SelectTrigger id='cutoff-type' data-testid='cutoff-type-select'>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value='daily'>Daily</SelectItem>
-                  <SelectItem value='weekly'>Weekly</SelectItem>
-                  <SelectItem value='semi_monthly'>Semi-Monthly</SelectItem>
-                  <SelectItem value='monthly'>Monthly</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className='space-y-2'>
-              <Label htmlFor='date-from'>Date From</Label>
-              <Input id='date-from' type='date' data-testid='date-from-input' value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-            </div>
-            <div className='space-y-2'>
-              <Label htmlFor='date-to'>Date To</Label>
-              <Input id='date-to' type='date' data-testid='date-to-input' value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-            </div>
-          </div>
-          <div className='grid gap-4 sm:grid-cols-2'>
-            <div className='space-y-2'>
-              <Label htmlFor='department-filter'>Department</Label>
-              <Select value={selectedDepartmentId} onValueChange={setSelectedDepartmentId}>
-                <SelectTrigger id='department-filter' data-testid='department-filter-select'>
-                  <SelectValue placeholder='All departments' />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value='__all__'>All departments</SelectItem>
-                  {(departmentsData?.data ?? []).map((dept) => (
-                    <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className='space-y-2'>
-              <Label htmlFor='employee-filter'>Employee</Label>
-              <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
-                <SelectTrigger id='employee-filter' data-testid='employee-filter-select'>
-                  <SelectValue placeholder='All employees' />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value='__all__'>All employees</SelectItem>
-                  {(employeesData?.data ?? []).map((emp) => (
-                    <SelectItem key={emp.id} value={emp.id}>{emp.employee_code} — {emp.first_name} {emp.last_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <Button data-testid='preview-payroll-button' onClick={handlePreview} disabled={previewMutation.isPending}>
-            {previewMutation.isPending ? 'Previewing...' : 'Preview Payroll'}
-          </Button>
-          {missingSalary && (
-            <div role='alert' data-testid='missing-salary-recovery' className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-50 p-4 text-sm dark:bg-amber-950'>
-              <span>No active salary is configured for one or more selected employees. Add an effective-dated salary, then return to preview.</span>
-              <Button type='button' variant='outline' data-testid='open-salary-setup-button' onClick={() => navigate({ to: '/payroll/salary' })}>
-                Open Salary Setup
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {generationUncertain && <p role='alert' data-testid='generation-outcome-unknown'>Generation outcome is unknown. Retry the same reviewed payroll to recover its result safely.</p>}
-      {step === 'review' && (
-        <div className='space-y-4'>
-          <div className='flex items-center justify-between'>
-            <h2 className='text-xl font-semibold'>Review Payroll Entries</h2>
-            <div className='flex gap-2'>
-              <Button variant='outline' disabled={generationUncertain} onClick={() => setStep('preview')}>Back</Button>
-              <Button data-testid='recalculate-payroll-button' onClick={recalculateReview} disabled={previewMutation.isPending || generationUncertain}>Recalculate Review</Button>
-              <Button data-testid='proceed-to-review-button' onClick={handleGenerate} disabled={generateMutation.isPending || previewMutation.isPending || reviewDirty || !canCreate || previewEntries.length === 0}>
-                {generateMutation.isPending ? 'Generating...' : 'Generate Payroll'}
-              </Button>
-            </div>
-          </div>
-          {previewEntries.some((e) => e.warnings && e.warnings.length > 0) && (
-            <div data-testid='compliance-warnings' className='space-y-2 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950'>
-              <h3 className='text-sm font-semibold text-yellow-800 dark:text-yellow-200'>Compliance Warnings</h3>
-              <ul className='list-inside list-disc space-y-1 text-sm text-yellow-700 dark:text-yellow-300'>
-                {previewEntries.flatMap((entry) =>
-                  (entry.warnings ?? []).map((w, i) => (
-                    <li key={`${entry.employee_id}-${i}`}>
-                      <span className='font-mono'>{entry.employee_id}</span>: <span className='font-mono'>{w.code}</span> — {w.message}
-                    </li>
-                  )),
-                )}
-              </ul>
-            </div>
-          )}
-          <div className='overflow-x-auto rounded-lg border'>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee ID</TableHead>
-                  <TableHead className='text-right'>Basic Rate</TableHead>
-                  <TableHead className='text-right'>Overtime Pay</TableHead>
-                  <TableHead className='text-right'>Non-Taxable</TableHead>
-                  <TableHead className='text-right'>Gross Pay</TableHead>
-                  <TableHead className='text-right'>Total Deductions</TableHead>
-                  <TableHead className='text-right'>Net Pay</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {previewEntries.map((entry, idx) => (
-                  <TableRow key={entry.employee_id}>
-                    <TableCell>{entry.employee_id}</TableCell>
-                    <TableCell className='text-right'>{formatCurrency(entry.basic_rate)}</TableCell>
-                    <TableCell className='text-right'>
-                      {canEdit && (
-                        <Input
-                          type='number'
-                          disabled={generationUncertain}
-                          className='w-24 text-right'
-                          value={Number(entry.overtime_pay)}
-                          onChange={(e) => updateEntry(idx, 'overtime_pay', e.target.value)}
-                          data-testid={`edit-overtime-${entry.employee_id}`}
-                        />
-                      )}
-                      {!canEdit && formatCurrency(entry.overtime_pay)}
-                    </TableCell>
-                    <TableCell className='text-right'>{formatCurrency(entry.non_taxable_income)}</TableCell>
-                    <TableCell className='text-right'>{formatCurrency(entry.gross_pay)}</TableCell>
-                    <TableCell className='text-right'>{formatCurrency(entry.total_deductions)}</TableCell>
-                    <TableCell className='text-right font-medium'>{formatCurrency(entry.net_pay)}</TableCell>
-                  </TableRow>
+      <section
+        className='space-y-4 rounded-lg border p-4'
+        aria-label='Payroll readiness preflight'
+      >
+        <div className='grid gap-3 md:grid-cols-3'>
+          <label className='grid gap-1 text-sm'>
+            Pay group
+            <Select
+              value={payGroupId}
+              onValueChange={(value) => {
+                setPayGroupId(value)
+                clearResults()
+              }}
+            >
+              <SelectTrigger data-testid='payroll-pay-group-select'>
+                <SelectValue placeholder='Select pay group' />
+              </SelectTrigger>
+              <SelectContent>
+                {setup.groups.data?.map((group) => (
+                  <SelectItem key={group.id} value={group.id}>
+                    {group.name} · {group.cadence.replace('_', ' ')}
+                  </SelectItem>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
+              </SelectContent>
+            </Select>
+          </label>
+          <label className='grid gap-1 text-sm'>
+            Period from
+            <Input
+              data-testid='payroll-period-from'
+              type='date'
+              value={dateFrom}
+              onChange={(event) => {
+                setDateFrom(event.target.value)
+                clearResults()
+              }}
+            />
+          </label>
+          <label className='grid gap-1 text-sm'>
+            Period through
+            <Input
+              data-testid='payroll-period-to'
+              type='date'
+              value={dateTo}
+              onChange={(event) => {
+                setDateTo(event.target.value)
+                clearResults()
+              }}
+            />
+          </label>
         </div>
+        {setup.groups.isError && (
+          <p role='alert' className='text-sm text-destructive'>
+            Pay groups could not be loaded.
+          </p>
+        )}
+        {!setup.groups.isPending && !setup.groups.data?.length && (
+          <p className='text-sm text-muted-foreground'>
+            Create a pay group in Payroll setup before checking a period.
+          </p>
+        )}
+        <Button
+          type='button'
+          data-testid='payroll-preflight-button'
+          disabled={
+            !payGroupId || !dateFrom || !dateTo || preflightMutation.isPending
+          }
+          onClick={() => checkReadiness(0)}
+        >
+          {preflightMutation.isPending
+            ? 'Checking readiness…'
+            : 'Check payroll readiness'}
+        </Button>
+        <Button
+          type='button'
+          variant='outline'
+          data-testid='payroll-attendance-preview-button'
+          disabled={
+            !payGroupId || !dateFrom || !dateTo || calculationMutation.isPending
+          }
+          onClick={previewAttendanceEarnings}
+        >
+          {calculationMutation.isPending
+            ? 'Calculating provisional earnings…'
+            : 'Preview attendance earnings'}
+        </Button>
+        {canAdd && (
+          <Button
+            type='button'
+            variant='outline'
+            data-testid='payroll-prepare-draft-button'
+            disabled={
+              !payGroupId || !dateFrom || !dateTo || prepareMutation.isPending
+            }
+            onClick={prepareDraft}
+          >
+            {prepareMutation.isPending
+              ? 'Saving draft…'
+              : 'Prepare blocked review draft'}
+          </Button>
+        )}
+      </section>
+
+      <div
+        role='status'
+        className='rounded-md border border-amber-500/40 p-3 text-sm text-muted-foreground'
+      >
+        Draft preparation saves attendance-based provisional earnings with
+        blockers. Statutory deductions, final approval, payslip generation and
+        delivery remain disabled pending verified rules and HR-approved sample
+        comparisons.
+      </div>
+      {preparedRunId && (
+        <p role='status' className='text-sm'>
+          Draft saved: {preparedRunId}. It cannot be reviewed or finalized while
+          blockers remain.
+        </p>
       )}
 
-      {step === 'result' && run && (
-        <div className='space-y-4'>
-          <div className='rounded-lg border p-4'>
-            <h2 className='text-xl font-semibold'>Payroll Run Generated</h2>
-            <p className='text-muted-foreground'>Run ID: {run.id}</p>
-            <p className='text-muted-foreground'>Status: {run.status}</p>
-            <p className='text-muted-foreground'>Cutoff: {run.cutoff_type} ({run.date_from} → {run.date_to})</p>
-            <p className='text-muted-foreground'>Entries: {previewEntries.length}</p>
-          </div>
-          <div className='flex gap-2'>
-            <Button data-testid='view-payslips-button' onClick={() => { window.open(`#/payroll-runs/${run.id}`, '_blank') }}>
-              View Payslips
-            </Button>
-            {canApprove && run.status === 'draft' && (
-              <Button data-testid='approve-payroll-run-button' onClick={handleApprove} disabled={approveMutation.isPending}>
-                {approveMutation.isPending ? 'Approving...' : 'Approve Run'}
+      {preflight && (
+        <section className='space-y-3' aria-label='Payroll preflight results'>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <p className='text-sm'>
+              {preflight.ready_count} ready · {preflight.blocked_count} blocked
+              on this page · {preflight.count} expected employees total
+            </p>
+            <div className='flex gap-2'>
+              <Button
+                variant='outline'
+                type='button'
+                disabled={page === 0 || preflightMutation.isPending}
+                onClick={() => checkReadiness(page - 1)}
+              >
+                Previous
               </Button>
-            )}
-            {canApprove && run.status === 'draft' && (
-              <Button data-testid='void-payroll-run-button' variant='destructive' onClick={handleVoid} disabled={voidMutation.isPending}>
-                {voidMutation.isPending ? 'Voiding...' : 'Void Run'}
+              <Button
+                variant='outline'
+                type='button'
+                disabled={!preflight.has_more || preflightMutation.isPending}
+                onClick={() => checkReadiness(page + 1)}
+              >
+                Next
               </Button>
-            )}
+            </div>
           </div>
-        </div>
+          <div className='max-h-[36rem] overflow-auto rounded-lg border'>
+            <table className='w-full text-sm'>
+              <thead className='sticky top-0 bg-muted'>
+                <tr>
+                  <th className='p-2 text-left'>Employee</th>
+                  <th className='p-2 text-left'>Blockers and warnings</th>
+                  <th className='p-2 text-right'>DTRs</th>
+                  <th className='p-2 text-right'>Approved OT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preflight.entries.map((entry) => (
+                  <tr key={entry.employee_id} className='border-t align-top'>
+                    <td className='p-2'>
+                      {entry.employee_code} · {entry.employee_name}
+                    </td>
+                    <td className='space-y-1 p-2'>
+                      {entry.blockers.map((blocker, index) => (
+                        <p
+                          key={`${blocker.code}-${blocker.work_date ?? index}`}
+                          className='text-destructive'
+                        >
+                          {blocker.work_date ? `${blocker.work_date}: ` : ''}
+                          {blocker.message}
+                        </p>
+                      ))}
+                      {entry.warnings.map((warning) => (
+                        <p key={warning} className='text-amber-700'>
+                          {warning}
+                        </p>
+                      ))}
+                      {!entry.blockers.length && !entry.warnings.length && (
+                        <span className='text-green-700'>
+                          Ready for calculation review
+                        </span>
+                      )}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.attendance_records}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.approved_overtime_minutes} /{' '}
+                      {entry.eligible_overtime_minutes} min
+                    </td>
+                  </tr>
+                ))}
+                {!preflight.entries.length && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className='p-4 text-center text-muted-foreground'
+                    >
+                      No expected employees in this pay group and period.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
-    </div>
+
+      {calculation && (
+        <section className='space-y-3' aria-label='Attendance earnings preview'>
+          <div
+            role='status'
+            className='rounded-md border border-amber-500/40 p-3 text-sm'
+          >
+            Provisional earnings only. Statutory contributions, tax, loans,
+            final approval, payslip generation and email delivery are not
+            included or enabled.
+          </div>
+          <div className='max-h-[36rem] overflow-auto rounded-lg border'>
+            <table className='w-full text-sm'>
+              <thead className='sticky top-0 bg-muted'>
+                <tr>
+                  <th className='p-2 text-left'>Employee</th>
+                  <th className='p-2 text-left'>Blockers</th>
+                  <th className='p-2 text-right'>Regular</th>
+                  <th className='p-2 text-right'>Approved OT</th>
+                  <th className='p-2 text-right'>Attendance deduction</th>
+                  <th className='p-2 text-right'>Gross before statutory</th>
+                </tr>
+              </thead>
+              <tbody>
+                {calculation.entries.map((entry) => (
+                  <tr key={entry.employee_id} className='border-t align-top'>
+                    <td className='p-2'>
+                      {entry.employee_code} · {entry.employee_name}
+                      <details className='mt-1 text-xs'>
+                        <summary>Formula and sources</summary>
+                        {entry.formula.map((line) => (
+                          <p key={line}>{line}</p>
+                        ))}
+                        {entry.source_references.map((source) => (
+                          <p key={source} className='text-muted-foreground'>
+                            {source}
+                          </p>
+                        ))}
+                      </details>
+                    </td>
+                    <td className='p-2 text-destructive'>
+                      {entry.blockers.map((blocker) => (
+                        <p key={`${blocker.code}-${blocker.work_date}`}>
+                          {blocker.work_date ? `${blocker.work_date}: ` : ''}
+                          {blocker.message}
+                        </p>
+                      ))}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.regular_earnings ?? '—'}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.approved_overtime ?? '—'}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.attendance_deduction ?? '—'}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.gross_before_statutory ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {calculation.has_more && (
+            <p className='text-sm text-muted-foreground'>
+              This is one bounded page of the expected roster. Change the
+              readiness page before previewing the next page.
+            </p>
+          )}
+        </section>
+      )}
+    </main>
   )
 }

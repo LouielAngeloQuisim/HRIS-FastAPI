@@ -1,7 +1,6 @@
 import { test, expect } from '../fixtures'
-import { apiUrl, createParent } from '../helpers/crud-journey'
+import { apiUrl } from '../helpers/crud-journey'
 import { StatutoryConfigurationPage } from '../pages/statutory-configuration.page'
-import { PayrollExecutionPage } from '../pages/payroll-execution.page'
 import type { Page } from '@playwright/test'
 
 async function headers(page: Page) {
@@ -44,42 +43,17 @@ for (const [kind, fields, change] of [
   })
 }
 
-test('preview stays transient and lost generation response retries recover exactly one run', async ({ page, loginAsAdmin }) => {
+test('legacy payroll preview and generation stay blocked while readiness explains the remaining gates', async ({ page, loginAsAdmin }) => {
   await loginAsAdmin()
-  const employee = await createParent(page, 'employees', { employee_code: `RET${Date.now().toString(36)}`, first_name: 'Retry', last_name: 'Payroll', birthdate: '1990-01-01' })
-  const salary = await page.request.post(`${apiUrl}/payroll/employees/${employee.id}/salary`, { headers: await headers(page), data: { employee_id: employee.id, basic_rate: '18000', currency: 'PHP', effective_date: '2026-01-01', pay_type: 'monthly' } })
-  expect(salary.status()).toBe(200)
-  const payroll = new PayrollExecutionPage(page)
-  const before = await page.request.get(`${apiUrl}/payroll/runs`, { headers: await headers(page) })
-  const baseline = (await before.json()).length
-  await payroll.openExecution()
-  await payroll.selectEmployee('employee-filter-select', new RegExp(`${employee.employee_code}.*Retry Payroll`))
-  await payroll.previewPeriod('2026-10-01', '2026-10-31')
-  await expect(page.getByTestId('proceed-to-review-button')).toBeVisible()
-  const afterPreview = await page.request.get(`${apiUrl}/payroll/runs`, { headers: await headers(page) })
-  expect((await afterPreview.json()).length).toBe(baseline)
-  let committedId: string | undefined
-  let identity: string | undefined
-  await page.route('**/payroll/runs/generate', async route => {
-    const payload = route.request().postDataJSON()
-    if (committedId) {
-      expect(payload.request_id).toBe(identity)
-      return route.continue()
-    }
-    identity = payload.request_id
-    const response = await route.fetch()
-    expect(response.status()).toBe(200)
-    committedId = (await response.json()).id
-    await route.abort()
-  })
-  await page.getByTestId('proceed-to-review-button').click()
-  await expect(page.getByTestId('generation-outcome-unknown')).toBeVisible()
-  await expect(page.getByTestId('recalculate-payroll-button')).toBeDisabled()
-  await payroll.generateReviewedPayroll()
-  const final = await page.request.get(`${apiUrl}/payroll/runs`, { headers: await headers(page) })
-  const runs = await final.json()
-  expect(runs.length).toBe(baseline + 1)
-  expect(runs.filter((run: { id: string }) => run.id === committedId)).toHaveLength(1)
+  const auth = await headers(page)
+  const preview = await page.request.post(`${apiUrl}/payroll/runs/preview`, { headers: auth, data: { cutoff_type: 'monthly', date_from: '2026-10-01', date_to: '2026-10-31' } })
+  expect(preview.status()).toBe(409)
+  const generation = await page.request.post(`${apiUrl}/payroll/runs/generate`, { headers: auth, data: { cutoff_type: 'monthly', date_from: '2026-10-01', date_to: '2026-10-31', request_id: crypto.randomUUID() } })
+  expect(generation.status()).toBe(409)
+  await page.goto('/payroll')
+  await expect(page.getByRole('heading', { name: 'Payroll readiness' })).toBeVisible()
+  await expect(page.getByText(/statutory deductions.*remain disabled/i)).toBeVisible()
+  await expect(page.getByTestId('payroll-prepare-draft-button')).toBeDisabled()
 })
 
 test('real permission rejection keeps statutory form values and shows one actionable error', async ({ page, loginAsAdmin, loginAsUser, logout }) => {

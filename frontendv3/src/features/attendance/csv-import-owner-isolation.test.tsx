@@ -10,6 +10,8 @@ import { renderWithClient } from '@/test-utils/providers'
 import { useAuthStore } from '@/stores/auth-store'
 import { AttendanceCsvImportWizard, __resetRecoverableSlotForTests } from './components/csv-import/attendance-csv-wizard'
 
+vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
+
 const { apiPostMock } = vi.hoisted(() => ({ apiPostMock: vi.fn() }))
 vi.mock('@/lib/api/client', () => ({
   api: { post: (...a: unknown[]) => apiPostMock(...a) },
@@ -27,6 +29,16 @@ const CSV = [
   'employee_code,login_date,logout_date,shift_code',
   'EMP001,2026-08-04T08:00:00Z,2026-08-04T17:00:00Z,DAY',
 ].join('\n')
+const PREFLIGHT_URL = '/daily-time-records/import-batches/preflight'
+const COMMIT_URL = '/daily-time-records/import-batches/commit'
+
+function mockAmbiguousCommit() {
+  apiPostMock.mockImplementation((url: string) => {
+    if (url === PREFLIGHT_URL) return Promise.resolve({ data: { valid: true, issues: [], excluded: [] } })
+    if (url === COMMIT_URL) return Promise.reject({ response: { status: 502 } })
+    return Promise.resolve({ data: {} })
+  })
+}
 
 function signIn(id: string) {
   useAuthStore.getState().auth.setUser({ id, email: `${id}@test.local`, fullName: `User ${id}`, isSuperuser: true, roleId: null, roleCode: 'admin' })
@@ -52,7 +64,7 @@ async function importUnresolvedAndClose(view: Awaited<ReturnType<typeof renderWi
   await userEvent.click(view.getByRole('button', { name: 'Open wizard' }))
   await userEvent.fill(view.getByPlaceholder(/employee_code/), CSV)
   await userEvent.click(view.getByRole('button', { name: /^Import 1 Records$/i }))
-  await vi.waitFor(() => { expect(apiPostMock).toHaveBeenCalledTimes(1) })
+  await vi.waitFor(() => { expect(apiPostMock).toHaveBeenCalledTimes(2) })
   await userEvent.click(view.getByTestId('csv-import-close-button'))
   await vi.waitFor(() => {
     expect(view.getByPlaceholder(/employee_code/)).not.toBeInTheDocument()
@@ -67,7 +79,7 @@ beforeEach(() => {
 
 describe('Attendance CSV wizard account isolation (PR74 review P1)', () => {
   it('does not hand an unresolved batch to a different account on reopen', async () => {
-    apiPostMock.mockRejectedValue({ response: { status: 502 } })
+  mockAmbiguousCommit()
     signIn('user-aaaa')
 
     const view = await renderWithClient(<Harness />)
@@ -94,7 +106,7 @@ describe('Attendance CSV wizard account isolation (PR74 review P1)', () => {
   })
 
   it('drops a stored unresolved batch the moment the account logs out', async () => {
-    apiPostMock.mockRejectedValue({ response: { status: 502 } })
+    mockAmbiguousCommit()
     signIn('user-aaaa')
 
     const view = await renderWithClient(<Harness />)
@@ -112,19 +124,22 @@ describe('Attendance CSV wizard account isolation (PR74 review P1)', () => {
 
   it('abandons a running import when the account changes mid-flight: A results never surface for B', async () => {
     let settle: (v: unknown) => void = () => {}
-    apiPostMock.mockImplementation(() => new Promise((resolve) => { settle = resolve }))
+    apiPostMock.mockImplementation((url: string) => {
+      if (url === PREFLIGHT_URL) return Promise.resolve({ data: { valid: true, issues: [], excluded: [] } })
+      return new Promise((resolve) => { settle = resolve })
+    })
     signIn('user-aaaa')
 
     const view = await renderWithClient(<Harness />)
     await userEvent.click(view.getByRole('button', { name: 'Open wizard' }))
     await userEvent.fill(view.getByPlaceholder(/employee_code/), CSV)
     await userEvent.click(view.getByRole('button', { name: /^Import 1 Records$/i }))
-    await vi.waitFor(() => { expect(apiPostMock).toHaveBeenCalledTimes(1) })
+    await vi.waitFor(() => { expect(apiPostMock).toHaveBeenCalledTimes(2) })
 
     // Account switches WHILE the POST is in flight; the late success verdict
     // arrives after the owner changed. It must not render and must not be
     // stored for restore.
-    apiPostMock.mockImplementation(() => Promise.resolve({ data: {} }))
+    apiPostMock.mockImplementation((url: string) => Promise.resolve(url === PREFLIGHT_URL ? { data: { valid: true, issues: [], excluded: [] } } : { data: {} }))
     signIn('user-bbbb')
     settle({ data: {} })
 
@@ -144,10 +159,15 @@ describe('Attendance CSV wizard account isolation (PR74 review P1)', () => {
   })
 
   it('still restores the unresolved batch with ORIGINAL keys for the SAME account (QA-01 preserved)', async () => {
-    const capturedKeys: string[] = []
-    apiPostMock.mockImplementation((_url: string, body: { source_ref?: string }) => {
-      capturedKeys.push(body.source_ref ?? '')
-      return Promise.reject({ response: { status: 502 } })
+    let capturedKey = ''
+    apiPostMock.mockImplementation((url: string, body: { keys?: Array<{ source_ref: string }> }) => {
+      if (url === PREFLIGHT_URL) return Promise.resolve({ data: { valid: true, issues: [], excluded: [] } })
+      if (url === COMMIT_URL) {
+        capturedKey = `dtr-import-${(body as unknown as { batch_id: string }).batch_id}-r0`
+        return Promise.reject({ response: { status: 502 } })
+      }
+      capturedKey = body.keys?.[0]?.source_ref ?? capturedKey
+      return Promise.resolve({ data: { results: [{ employee_code: 'EMP001', source_ref: capturedKey, status: 'not_found' }] } })
     })
     signIn('user-aaaa')
 
@@ -160,11 +180,10 @@ describe('Attendance CSV wizard account isolation (PR74 review P1)', () => {
 
     // Reconcile on the restored batch asks the server about the ORIGINAL key.
     apiPostMock.mockReset()
-    apiPostMock.mockResolvedValue({ data: { results: [{ employee_code: 'EMP001', source_ref: capturedKeys[0], status: 'not_found' }] } })
     await userEvent.click(view.getByRole('button', { name: /reconcile/i }))
     await vi.waitFor(() => {
       expect(apiPostMock).toHaveBeenCalledWith('/daily-time-records/reconcile-imports', {
-        keys: [{ employee_code: 'EMP001', source_ref: capturedKeys[0] }],
+        keys: [{ employee_code: 'EMP001', source_ref: capturedKey }],
       })
     })
   })

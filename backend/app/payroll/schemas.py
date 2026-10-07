@@ -8,9 +8,9 @@ Naming follows the leave-domain convention (``*Public``/``*Create``/``*Update``/
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, EmailStr, Field
 from sqlmodel import SQLModel
 
 from app.payroll.models import (
@@ -233,6 +233,109 @@ class EmployeeSalaryList(SQLModel):
     count: int
 
 
+class PayrollSalaryRosterItem(SQLModel):
+    employee_id: uuid.UUID
+    employee_code: str
+    first_name: str
+    last_name: str
+    employee_status: str
+    has_effective_salary: bool
+
+
+class PayrollSalaryRosterList(SQLModel):
+    data: list[PayrollSalaryRosterItem]
+    count: int
+
+
+class PayrollPreflightBlocker(SQLModel):
+    code: str
+    message: str
+    work_date: date | None = None
+
+
+class PayrollPreflightEmployee(SQLModel):
+    employee_id: uuid.UUID
+    employee_code: str
+    employee_name: str
+    email: str | None = None
+    blockers: list[PayrollPreflightBlocker] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    attendance_records: int = 0
+    eligible_overtime_minutes: int = 0
+    approved_overtime_minutes: int = 0
+
+
+class PayrollRunPreflight(SQLModel):
+    pay_group_id: uuid.UUID
+    date_from: date
+    date_to: date
+    policy_versions: list[int] = Field(default_factory=list)
+    entries: list[PayrollPreflightEmployee]
+    count: int
+    blocked_count: int
+    ready_count: int
+    has_more: bool
+
+
+class PayrollAttendanceCalculationEntry(SQLModel):
+    employee_id: uuid.UUID
+    employee_code: str
+    employee_name: str
+    regular_earnings: Decimal | None = None
+    approved_overtime: Decimal | None = None
+    attendance_deduction: Decimal | None = None
+    gross_before_statutory: Decimal | None = None
+    blockers: list[PayrollPreflightBlocker] = Field(default_factory=list)
+    formula: list[str] = Field(default_factory=list)
+    source_references: list[str] = Field(default_factory=list)
+
+
+class PayrollAttendanceCalculationPreview(SQLModel):
+    pay_group_id: uuid.UUID
+    date_from: date
+    date_to: date
+    calculation_status: Literal["provisional_earnings_only"] = (
+        "provisional_earnings_only"
+    )
+    entries: list[PayrollAttendanceCalculationEntry]
+    count: int
+    has_more: bool
+
+
+class EmployeeSalaryBulkRow(SQLModel):
+    employee_id: uuid.UUID
+    basic_rate: Decimal = Field(gt=0)
+    pay_type: PayType
+    overtime_rate: Decimal = Field(default=Decimal("0"), ge=0)
+    non_taxable_allowance: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class EmployeeSalaryBulkRequest(SQLModel):
+    batch_id: uuid.UUID
+    effective_date: date
+    rows: list[EmployeeSalaryBulkRow] = Field(min_length=1, max_length=500)
+
+
+class EmployeeSalaryBulkIssue(SQLModel):
+    row_index: int
+    employee_id: uuid.UUID
+    code: str
+    message: str
+
+
+class EmployeeSalaryBulkPreflight(SQLModel):
+    batch_id: uuid.UUID
+    valid: bool
+    requested: int
+    issues: list[EmployeeSalaryBulkIssue]
+
+
+class EmployeeSalaryBulkCommit(SQLModel):
+    batch_id: uuid.UUID
+    replayed: bool
+    salaries: list[EmployeeSalaryPublic]
+
+
 # === Payroll run lifecycle (B4B) =========================================================
 
 
@@ -240,7 +343,9 @@ class PayrollRunCreate(SQLModel):
     cutoff_type: CutoffType = Field(default=CutoffType.MONTHLY)
     date_from: date
     date_to: date
-    adjustment_type: PayrollAdjustmentType = Field(default=PayrollAdjustmentType.REGULAR)
+    adjustment_type: PayrollAdjustmentType = Field(
+        default=PayrollAdjustmentType.REGULAR
+    )
     employee_ids: list[uuid.UUID] | None = None
     department_id: uuid.UUID | None = None
 
@@ -259,6 +364,12 @@ class PayrollRunPublic(SQLModel):
     is_deleted: bool
     created_at: datetime | None
     updated_at: datetime | None
+    workflow_status: str = "draft"
+    pay_group_id: uuid.UUID | None = None
+    policy_version_id: uuid.UUID | None = None
+    payment_date: date | None = None
+    finalized_by: uuid.UUID | None = None
+    finalized_at: datetime | None = None
     total_gross_pay: Decimal = Field(default=Decimal("0.00"))
     total_deductions: Decimal = Field(default=Decimal("0.00"))
     total_net_pay: Decimal = Field(default=Decimal("0.00"))
@@ -288,6 +399,59 @@ class PayrollEntryPublic(SQLModel):
     is_deleted: bool
     created_at: datetime | None
     updated_at: datetime | None
+    review_state: str = "ready"
+    reviewed_by: uuid.UUID | None = None
+    reviewed_at: datetime | None = None
+    input_fingerprint: str | None = None
+    blockers: list[dict[str, str]] = Field(default_factory=list)
+
+
+class PayrollEntryReviewRequest(SQLModel):
+    action: Literal["reviewed", "excluded"]
+    expected_input_fingerprint: str = Field(min_length=64, max_length=64)
+    reason: str | None = Field(default=None, max_length=1024)
+
+
+class PayrollAttendancePrepareRequest(SQLModel):
+    """Create an immutable-source draft from one configured pay period."""
+
+    pay_group_id: uuid.UUID
+    date_from: date
+    date_to: date
+
+
+class PayrollReviewActionResult(SQLModel):
+    run_id: uuid.UUID
+    entry_id: uuid.UUID | None = None
+    workflow_status: str
+    reviewed_count: int
+    excluded_count: int
+    unresolved_count: int
+
+
+class PayrollDeliveryStatusPublic(SQLModel):
+    id: uuid.UUID
+    payroll_entry_id: uuid.UUID
+    document_version: int
+    recipient_snapshot: str | None
+    status: str
+    attempts: int
+    next_attempt_at: datetime | None
+    sent_at: datetime | None
+    last_error_code: str | None
+    last_action_by: uuid.UUID | None
+    last_action_at: datetime | None
+    last_action_reason: str | None
+
+
+class PayrollDeliveryAddressUpdate(SQLModel):
+    email: EmailStr
+    reason: str = Field(min_length=5, max_length=1024)
+
+
+class PayrollDeliveryResendRequest(SQLModel):
+    reason: str = Field(min_length=5, max_length=1024)
+    confirm_duplicate_risk: bool = False
 
 
 PayrollEntryRead = PayrollEntryPublic
@@ -353,7 +517,9 @@ class PayrollPreviewRequest(SQLModel):
     cutoff_type: CutoffType = Field(default=CutoffType.MONTHLY)
     date_from: date
     date_to: date
-    adjustment_type: PayrollAdjustmentType = Field(default=PayrollAdjustmentType.REGULAR)
+    adjustment_type: PayrollAdjustmentType = Field(
+        default=PayrollAdjustmentType.REGULAR
+    )
     entries: list[PayrollReviewOverride] | None = None
     employee_ids: list[uuid.UUID] | None = None
     department_id: uuid.UUID | None = None
@@ -579,3 +745,69 @@ class PayrollPayslipPublic(SQLModel):
 class PayrollPayslipList(SQLModel):
     data: list[PayrollPayslipPublic]
     count: int
+
+
+# === Attendance-driven payroll setup ================================================
+
+
+class PayrollPayGroupCreate(SQLModel):
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=128)
+    cadence: CutoffType
+    first_period_end_day: int | None = Field(default=None, ge=1, le=30)
+    second_period_end_day: int | None = Field(default=None, ge=1, le=31)
+    payment_offset_days: int = Field(default=0, ge=0, le=60)
+    weekend_rule: Literal[
+        "next_business_day", "previous_business_day", "nearest_business_day"
+    ] = "next_business_day"
+
+
+class PayrollPayGroupPublic(PayrollPayGroupCreate):
+    id: uuid.UUID
+    is_active: bool
+    created_by: uuid.UUID | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+class EmployeePayGroupAssignmentCreate(SQLModel):
+    employee_id: uuid.UUID
+    pay_group_id: uuid.UUID
+    effective_from: date
+    effective_to: date | None = None
+
+
+class EmployeePayGroupAssignmentPublic(EmployeePayGroupAssignmentCreate):
+    id: uuid.UUID
+    assigned_by: uuid.UUID | None
+    created_at: datetime | None
+
+
+class EmployeePayGroupAssignmentUpdate(SQLModel):
+    effective_to: date
+
+
+class PayrollPolicyVersionCreate(SQLModel):
+    effective_from: date
+    policy: dict[str, Any]
+
+
+class PayrollPolicyVersionPublic(SQLModel):
+    id: uuid.UUID
+    version: int
+    effective_from: date
+    effective_to: date | None
+    policy: dict[str, Any]
+    confirmed: bool
+    confirmed_by: uuid.UUID | None
+    confirmed_at: datetime | None
+    created_by: uuid.UUID | None
+    created_at: datetime | None
+
+
+class PayrollPayPeriodPublic(SQLModel):
+    pay_group_id: uuid.UUID
+    date_from: date
+    date_to: date
+    payment_date: date
+    cadence: CutoffType

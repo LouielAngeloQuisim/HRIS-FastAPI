@@ -133,7 +133,7 @@ def bir_brackets(db: Session) -> Generator[list[BIRBracket], None, None]:
     monthly_data = [
         (0, 10416.67, 0, 20),
         (10416.68, 20833.33, 2083.33, 25),
-        (20833.34, 999999999, 2083.33, 30),
+        (20833.34, 999999999, 4687.49, 30),
     ]
     brackets: list[BIRBracket] = []
     for br_min, br_max, base_tax, excess_rate in monthly_data:
@@ -498,52 +498,44 @@ class TestBIRCalculation:
         assert data["tax_amount"] == 2083.33
 
     def test_second_bracket_lower_bound(self, client: TestClient, superuser_token_headers, bir_brackets):
-        # 10416.68: b1 full span 10416.67; b2 sliver 0.01
-        # b1 tax = 0 + (10416.67 * 20%) = 2083.334; b2 tax = 2083.33 + (0.01 * 25%) = 2083.3325
-        # total = 2083.334 + 2083.3325 = 4166.6665 → quantize → 4166.67
+        # The selected bracket contributes its base tax plus excess over its own minimum.
         response = client.post(f"{API}/bir/calculate",
                                params={"taxable_income": 10416.68, "period_type": "monthly"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == BIR_KEYS
-        assert data["tax_amount"] == 4166.67
+        assert data["tax_amount"] == 2083.33
 
     def test_calculate_mid_range_bracket(self, client: TestClient, superuser_token_headers, bir_brackets):
-        # 15000: b1 full span 10416.67; b2 remaining 4583.33
-        # b1 = 0 + 2083.334; b2 = 2083.33 + (4583.33*0.25) = 2083.33 + 1145.8325 = 3229.1625
-        # total = 2083.334 + 3229.1625 = 5312.4965 → 5312.50
+        # 2083.33 base tax plus the 25% tax on income above 10416.68.
         response = client.post(f"{API}/bir/calculate",
                                params={"taxable_income": 15000.0, "period_type": "monthly"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == BIR_KEYS
-        assert data["tax_amount"] == 5312.50
+        assert data["tax_amount"] == 3229.16
 
     def test_second_bracket_upper_bound(self, client: TestClient, superuser_token_headers, bir_brackets):
-        # 20833.33: b1 full span 10416.67; b2 full span 10416.65; b3 sliver 0.01
-        # b1 = 2083.334; b2 = 2083.33 + 2604.1625 = 4687.4925; b3 = 2083.33 + 0.0003 = 2083.3303
-        # total = 2083.334 + 4687.4925 + 2083.3303 = 8854.1568 → 8854.16
+        # The upper endpoint remains in the 25% bracket.
         response = client.post(f"{API}/bir/calculate",
                                params={"taxable_income": 20833.33, "period_type": "monthly"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == BIR_KEYS
-        assert data["tax_amount"] == 8854.16
+        assert data["tax_amount"] == 4687.49
 
     def test_calculate_high_income_bracket(self, client: TestClient, superuser_token_headers, bir_brackets):
-        # 33333.33: b1 full 10416.67; b2 full 10416.65; b3 remaining 12500.0 (20833.34..33333.33)
-        # b1 = 2083.334; b2 = 4687.4925; b3 = 2083.33 + (12500.0*30%) = 2083.33 + 3750.0 = 5833.33
-        # total = 2083.334 + 4687.4925 + 5833.33 = 12604.1565 → 12604.16
+        # 4687.49 base tax plus 30% on income above 20833.34.
         response = client.post(f"{API}/bir/calculate",
                                params={"taxable_income": 33333.33, "period_type": "monthly"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == BIR_KEYS
-        assert data["tax_amount"] == 12604.16
+        assert data["tax_amount"] == 8437.49
 
     def test_top_unallocated_income_excess_only(self, client: TestClient, superuser_token_headers, bir_brackets):
         # Same income as above (50000), verify top bracket calculation consistency.
@@ -553,7 +545,7 @@ class TestBIRCalculation:
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == BIR_KEYS
-        assert data["tax_amount"] == 17604.16
+        assert data["tax_amount"] == 13437.49
 
     def test_two_brackets_same_rate_no_base_tax(self, client: TestClient, superuser_token_headers, bir_brackets):
         # Adjacent bracket boundary: both produce identical outputs.
@@ -566,7 +558,7 @@ class TestBIRCalculation:
             data = response.json()
             assert set(data) == BIR_KEYS
             expected.append(data["tax_amount"])
-        assert expected[0] == 8854.16
+        assert expected[0] == 4687.49
         assert expected[0] == expected[1]
 
     def test_valid_period_with_no_brackets_yields_zero(self, client: TestClient, superuser_token_headers, bir_brackets):
@@ -617,8 +609,8 @@ class TestBatchContributionCalculation:
         assert c["pagibig_employer"] == 30.0
         assert _dec(c["taxable_income"]) == Decimal("25000.00") - Decimal("500.00") - Decimal("625.00") - Decimal("30.00")
         assert c["taxable_income"] == 23845.0
-        # BIR on 23845 across three monthly fixture brackets (base_tax per-row quirk):
-        assert c["bir"] == 9757.66
+        # The selected bracket supplies one cumulative base tax plus tax on excess.
+        assert c["bir"] == 5590.99
 
     def test_calculate_contributions_without_effective_date(self, client: TestClient, superuser_token_headers,
                                                              sss_brackets, philhealth_brackets, pagibig_brackets,
@@ -644,7 +636,7 @@ class TestBatchContributionCalculation:
         assert c["pagibig_employer"] == 200.0
         assert _dec(c["taxable_income"]) == Decimal("15000.00") - Decimal("500.00") - Decimal("375.00") - Decimal("100.00")
         assert c["taxable_income"] == 14025.0
-        assert c["bir"] == 5068.75
+        assert c["bir"] == 2985.41
 
     def test_calculate_contributions_low_gross_pay(self, client: TestClient, superuser_token_headers,
                                                     sss_brackets, philhealth_brackets, pagibig_brackets,

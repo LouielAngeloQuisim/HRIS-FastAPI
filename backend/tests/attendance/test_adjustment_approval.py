@@ -57,7 +57,7 @@ def dtr(db: Session, employee: EmployeeRecords, shift: Shift) -> DailyTimeRecord
     rec = DailyTimeRecord(
         employee_id=employee.id, shift_id=shift.id,
         login_date=_dt(MON, 8, 0), logout_date=_dt(MON, 17, 0),
-        rendered_minutes=480, late_minutes=0, undertime_minutes=0, overtime_minutes=0,
+        rendered_minutes=480, late_minutes=0, undertime_minutes=0, overtime_minutes=60,
         is_time_calculated=True, source="manual",
     )
     db.add(rec)
@@ -74,6 +74,7 @@ class TestOvertimeApproval:
     ) -> None:
         r = client.post(
             f"{API}/daily-time-records/{dtr.id}/approve-overtime",
+            json={"approved_minutes": 45, "reason": "Verified by supervisor"},
             headers=superuser_token_headers,
         )
         assert r.status_code == 200, r.text
@@ -81,6 +82,8 @@ class TestOvertimeApproval:
             f"{API}/daily-time-records/{dtr.id}", headers=superuser_token_headers,
         )
         assert r.json()["overtime_approved"] is True
+        assert r.json()["overtime_approved_minutes"] == 45
+        assert r.json()["overtime_decision_reason"] == "Verified by supervisor"
 
     def test_reject_overtime_flips_flag_false(
         self, client: TestClient, superuser_token_headers, dtr: DailyTimeRecord,
@@ -89,10 +92,12 @@ class TestOvertimeApproval:
         dtr.overtime_approved = True
         client.post(
             f"{API}/daily-time-records/{dtr.id}/approve-overtime",
+            json={"approved_minutes": 30, "reason": "Initial review"},
             headers=superuser_token_headers,
         )
         r = client.post(
             f"{API}/daily-time-records/{dtr.id}/reject-overtime",
+            json={"reason": "Rejected after review"},
             headers=superuser_token_headers,
         )
         assert r.status_code == 200, r.text
@@ -100,12 +105,15 @@ class TestOvertimeApproval:
             f"{API}/daily-time-records/{dtr.id}", headers=superuser_token_headers,
         )
         assert r.json()["overtime_approved"] is False
+        assert r.json()["overtime_approved_minutes"] == 0
+        assert r.json()["overtime_decision_reason"] == "Rejected after review"
 
     def test_overtime_approval_requires_permission(
         self, client: TestClient, normal_user_token_headers, dtr: DailyTimeRecord,
     ) -> None:
         r = client.post(
             f"{API}/daily-time-records/{dtr.id}/approve-overtime",
+            json={"approved_minutes": 30, "reason": "Not permitted"},
             headers=normal_user_token_headers,
         )
         assert r.status_code == 403, r.text

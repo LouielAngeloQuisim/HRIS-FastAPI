@@ -8,8 +8,16 @@ vi.mock('@/context/permissions-provider', () => ({
 }))
 
 const { useEmployeesMock, useDepartmentsMock } = vi.hoisted(() => ({
-  useEmployeesMock: vi.fn(() => ({ data: { data: [], count: 0 }, isPending: false, isError: false })),
-  useDepartmentsMock: vi.fn(() => ({ data: { data: [], count: 0 }, isPending: false, isError: false })),
+  useEmployeesMock: vi.fn(() => ({
+    data: { data: [], count: 0 },
+    isPending: false,
+    isError: false,
+  })),
+  useDepartmentsMock: vi.fn(() => ({
+    data: { data: [], count: 0 },
+    isPending: false,
+    isError: false,
+  })),
 }))
 vi.mock('@/lib/api/employees', () => ({
   useEmployees: () => useEmployeesMock(),
@@ -19,6 +27,18 @@ vi.mock('@/lib/api/departments', () => ({
 }))
 
 vi.mock('@/lib/api/payroll', () => ({
+  usePayrollSetup: () => ({
+    groups: { data: [], isPending: false, isError: false },
+  }),
+  usePayrollRunPreflight: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  usePayrollAttendanceCalculationPreview: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  usePrepareAttendancePayrollDraft: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
   usePreviewPayroll: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useGeneratePayroll: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useApprovePayrollRun: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -30,6 +50,8 @@ describe('PayrollPage permissions', () => {
     useCanMock.mockReturnValue(false)
 
     const screen = await render(<PayrollPage />)
-    await expect.element(screen.getByText(/You do not have permission to view payroll/i)).toBeVisible()
+    await expect
+      .element(screen.getByText(/You do not have permission to view payroll/i))
+      .toBeVisible()
   })
 })

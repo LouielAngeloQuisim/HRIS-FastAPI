@@ -9,6 +9,8 @@ import {
 } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEmployee } from '@/lib/api/employees'
+import { useCan } from '@/context/permissions-provider'
+import { useEmployeePayGroupAssignments, useEmployeeSalaries } from '@/lib/api/payroll'
 import { fullName, type Employee } from '../data/schema'
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -109,6 +111,30 @@ function Overview({ employee }: { employee: Employee }) {
   )
 }
 
+function Compensation({ employeeId }: { employeeId: string }) {
+  const salaries = useEmployeeSalaries(employeeId)
+  const assignments = useEmployeePayGroupAssignments(employeeId)
+  const canViewPayroll = useCan('payroll', 'view')
+  if (!canViewPayroll) return null
+  const salaryRows = salaries.data?.data ?? []
+  const latest = [...salaryRows].sort((a, b) => b.effective_date.localeCompare(a.effective_date))[0]
+  return <Card>
+    <CardHeader><CardTitle className='text-base'>Compensation and payroll setup</CardTitle></CardHeader>
+    <CardContent className='space-y-3'>
+      {salaries.isPending || assignments.isPending ? <p className='text-sm text-muted-foreground'>Loading compensation…</p> : salaries.isError || assignments.isError ? <p role='alert' className='text-sm text-destructive'>Compensation details could not be loaded.</p> : latest ? <>
+        <dl className='grid grid-cols-2 gap-4'>
+          <Field label='Salary basis' value={latest.pay_type} />
+          <Field label='Basic rate' value={`${latest.currency} ${latest.basic_rate}`} />
+          <Field label='Effective from' value={latest.effective_date} />
+          <Field label='Non-taxable allowance' value={`${latest.currency} ${latest.non_taxable_allowance}`} />
+        </dl>
+        <div><h3 className='text-sm font-medium'>Pay group history</h3>{assignments.data?.length ? assignments.data.map(row => <p key={row.id} className='text-sm text-muted-foreground'>{row.effective_from}{row.effective_to ? ` through ${row.effective_to}` : ' onward'} · group {row.pay_group_id}</p>) : <p className='text-sm text-muted-foreground'>No pay group is assigned.</p>}</div>
+        <p className='text-xs text-muted-foreground'>Contribution amounts and tax are calculated for each payroll period from applicable rules and employee history; this profile does not treat them as fixed salary deductions.</p>
+      </> : <p className='text-sm text-muted-foreground'>No salary is configured for this employee.</p>}
+    </CardContent>
+  </Card>
+}
+
 export function EmployeeProfile() {
   const { employeeId } = useParams({ from: '/_authenticated/employees/$employeeId' })
   const { data, isPending, isError } = useEmployee(employeeId)
@@ -139,6 +165,7 @@ export function EmployeeProfile() {
             </p>
           </div>
           <Overview employee={data} />
+          <Compensation employeeId={data.id} />
         </>
       )}
     </div>

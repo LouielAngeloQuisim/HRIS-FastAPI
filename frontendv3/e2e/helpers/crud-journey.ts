@@ -13,6 +13,28 @@ export async function createParent(page: Page, resource: string, data: Record<st
   return body.data || body
 }
 
+/** Create an effective shift assignment for DTR journey prerequisites. */
+export async function assignEmployeeShift(page: Page, employeeId: string) {
+  const suffix = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  const shift = await createParent(page, 'shifts', {
+    code: 'QA' + suffix,
+    name: 'QA Shift ' + suffix,
+    start_time: '08:00',
+    end_time: '17:00',
+    lunch_break_duration: 60,
+    total_hours_minus_lunch: 480,
+    days_of_week: ['1', '2', '3', '4', '5', '6', '7'],
+  })
+  const token = (await page.context().cookies()).find(c => c.name === 'hris_at')?.value
+  if (!token) throw new Error('Missing authenticated test session')
+  const response = await page.request.post(apiUrl + '/employee-shift-assignments/', {
+    headers: { Authorization: 'Bearer ' + token },
+    data: { employee_id: employeeId, shift_id: shift.id, effective_from: '2020-01-01' },
+  })
+  expect(response.status(), 'assign effective shift').toBe(201)
+  return shift
+}
+
 export async function selectLabel(page: Page, testId: string, label: string) {
   await page.getByTestId(testId).click()
   await page.getByRole('option', { name: label, exact: true }).click()

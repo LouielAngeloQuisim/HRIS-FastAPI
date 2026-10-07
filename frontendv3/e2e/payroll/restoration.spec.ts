@@ -3,9 +3,9 @@ import { test, expect } from '../fixtures'
 test('restored payroll pages load the real backend and validate required input', async ({ page, loginAsAdmin }) => {
   await loginAsAdmin()
   await page.goto('/payroll')
-  await expect(page.getByRole('heading', { name: 'Payroll Execution' })).toBeVisible()
-  await page.getByTestId('preview-payroll-button').click()
-  await expect(page.getByText('Select a valid date range with the end on or after the start.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Payroll readiness' })).toBeVisible()
+  await expect(page.getByTestId('payroll-preflight-button')).toBeDisabled()
+  await expect(page.getByText(/statutory deductions.*remain disabled/i)).toBeVisible()
   await page.goto('/payroll-runs')
   await expect(page.getByRole('heading', { name: 'Payroll Runs', exact: true })).toBeVisible()
   await expect(page.getByRole('table')).toBeVisible()

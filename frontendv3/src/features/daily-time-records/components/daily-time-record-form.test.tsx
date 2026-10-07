@@ -4,7 +4,7 @@ import { userEvent } from 'vitest/browser'
 import { DailyTimeRecordForm } from './daily-time-record-form'
 import type { DailyTimeRecordPublic } from '@/lib/api/types'
 const { save } = vi.hoisted(() => ({ save: vi.fn() }))
-vi.mock('@/lib/api/daily-time-records', () => ({ useUpdateDailyTimeRecord: () => ({ mutateAsync: save, isPending: false }) }))
+vi.mock('@/lib/api/daily-time-records', () => ({ useUpdateDailyTimeRecord: () => ({ mutateAsync: save, isPending: false }), useDtrIntervals: () => ({ data: [], isPending: false, isError: false }), useReplaceDtrIntervals: () => ({ mutateAsync: vi.fn(), isPending: false }) }))
 const item = { id: 'dtr-1', employee_id: 'emp-1', login_date: '2026-10-02T08:00:00Z', logout_date: '2026-10-02T17:00:00Z' } as DailyTimeRecordPublic
 beforeEach(() => { save.mockReset().mockResolvedValue({}) })
 it('saves explicit UTC timestamps independent of browser timezone', async () => {

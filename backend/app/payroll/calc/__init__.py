@@ -144,17 +144,25 @@ def calculate_bir_tax(
         .order_by(BIRBracket.bracket_min)  # type: ignore[arg-type]
     )
     brackets = session.exec(stmt).all()
-
-    tax = Decimal("0.00")
-    remaining = taxable_income
-    for bracket in brackets:
-        if remaining <= 0:
-            break
-        span = (bracket.bracket_max or Decimal("999999999.99")) - bracket.bracket_min
-        in_bracket = min(remaining, span)
-        tax += bracket.base_tax + (in_bracket * bracket.excess_rate / Decimal("100.0"))
-        remaining -= in_bracket
-    return tax.quantize(Decimal("0.01"))
+    if not brackets:
+        return Decimal("0.00")
+    latest_effective_date = max(bracket.effective_date for bracket in brackets)
+    current_brackets = [bracket for bracket in brackets if bracket.effective_date == latest_effective_date]
+    bracket = next(
+        (
+            row
+            for row in current_brackets
+            if row.bracket_min <= taxable_income
+            and (row.bracket_max is None or taxable_income <= row.bracket_max)
+        ),
+        None,
+    )
+    if bracket is None:
+        return Decimal("0.00")
+    taxable_excess = max(Decimal("0"), taxable_income - bracket.bracket_min)
+    return (bracket.base_tax + taxable_excess * bracket.excess_rate / Decimal("100.0")).quantize(
+        Decimal("0.01")
+    )
 
 
 # --- Batch ----------------------------------------------------------------------

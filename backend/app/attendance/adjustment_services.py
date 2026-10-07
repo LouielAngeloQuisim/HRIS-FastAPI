@@ -18,7 +18,9 @@ from app.attendance.models import DailyTimeRecord
 from app.attendance.selectors import get_active_by_id
 
 
-def get_adjustment(*, session: Session, adjustment_id: uuid.UUID) -> DtrAdjustment | None:
+def get_adjustment(
+    *, session: Session, adjustment_id: uuid.UUID
+) -> DtrAdjustment | None:
     """Fetch a non-deleted adjustment by PK, or None."""
     row = session.get(DtrAdjustment, adjustment_id)
     if row is None or row.is_deleted:
@@ -57,7 +59,9 @@ def create_adjustment(
 
 def _apply_adjustment(*, session: Session, adjustment: DtrAdjustment) -> None:
     """Apply the adjusted times to the DTR and recompute (server-authoritative)."""
-    dtr = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=adjustment.daily_time_record_id)
+    dtr = get_active_by_id(
+        session=session, model=DailyTimeRecord, obj_id=adjustment.daily_time_record_id
+    )
     if dtr is None:
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
     dtr.login_date = adjustment.adjusted_login_date
@@ -76,7 +80,8 @@ def approve_adjustment(
     """PENDING -> APPROVED: apply the correction and recompute the DTR."""
     if adjustment.status != "PENDING":
         raise HTTPException(
-            status_code=409, detail=f"Cannot approve an adjustment with status {adjustment.status}"
+            status_code=409,
+            detail=f"Cannot approve an adjustment with status {adjustment.status}",
         )
     _apply_adjustment(session=session, adjustment=adjustment)
     adjustment.status = "APPROVED"
@@ -94,7 +99,8 @@ def reject_adjustment(
     """PENDING -> REJECTED: DTR is left unchanged."""
     if adjustment.status != "PENDING":
         raise HTTPException(
-            status_code=409, detail=f"Cannot reject an adjustment with status {adjustment.status}"
+            status_code=409,
+            detail=f"Cannot reject an adjustment with status {adjustment.status}",
         )
     adjustment.status = "REJECTED"
     adjustment.approved_by = actor_id

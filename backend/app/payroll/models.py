@@ -277,6 +277,117 @@ class EmployeeSalary(SQLModel, table=True):
     updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
 
 
+class PayrollPayGroup(SQLModel, table=True):
+    """Company-defined payroll cadence and pay-date policy."""
+
+    __tablename__ = "payroll_pay_group"
+    __table_args__ = (UniqueConstraint("code", name="uq_payroll_pay_group_code"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    code: str = Field(max_length=32)
+    name: str = Field(max_length=128)
+    cadence: CutoffType = Field(
+        default=CutoffType.MONTHLY,
+        sa_type=_EnumAsString(CutoffType, "cutofftype"),
+    )  # type: ignore
+    # For semi-monthly: configured inclusive first and second period end days.
+    first_period_end_day: int | None = Field(default=None, ge=1, le=30)
+    second_period_end_day: int | None = Field(default=None, ge=1, le=31)
+    payment_offset_days: int = Field(default=0, ge=0, le=60)
+    weekend_rule: str = Field(default="next_business_day", max_length=32)
+    is_active: bool = Field(default=True)
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
+class EmployeePayGroupAssignment(SQLModel, table=True):
+    """Effective-dated pay group membership, independent of salary basis."""
+
+    __tablename__ = "employee_pay_group_assignment"
+    __table_args__ = (
+        UniqueConstraint(
+            "employee_id", "effective_from", name="uq_employee_pay_group_assignment_start"
+        ),
+        Index(
+            "ix_employee_pay_group_assignment_employee_dates",
+            "employee_id",
+            "effective_from",
+            "effective_to",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    employee_id: uuid.UUID = Field(
+        foreign_key="employee_records.id", index=True, ondelete="CASCADE"
+    )
+    pay_group_id: uuid.UUID = Field(
+        foreign_key="payroll_pay_group.id", index=True, ondelete="RESTRICT"
+    )
+    effective_from: date
+    effective_to: date | None = None
+    assigned_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
+class EmployeeSalaryBulkBatch(SQLModel, table=True):
+    """Idempotency record for an explicitly selected atomic salary batch."""
+
+    __tablename__ = "employee_salary_bulk_batch"
+
+    id: uuid.UUID = Field(primary_key=True)
+    payload_fingerprint: str = Field(max_length=64)
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    result_salary_ids: list[str] = Field(default_factory=list, sa_type=JSON)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
+class PayrollPolicyVersion(SQLModel, table=True):
+    """Immutable version of company payroll calculation rules."""
+
+    __tablename__ = "payroll_policy_version"
+    __table_args__ = (
+        UniqueConstraint("version", name="uq_payroll_policy_version"),
+        Index("ix_payroll_policy_version_effective", "effective_from", "effective_to"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    version: int
+    effective_from: date
+    effective_to: date | None = None
+    policy: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    confirmed: bool = Field(default=False)
+    confirmed_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    confirmed_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
 # --- Payroll run lifecycle (B4B.2b/2c) --------------------------------------------------
 
 
@@ -288,6 +399,20 @@ class PayrollRun(SQLModel, table=True):
     """
 
     generation_fingerprint: str | None = Field(default=None, max_length=64)
+    workflow_status: str = Field(default="draft", max_length=32)
+    pay_group_id: uuid.UUID | None = Field(
+        default=None, foreign_key="payroll_pay_group.id", ondelete="RESTRICT", index=True
+    )
+    policy_version_id: uuid.UUID | None = Field(
+        default=None, foreign_key="payroll_policy_version.id", ondelete="RESTRICT", index=True
+    )
+    payment_date: date | None = None
+    input_fingerprint: str | None = Field(default=None, max_length=64)
+    finalized_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    finalized_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    frozen_snapshot: dict[str, Any] | None = Field(default=None, sa_type=JSON)
 
     __tablename__ = "payroll_run"
     __table_args__ = (Index("ix_payroll_run_created_by", "created_by"),)
@@ -333,6 +458,16 @@ class PayrollEntry(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    review_state: str = Field(default="ready", max_length=16)
+    reviewed_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    reviewed_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    review_reason: str | None = Field(default=None, max_length=1024)
+    calculation_version: str | None = Field(default=None, max_length=64)
+    input_fingerprint: str | None = Field(default=None, max_length=64)
+    input_snapshot: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    blockers: list[dict[str, str]] = Field(default_factory=list, sa_type=JSON)
     payroll_run_id: uuid.UUID | None = Field(
         default=None, foreign_key="payroll_run.id", ondelete="CASCADE"
     )
@@ -354,6 +489,37 @@ class PayrollEntry(SQLModel, table=True):
     is_readonly: bool = Field(default=False)
     is_deleted: bool = Field(default=False)
     deleted_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+    updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+
+
+class PayrollDeliveryOutbox(SQLModel, table=True):
+    """Durable delivery work created atomically with payroll finalization."""
+
+    __tablename__ = "payroll_delivery_outbox"
+    __table_args__ = (
+        UniqueConstraint(
+            "payroll_entry_id", "document_version", name="uq_payroll_delivery_document"
+        ),
+        Index("ix_payroll_delivery_due", "status", "next_attempt_at"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    payroll_entry_id: uuid.UUID = Field(
+        foreign_key="payroll_entry.id", ondelete="RESTRICT", index=True
+    )
+    document_version: int = Field(default=1, ge=1)
+    recipient_snapshot: str | None = Field(default=None, max_length=320)
+    content_snapshot: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    status: str = Field(default="scheduled", max_length=16)
+    attempts: int = Field(default=0, ge=0)
+    next_attempt_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    claimed_until: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    last_error_code: str | None = Field(default=None, max_length=64)
+    last_action_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    last_action_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    last_action_reason: str | None = Field(default=None, max_length=1024)
+    sent_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
     created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
     updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
 

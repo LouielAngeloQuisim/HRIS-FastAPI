@@ -46,6 +46,13 @@ vi.mock('@/lib/api/employees', () => ({
   fetchEmployee: vi.fn(),
 }))
 
+vi.mock('@/lib/api/payroll', () => ({
+  useEmployeeSalaries: () => ({ data: [], isPending: false, isError: false }),
+  useEmployeePayGroupAssignments: () => ({ data: [], isPending: false, isError: false }),
+}))
+
+vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
+
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ employeeId: 'emp-1' }),
   Link: ({ children, to, ...rest }: { children?: React.ReactNode; to: string }) => (

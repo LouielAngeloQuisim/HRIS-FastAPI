@@ -7,11 +7,13 @@ server-authoritative actor. DTR adjustments add an approval state machine.
 """
 
 import uuid
-from typing import Any
+from datetime import date, datetime, timezone
+from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlmodel import SQLModel
+from sqlalchemy import or_
+from sqlmodel import SQLModel, col, func, select
 
 from app.attendance import adjustment_schemas as adj_s
 from app.attendance import schemas as s
@@ -22,7 +24,15 @@ from app.attendance.adjustment_services import (
     get_adjustment,
     reject_adjustment,
 )
-from app.attendance.models import DailyTimeRecord, Shift
+from app.attendance.imports import commit_import, preflight_import
+from app.attendance.models import (
+    DailyTimeRecord,
+    DtrAttendanceInterval,
+    DtrImportBatch,
+    DtrOvertimeDecision,
+    EmployeeShiftAssignment,
+    Shift,
+)
 from app.attendance.selectors import (
     get_active_by_id,
     get_deleted_dtr_by_employee_and_source_ref,
@@ -33,6 +43,7 @@ from app.attendance.selectors import (
 )
 from app.attendance.services import (
     create_dtr,
+    replace_dtr_intervals,
     set_overtime_approved,
     soft_delete_obj,
     update_dtr,
@@ -40,6 +51,7 @@ from app.attendance.services import (
 from app.common.dependencies import CurrentUser, SessionDep
 from app.common.schemas import Message
 from app.common.types import ModelT
+from app.employee.models import EmployeeRecords
 from app.rbac.dependencies import require_permission
 
 
@@ -114,9 +126,12 @@ def _make_crud_router(
 
         from app.attendance.services import update_obj
 
-        return public.model_validate(update_obj(session=session, db_obj=db_obj, data=obj_in))
+        return public.model_validate(
+            update_obj(session=session, db_obj=db_obj, data=obj_in)
+        )
 
     if not custom_delete:
+
         @router.delete(
             "/{obj_id}",
             response_model=Message,
@@ -132,6 +147,16 @@ def _make_crud_router(
     return router
 
 
+def _dtr_visible_to_user(
+    *, session: SessionDep, current_user: CurrentUser, dtr: DailyTimeRecord
+) -> bool:
+    if current_user.is_superuser:
+        return True
+    return get_employee_id_for_user(
+        session=session, user_id=current_user.id
+    ) == dtr.employee_id
+
+
 # --- Shift ---------------------------------------------------------------------------
 shifts_router = _make_crud_router(
     prefix="/shifts",
@@ -145,8 +170,220 @@ shifts_router = _make_crud_router(
 )
 
 
+# --- Effective-dated employee shift assignments -------------------------------------
+shift_assignments_router = APIRouter(
+    prefix="/employee-shift-assignments", tags=["employee_shift_assignments"]
+)
+
+
+@shift_assignments_router.get(
+    "/",
+    response_model=s.EmployeeShiftAssignmentList,
+    dependencies=[Depends(require_permission("shifts", "view"))],
+)
+def list_shift_assignments(
+    session: SessionDep,
+    current_user: CurrentUser,
+    employee_id: uuid.UUID | None = None,
+    as_of: date | None = None,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> Any:
+    stmt = select(EmployeeShiftAssignment).where(
+        EmployeeShiftAssignment.is_deleted == False  # noqa: E712
+    )
+    if not current_user.is_superuser:
+        own_employee_id = get_employee_id_for_user(session=session, user_id=current_user.id)
+        if own_employee_id is None or (employee_id is not None and employee_id != own_employee_id):
+            return s.EmployeeShiftAssignmentList(data=[], count=0)
+        employee_id = own_employee_id
+    if employee_id is not None:
+        stmt = stmt.where(EmployeeShiftAssignment.employee_id == employee_id)
+    if as_of is not None:
+        stmt = stmt.where(
+            EmployeeShiftAssignment.effective_from <= as_of,
+            or_(
+                col(EmployeeShiftAssignment.effective_to).is_(None),
+                col(EmployeeShiftAssignment.effective_to) >= as_of,
+            ),
+        )
+    rows = list(
+        session.exec(
+            stmt.order_by(col(EmployeeShiftAssignment.effective_from).desc())
+            .offset(skip)
+            .limit(limit)
+        ).all()
+    )
+    count = session.exec(select(func.count()).select_from(stmt.subquery())).one()
+    return s.EmployeeShiftAssignmentList(
+        data=[s.EmployeeShiftAssignmentPublic.model_validate(row) for row in rows],
+        count=count,
+    )
+
+
+@shift_assignments_router.post(
+    "/",
+    response_model=s.EmployeeShiftAssignmentPublic,
+    status_code=201,
+    dependencies=[Depends(require_permission("shifts", "add"))],
+)
+def create_shift_assignment(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    obj_in: s.EmployeeShiftAssignmentCreate,
+) -> Any:
+    employee_id = obj_in.employee_id
+    if employee_id is None and obj_in.employee_code is not None:
+        employee = get_employee_by_code(session=session, code=obj_in.employee_code.strip())
+        employee_id = employee.id if employee is not None else None
+    if employee_id is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if not current_user.is_superuser and get_employee_id_for_user(
+        session=session, user_id=current_user.id
+    ) != employee_id:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if obj_in.effective_to is not None and obj_in.effective_to < obj_in.effective_from:
+        raise HTTPException(
+            status_code=422, detail="effective_to must be on or after effective_from"
+        )
+    employee = session.exec(
+        select(EmployeeRecords)
+        .where(
+            EmployeeRecords.id == employee_id,
+            EmployeeRecords.is_deleted == False,  # noqa: E712
+        )
+        .with_for_update()
+    ).first()
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    shift = session.exec(
+        select(Shift).where(Shift.id == obj_in.shift_id, Shift.is_deleted == False)  # noqa: E712
+    ).first()
+    if shift is None:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    assignments = session.exec(
+        select(EmployeeShiftAssignment).where(
+            EmployeeShiftAssignment.employee_id == employee_id,
+            EmployeeShiftAssignment.is_deleted == False,  # noqa: E712
+        )
+    ).all()
+    for existing in assignments:
+        new_end = obj_in.effective_to or date.max
+        old_end = existing.effective_to or date.max
+        if obj_in.effective_from <= old_end and existing.effective_from <= new_end:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Shift assignment overlaps existing assignment {existing.id}; close it before adding another.",
+            )
+    row = EmployeeShiftAssignment(
+        employee_id=employee_id,
+        shift_id=obj_in.shift_id,
+        effective_from=obj_in.effective_from,
+        effective_to=obj_in.effective_to,
+        assigned_by=current_user.id,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return s.EmployeeShiftAssignmentPublic.model_validate(row)
+
+
+@shift_assignments_router.patch(
+    "/{assignment_id}",
+    response_model=s.EmployeeShiftAssignmentPublic,
+    dependencies=[Depends(require_permission("shifts", "edit"))],
+)
+def close_shift_assignment(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    assignment_id: uuid.UUID,
+    obj_in: s.EmployeeShiftAssignmentUpdate,
+) -> Any:
+    existing = session.get(EmployeeShiftAssignment, assignment_id)
+    if existing is None or existing.is_deleted:
+        raise HTTPException(status_code=404, detail="Shift assignment not found")
+    if not current_user.is_superuser and get_employee_id_for_user(
+        session=session, user_id=current_user.id
+    ) != existing.employee_id:
+        raise HTTPException(status_code=404, detail="Shift assignment not found")
+    # Serialize date-range edits with assignment creation for this employee.
+    employee = session.exec(
+        select(EmployeeRecords)
+        .where(EmployeeRecords.id == existing.employee_id)
+        .with_for_update()
+    ).first()
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    row = session.exec(
+        select(EmployeeShiftAssignment)
+        .where(EmployeeShiftAssignment.id == assignment_id)
+        .with_for_update()
+    ).first()
+    if row is None or row.is_deleted:
+        raise HTTPException(status_code=404, detail="Shift assignment not found")
+    if obj_in.effective_to is None or obj_in.effective_to < row.effective_from:
+        raise HTTPException(
+            status_code=422, detail="effective_to must be on or after effective_from"
+        )
+    later = session.exec(
+        select(EmployeeShiftAssignment).where(
+            EmployeeShiftAssignment.employee_id == row.employee_id,
+            EmployeeShiftAssignment.is_deleted == False,  # noqa: E712
+            EmployeeShiftAssignment.effective_from > row.effective_from,
+        )
+    ).first()
+    if later is not None and obj_in.effective_to >= later.effective_from:
+        raise HTTPException(
+            status_code=409, detail="effective_to overlaps the next shift assignment"
+        )
+    row.effective_to = obj_in.effective_to
+    row.updated_at = datetime.now(timezone.utc)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return s.EmployeeShiftAssignmentPublic.model_validate(row)
+
+
 # --- DailyTimeRecord -----------------------------------------------------------------
 dtr_router = APIRouter(prefix="/daily-time-records", tags=["daily_time_records"])
+
+
+@dtr_router.post(
+    "/import-batches/preflight",
+    response_model=s.DtrImportPreflightResponse,
+    dependencies=[Depends(require_permission("daily_time_record", "add"))],
+)
+def preflight_dtr_import(
+    *, session: SessionDep, obj_in: s.DtrImportBatchRequest, current_user: CurrentUser
+) -> Any:
+    return preflight_import(session=session, request=obj_in, actor_id=current_user.id)
+
+
+@dtr_router.post(
+    "/import-batches/commit",
+    response_model=s.DtrImportBatchCommitResponse,
+    dependencies=[Depends(require_permission("daily_time_record", "add"))],
+)
+def commit_dtr_import(
+    *, session: SessionDep, obj_in: s.DtrImportBatchRequest, current_user: CurrentUser
+) -> Any:
+    return commit_import(session=session, request=obj_in, actor_id=current_user.id)
+
+
+@dtr_router.get(
+    "/import-batches/{batch_id}",
+    response_model=s.DtrImportBatchPublic,
+    dependencies=[Depends(require_permission("daily_time_record", "view"))],
+)
+def read_dtr_import_batch(
+    *, session: SessionDep, batch_id: uuid.UUID, current_user: CurrentUser
+) -> s.DtrImportBatchPublic:
+    batch = session.get(DtrImportBatch, batch_id)
+    if batch is None or (not current_user.is_superuser and batch.created_by != current_user.id):
+        raise HTTPException(status_code=404, detail="Attendance import batch not found")
+    return s.DtrImportBatchPublic.model_validate(batch)
 
 
 @dtr_router.get(
@@ -157,8 +394,12 @@ dtr_router = APIRouter(prefix="/daily-time-records", tags=["daily_time_records"]
 def list_dtr(
     session: SessionDep,
     current_user: CurrentUser,
-    skip: int = 0,
-    limit: int = 100,
+    employee_id: uuid.UUID | None = None,
+    employee_code: str | None = Query(default=None, min_length=1, max_length=64),
+    date_from: date | None = None,
+    date_to: date | None = None,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
     """List DTRs. Superusers/HR see all; non-HR callers see only their own records.
 
@@ -167,20 +408,68 @@ def list_dtr(
     no linked EmployeeRecords, the filter is set and the result is an empty
     list (defensive — a non-employee with DTR view permission sees nothing).
     """
-    employee_id_filter: uuid.UUID | None = None
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise HTTPException(
+            status_code=422, detail="date_from must be on or before date_to"
+        )
+
+    employee_id_filter: uuid.UUID | None = employee_id
+    if employee_code is not None:
+        employee = session.exec(
+            select(EmployeeRecords).where(
+                EmployeeRecords.employee_code == employee_code.strip(),
+                EmployeeRecords.is_deleted == False,  # noqa: E712
+            )
+        ).first()
+        if employee is None:
+            return s.DailyTimeRecordList(data=[], count=0)
+        if employee_id_filter is not None and employee_id_filter != employee.id:
+            raise HTTPException(
+                status_code=422,
+                detail="employee_id and employee_code identify different employees",
+            )
+        employee_id_filter = employee.id
     if not current_user.is_superuser:
-        employee_id_filter = get_employee_id_for_user(
+        own_employee_id = get_employee_id_for_user(
             session=session, user_id=current_user.id
         )
-        if employee_id_filter is None:
+        if own_employee_id is None:
             return s.DailyTimeRecordList(data=[], count=0)
-    rows, count = get_list(
-        session=session,
-        model=DailyTimeRecord,
-        employee_id_filter=employee_id_filter,
-        skip=skip,
-        limit=limit,
+        if employee_id_filter is not None and employee_id_filter != own_employee_id:
+            return s.DailyTimeRecordList(data=[], count=0)
+        employee_id_filter = own_employee_id
+
+    statement = select(DailyTimeRecord).where(DailyTimeRecord.is_deleted == False)  # noqa: E712
+    count_statement = (
+        select(func.count())
+        .select_from(DailyTimeRecord)
+        .where(
+            DailyTimeRecord.is_deleted == False  # noqa: E712
+        )
     )
+    if employee_id_filter is not None:
+        statement = statement.where(DailyTimeRecord.employee_id == employee_id_filter)
+        count_statement = count_statement.where(
+            DailyTimeRecord.employee_id == employee_id_filter
+        )
+
+    if date_from is not None:
+        work_date_column = cast(date, DailyTimeRecord.work_date)
+        statement = statement.where(work_date_column >= date_from)
+        count_statement = count_statement.where(work_date_column >= date_from)
+    if date_to is not None:
+        work_date_column = cast(date, DailyTimeRecord.work_date)
+        statement = statement.where(work_date_column <= date_to)
+        count_statement = count_statement.where(work_date_column <= date_to)
+
+    rows = list(
+        session.exec(
+            statement.order_by(col(DailyTimeRecord.login_date).desc())
+            .offset(skip)
+            .limit(limit)
+        ).all()
+    )
+    count = session.exec(count_statement).one()
     return s.DailyTimeRecordList(
         data=[s.DailyTimeRecordPublic.model_validate(r) for r in rows], count=count
     )
@@ -191,9 +480,9 @@ def list_dtr(
     response_model=s.DailyTimeRecordPublic,
     dependencies=[Depends(require_permission("daily_time_record", "view"))],
 )
-def read_dtr(session: SessionDep, obj_id: uuid.UUID) -> Any:
+def read_dtr(session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser) -> Any:
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
-    if db_obj is None:
+    if db_obj is None or not _dtr_visible_to_user(session=session, current_user=current_user, dtr=db_obj):
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
     return s.DailyTimeRecordPublic.model_validate(db_obj)
 
@@ -214,7 +503,19 @@ def create_dtr_route(
     """Create a punch (201). An idempotent replay of a committed keyed import row
     returns the existing row with 200 instead of duplicating it (QA-01).
     """
-    db_obj, replayed = create_dtr(session=session, data=obj_in, actor_id=current_user.id)
+    if not current_user.is_superuser:
+        own_employee_id = get_employee_id_for_user(
+            session=session, user_id=current_user.id
+        )
+        requested_employee_id = obj_in.employee_id
+        if obj_in.employee_code:
+            employee = get_employee_by_code(session=session, code=obj_in.employee_code)
+            requested_employee_id = employee.id if employee is not None else None
+        if own_employee_id is None or requested_employee_id != own_employee_id:
+            raise HTTPException(status_code=404, detail="Employee not found")
+    db_obj, replayed = create_dtr(
+        session=session, data=obj_in, actor_id=current_user.id
+    )
     if replayed:
         response.status_code = 200
     return s.DailyTimeRecordPublic.model_validate(db_obj)
@@ -253,14 +554,20 @@ def reconcile_dtr_imports(
     """
     scope_employee_id: uuid.UUID | None = None
     if not current_user.is_superuser:
-        scope_employee_id = get_employee_id_for_user(session=session, user_id=current_user.id)
+        scope_employee_id = get_employee_id_for_user(
+            session=session, user_id=current_user.id
+        )
         if scope_employee_id is None:
             # No linked employee -> no visible scope at all (mirrors the list
             # route's empty-return defense). Do NOT let None mean "unscoped":
             # every pair must come back unresolved, never settled or not_found.
             return s.ReconcileResponse(
                 results=[
-                    s.ReconcileResult(employee_code=p.employee_code, source_ref=p.source_ref, status="unresolved")
+                    s.ReconcileResult(
+                        employee_code=p.employee_code,
+                        source_ref=p.source_ref,
+                        status="unresolved",
+                    )
                     for p in obj_in.keys
                 ],
                 unresolved=len(obj_in.keys),
@@ -271,10 +578,13 @@ def reconcile_dtr_imports(
     unresolved = 0
     for pair in obj_in.keys:
         emp = get_employee_by_code(session=session, code=pair.employee_code)
-        if emp is None or (scope_employee_id is not None and emp.id != scope_employee_id):
+        if emp is None or (
+            scope_employee_id is not None and emp.id != scope_employee_id
+        ):
             results.append(
                 s.ReconcileResult(
-                    employee_code=pair.employee_code, source_ref=pair.source_ref,
+                    employee_code=pair.employee_code,
+                    source_ref=pair.source_ref,
                     status="unresolved",
                 )
             )
@@ -287,8 +597,10 @@ def reconcile_dtr_imports(
             # Defensive ambiguity guard (index makes this unreachable in practice).
             results.append(
                 s.ReconcileResult(
-                    employee_code=pair.employee_code, source_ref=pair.source_ref,
-                    status="committed", record_id=active.id,
+                    employee_code=pair.employee_code,
+                    source_ref=pair.source_ref,
+                    status="committed",
+                    record_id=active.id,
                 )
             )
             continue
@@ -298,14 +610,16 @@ def reconcile_dtr_imports(
         if deleted is not None:
             results.append(
                 s.ReconcileResult(
-                    employee_code=pair.employee_code, source_ref=pair.source_ref,
+                    employee_code=pair.employee_code,
+                    source_ref=pair.source_ref,
                     status="deleted",
                 )
             )
             continue
         results.append(
             s.ReconcileResult(
-                employee_code=pair.employee_code, source_ref=pair.source_ref,
+                employee_code=pair.employee_code,
+                source_ref=pair.source_ref,
                 status="not_found",
             )
         )
@@ -320,10 +634,14 @@ def reconcile_dtr_imports(
     dependencies=[Depends(require_permission("daily_time_record", "edit"))],
 )
 def update_dtr_route(
-    *, session: SessionDep, obj_id: uuid.UUID, obj_in: s.DailyTimeRecordUpdate, current_user: CurrentUser
+    *,
+    session: SessionDep,
+    obj_id: uuid.UUID,
+    obj_in: s.DailyTimeRecordUpdate,
+    current_user: CurrentUser,
 ) -> Any:
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
-    if db_obj is None:
+    if db_obj is None or not _dtr_visible_to_user(session=session, current_user=current_user, dtr=db_obj):
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
 
     shift = None
@@ -335,7 +653,11 @@ def update_dtr_route(
         shift = get_active_by_id(session=session, model=Shift, obj_id=db_obj.shift_id)
 
     db_obj = update_dtr(
-        session=session, db_obj=db_obj, data=obj_in, shift=shift, actor_id=current_user.id
+        session=session,
+        db_obj=db_obj,
+        data=obj_in,
+        shift=shift,
+        actor_id=current_user.id,
     )
     return s.DailyTimeRecordPublic.model_validate(db_obj)
 
@@ -345,9 +667,9 @@ def update_dtr_route(
     response_model=Message,
     dependencies=[Depends(require_permission("daily_time_record", "delete"))],
 )
-def delete_dtr(session: SessionDep, obj_id: uuid.UUID) -> Any:
+def delete_dtr(session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser) -> Any:
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
-    if db_obj is None:
+    if db_obj is None or not _dtr_visible_to_user(session=session, current_user=current_user, dtr=db_obj):
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
     soft_delete_obj(session=session, db_obj=db_obj)
     return Message(message="DailyTimeRecord deleted successfully")
@@ -359,14 +681,16 @@ def delete_dtr(session: SessionDep, obj_id: uuid.UUID) -> Any:
     dependencies=[Depends(require_permission("daily_time_record", "edit"))],
 )
 def approve_overtime(
-    *, session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser
+    *, session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser,
+    obj_in: s.OvertimeDecision,
 ) -> Any:
     """Phase 2B: approve a DTR's overtime (paid only when overtime_approved=True)."""
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
-    if db_obj is None:
+    if db_obj is None or not _dtr_visible_to_user(session=session, current_user=current_user, dtr=db_obj):
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
     set_overtime_approved(
-        session=session, db_obj=db_obj, approved=True, actor_id=current_user.id
+        session=session, db_obj=db_obj, approved=True, actor_id=current_user.id,
+        approved_minutes=obj_in.approved_minutes, reason=obj_in.reason,
     )
     return Message(message="Overtime approved")
 
@@ -377,16 +701,93 @@ def approve_overtime(
     dependencies=[Depends(require_permission("daily_time_record", "edit"))],
 )
 def reject_overtime(
-    *, session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser
+    *, session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser,
+    obj_in: s.OvertimeDecision,
 ) -> Any:
     """Phase 2B: reject a DTR's overtime."""
     db_obj = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
-    if db_obj is None:
+    if db_obj is None or not _dtr_visible_to_user(session=session, current_user=current_user, dtr=db_obj):
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
     set_overtime_approved(
-        session=session, db_obj=db_obj, approved=False, actor_id=current_user.id
+        session=session, db_obj=db_obj, approved=False, actor_id=current_user.id,
+        approved_minutes=obj_in.approved_minutes, reason=obj_in.reason,
     )
     return Message(message="Overtime rejected")
+
+
+@dtr_router.get(
+    "/{obj_id}/overtime-decisions",
+    response_model=list[s.OvertimeDecisionPublic],
+    dependencies=[Depends(require_permission("daily_time_record", "view"))],
+)
+def list_overtime_decisions(
+    *,
+    session: SessionDep,
+    obj_id: uuid.UUID,
+    current_user: CurrentUser,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> Any:
+    dtr = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
+    if dtr is None or not _dtr_visible_to_user(session=session, current_user=current_user, dtr=dtr):
+        raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
+    rows = session.exec(
+        select(DtrOvertimeDecision)
+        .where(DtrOvertimeDecision.daily_time_record_id == obj_id)
+        .order_by(col(DtrOvertimeDecision.created_at).desc())
+        .offset(skip)
+        .limit(limit)
+    ).all()
+    return [s.OvertimeDecisionPublic.model_validate(row) for row in rows]
+
+
+@dtr_router.get(
+    "/{obj_id}/intervals",
+    response_model=list[s.DtrAttendanceIntervalPublic],
+    dependencies=[Depends(require_permission("daily_time_record", "view"))],
+)
+def list_dtr_intervals(
+    *, session: SessionDep, obj_id: uuid.UUID, current_user: CurrentUser,
+    include_history: bool = False,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> Any:
+    dtr = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
+    if dtr is None or not _dtr_visible_to_user(session=session, current_user=current_user, dtr=dtr):
+        raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
+    statement = select(DtrAttendanceInterval).where(
+        DtrAttendanceInterval.daily_time_record_id == obj_id
+    )
+    if not include_history:
+        statement = statement.where(DtrAttendanceInterval.revision == dtr.interval_revision)
+    rows = session.exec(
+        statement.order_by(
+            col(DtrAttendanceInterval.revision).desc(),
+            col(DtrAttendanceInterval.sequence),
+        ).offset(skip).limit(limit)
+    ).all()
+    return [s.DtrAttendanceIntervalPublic.model_validate(row) for row in rows]
+
+
+@dtr_router.put(
+    "/{obj_id}/intervals",
+    response_model=list[s.DtrAttendanceIntervalPublic],
+    dependencies=[Depends(require_permission("daily_time_record", "edit"))],
+)
+def update_dtr_intervals(
+    *,
+    session: SessionDep,
+    obj_id: uuid.UUID,
+    current_user: CurrentUser,
+    obj_in: s.DtrIntervalsUpdate,
+) -> Any:
+    dtr = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_id)
+    if dtr is None or not _dtr_visible_to_user(session=session, current_user=current_user, dtr=dtr):
+        raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
+    rows = replace_dtr_intervals(
+        session=session, dtr=dtr, intervals=obj_in.intervals, actor_id=current_user.id
+    )
+    return [s.DtrAttendanceIntervalPublic.model_validate(row) for row in rows]
 
 
 # --- DtrAdjustment (approval flow) -------------------------------------------------
@@ -426,7 +827,9 @@ def read_adjustment(session: SessionDep, obj_id: uuid.UUID) -> Any:
 def create_adjustment_route(
     *, session: SessionDep, obj_in: adj_s.DtrAdjustmentCreate, current_user: CurrentUser
 ) -> Any:
-    dtr = get_active_by_id(session=session, model=DailyTimeRecord, obj_id=obj_in.daily_time_record_id)
+    dtr = get_active_by_id(
+        session=session, model=DailyTimeRecord, obj_id=obj_in.daily_time_record_id
+    )
     if dtr is None:
         raise HTTPException(status_code=404, detail="DailyTimeRecord not found")
     db_obj = create_adjustment(
@@ -446,7 +849,9 @@ def approve_adjustment_route(
     db_obj = get_adjustment(session=session, adjustment_id=obj_id)
     if db_obj is None:
         raise HTTPException(status_code=404, detail="DtrAdjustment not found")
-    db_obj = approve_adjustment(session=session, adjustment=db_obj, actor_id=current_user.id)
+    db_obj = approve_adjustment(
+        session=session, adjustment=db_obj, actor_id=current_user.id
+    )
     return adj_s.DtrAdjustmentPublic.model_validate(db_obj)
 
 
@@ -461,8 +866,15 @@ def reject_adjustment_route(
     db_obj = get_adjustment(session=session, adjustment_id=obj_id)
     if db_obj is None:
         raise HTTPException(status_code=404, detail="DtrAdjustment not found")
-    db_obj = reject_adjustment(session=session, adjustment=db_obj, actor_id=current_user.id)
+    db_obj = reject_adjustment(
+        session=session, adjustment=db_obj, actor_id=current_user.id
+    )
     return adj_s.DtrAdjustmentPublic.model_validate(db_obj)
 
 
-routers: list[APIRouter] = [shifts_router, dtr_router, adj_router]
+routers: list[APIRouter] = [
+    shifts_router,
+    shift_assignments_router,
+    dtr_router,
+    adj_router,
+]

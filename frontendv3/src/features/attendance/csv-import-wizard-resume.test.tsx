@@ -4,6 +4,8 @@ import { userEvent } from 'vitest/browser'
 import { renderWithClient } from '@/test-utils/providers'
 import { AttendanceCsvImportWizard } from './components/csv-import/attendance-csv-wizard'
 
+vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
+
 const { apiPostMock, toastErrorMock } = vi.hoisted(() => ({
   apiPostMock: vi.fn(), toastErrorMock: vi.fn(),
 }))

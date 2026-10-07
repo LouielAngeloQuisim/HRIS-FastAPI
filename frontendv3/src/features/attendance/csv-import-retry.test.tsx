@@ -3,6 +3,8 @@ import { userEvent } from 'vitest/browser'
 import { renderWithClient } from '@/test-utils/providers'
 import { AttendanceCsvImportWizard } from './components/csv-import/attendance-csv-wizard'
 
+vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
+
 const { apiPostMock, toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   apiPostMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -26,12 +28,14 @@ const CSV = [
 ].join('\n')
 
 describe('Attendance CSV import retry (§8.11)', () => {
-  it('continues past a failed row, reports partial results, and uses the error toast', async () => {
-    apiPostMock.mockResolvedValueOnce({ data: {} })
-    // 422 = definite validation rejection (outcome known: not committed).
-    // 5xx is deliberately NOT used here: it is ambiguous and marks the row
-    // UNKNOWN (see csv-import-idempotency tests).
-    apiPostMock.mockRejectedValueOnce({ response: { status: 422, data: { detail: 'boom' } } })
+  it('blocks the complete batch when preflight finds one invalid row', async () => {
+    apiPostMock.mockResolvedValueOnce({
+      data: {
+        valid: false,
+        issues: [{ row_index: 1, employee_code: 'EMP002', code: 'attendance_invalid', message: 'Missing shift assignment' }],
+        excluded: [],
+      },
+    })
 
     const { getByRole, getByText, getByPlaceholder } = await renderWithClient(
       <AttendanceCsvImportWizard open={true} onOpenChange={() => {}} />
@@ -40,16 +44,14 @@ describe('Attendance CSV import retry (§8.11)', () => {
     await userEvent.fill(getByPlaceholder(/employee_code/), CSV)
     await userEvent.click(getByRole('button', { name: /^Import 2 Records$/i }))
 
-    // Both rows are attempted (no early abort).
     await vi.waitFor(() => {
-      expect(apiPostMock).toHaveBeenCalledTimes(2)
-      expect(apiPostMock).toHaveBeenNthCalledWith(1, '/daily-time-records', expect.objectContaining({ employee_code: 'EMP001' }))
-      expect(apiPostMock).toHaveBeenNthCalledWith(2, '/daily-time-records', expect.objectContaining({ employee_code: 'EMP002' }))
+      expect(apiPostMock).toHaveBeenCalledTimes(1)
+      expect(apiPostMock).toHaveBeenCalledWith('/daily-time-records/import-batches/preflight', expect.any(Object))
     })
 
-    await expect.element(getByText(/1 succeeded/)).toBeInTheDocument()
-    await expect.element(getByText(/1 failed/)).toBeInTheDocument()
-    expect(toastErrorMock).toHaveBeenCalledWith('Imported 1 time records, 1 failed')
+    await expect.element(getByText(/0 succeeded/)).toBeInTheDocument()
+    await expect.element(getByText(/2 failed/)).toBeInTheDocument()
+    expect(toastErrorMock).toHaveBeenCalledWith('Attendance needs correction in 1 row(s). Nothing was saved.')
     expect(toastSuccessMock).not.toHaveBeenCalled()
   })
 })

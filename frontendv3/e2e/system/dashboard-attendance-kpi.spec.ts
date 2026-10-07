@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures'
-import { apiUrl, createParent } from '../helpers/crud-journey'
+import { apiUrl, assignEmployeeShift, createParent } from '../helpers/crud-journey'
 
 /**
  * QA-08 — Dashboard daily attendance KPI (Asia/Manila, distinct employees).
@@ -8,9 +8,9 @@ import { apiUrl, createParent } from '../helpers/crud-journey'
  * calendar day containing "now" — legacy bug counted raw rows and used a
  * broken day window. Verified with deltas so shared test data cannot flake:
  *   punch for new employee            -> +1
- *   second punch, same employee       -> unchanged (distinct, not rows)
- *   delete one of the two             -> unchanged (employee still punched)
- *   delete the last punch of employee -> back to baseline
+ *   second work interval, same DTR    -> unchanged (one daily record)
+ *   remove one interval               -> unchanged (employee still punched)
+ *   delete the daily record           -> back to baseline
  */
 
 async function bearer(page: import('@playwright/test').Page) {
@@ -45,7 +45,7 @@ test.describe('Dashboard daily attendance KPI E2E (QA-08)', () => {
     await loginAsAdmin()
   })
 
-  test('counts distinct employees punched-in today (Manila), tolerant to second punches and deletions', async ({ page }) => {
+  test('counts distinct employees punched-in today (Manila), tolerant to multiple intervals and deletions', async ({ page }) => {
     const unique = Date.now().toString(36)
     await page.goto('/')
     await expect(page.getByTestId('kpi-dtr_records_daily_count')).toBeVisible()
@@ -53,28 +53,45 @@ test.describe('Dashboard daily attendance KPI E2E (QA-08)', () => {
 
     // Employee A: first punch of "today" -> distinct count must rise by one.
     const empA = await createParent(page, 'employees', { employee_code: 'KA' + unique, first_name: 'Kpi', last_name: 'A', birthdate: '1990-01-01' })
+    await assignEmployeeShift(page, empA.id)
     const pA1 = await punch(page, empA.id)
     expect(await dailyKpi(page)).toBe(baseline + 1)
 
-    // Employee A punches again the same day -> DISTINCT employee count holds.
-    const pA2 = await punch(page, empA.id, 60_000)
+    // A second work interval belongs to the same employee/work-date DTR.
+    const manilaDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date())
+    const intervalStart = new Date(`${manilaDate}T08:00:00+08:00`)
+    const firstEnd = new Date(`${manilaDate}T08:30:00+08:00`)
+    const secondStart = new Date(`${manilaDate}T09:00:00+08:00`)
+    const secondEnd = new Date(`${manilaDate}T09:30:00+08:00`)
+    const intervalUrl = `${apiUrl}/daily-time-records/${pA1.id}/intervals`
+    const authHeaders = { Authorization: `Bearer ${await bearer(page)}` }
+    const twoIntervals = await page.request.put(intervalUrl, {
+      headers: authHeaders,
+      data: { intervals: [
+        { start_at: intervalStart.toISOString(), end_at: firstEnd.toISOString() },
+        { start_at: secondStart.toISOString(), end_at: secondEnd.toISOString() },
+      ] },
+    })
+    expect(twoIntervals.status()).toBe(200)
     expect(await dailyKpi(page)).toBe(baseline + 1)
 
     // Employee B punches -> +1 more.
     const empB = await createParent(page, 'employees', { employee_code: 'KB' + unique, first_name: 'Kpi', last_name: 'B', birthdate: '1990-01-01' })
+    await assignEmployeeShift(page, empB.id)
     const pB1 = await punch(page, empB.id)
     expect(await dailyKpi(page)).toBe(baseline + 2)
 
-    // Delete one of A's two punches: A still punched today -> unchanged.
-    const del = await page.request.delete(`${apiUrl}/daily-time-records/${pA1.id}`, {
-      headers: { Authorization: `Bearer ${await bearer(page)}` },
+    // Remove one interval: the daily record still represents a punch today.
+    const oneInterval = await page.request.put(intervalUrl, {
+      headers: authHeaders,
+      data: { intervals: [{ start_at: intervalStart.toISOString(), end_at: firstEnd.toISOString() }] },
     })
-    expect(del.status()).toBe(200)
+    expect(oneInterval.status()).toBe(200)
     expect(await dailyKpi(page)).toBe(baseline + 2)
 
-    // Delete A's remaining punch and B's punch -> employees leave today's set.
-    await page.request.delete(`${apiUrl}/daily-time-records/${pA2.id}`, { headers: { Authorization: `Bearer ${await bearer(page)}` } })
-    await page.request.delete(`${apiUrl}/daily-time-records/${pB1.id}`, { headers: { Authorization: `Bearer ${await bearer(page)}` } })
+    // Delete A's one daily record and B's punch -> employees leave today's set.
+    await page.request.delete(`${apiUrl}/daily-time-records/${pA1.id}`, { headers: authHeaders })
+    await page.request.delete(`${apiUrl}/daily-time-records/${pB1.id}`, { headers: authHeaders })
     expect(await dailyKpi(page)).toBe(baseline)
   })
 })

@@ -8,14 +8,21 @@ unique-index settlement with two real PostgreSQL sessions.
 
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.attendance.models import DailyTimeRecord, Shift
-from app.attendance.schemas import DailyTimeRecordCreate
+from app.attendance.models import (
+    DailyTimeRecord,
+    DtrImportBatch,
+    EmployeeShiftAssignment,
+    Shift,
+)
+from app.attendance.schemas import DailyTimeRecordCreate, DtrImportBatchRequest
+from app.attendance.imports import commit_import, preflight_import
 from app.attendance.services import create_dtr
 from app.config.database import engine
 from app.config.settings import settings
@@ -29,20 +36,48 @@ def _superuser_id(db: Session) -> uuid.UUID:
     """created_by has FK user.id — the seeded superuser is the only guaranteed row."""
     return db.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).one().id
 
+
 KEY = "dtr-import-batch1-r0"
 LOGIN = "2026-08-04T08:00:00+00:00"
 LOGOUT = "2026-08-04T17:00:00+00:00"
 
 
 @pytest.fixture
-def employee(db: Session) -> EmployeeRecords:
+def shift(db: Session) -> Shift:
+    srow = Shift(
+        code=f"DAY-{uuid.uuid4().hex[:8]}",
+        name="Day Shift",
+        start_time="08:00",
+        end_time="17:00",
+        lunch_break_duration=60,
+        total_hours_minus_lunch=480,
+    )
+    db.add(srow)
+    db.commit()
+    db.refresh(srow)
+    return srow
+
+
+@pytest.fixture
+def employee(db: Session, shift: Shift) -> EmployeeRecords:
     emp = EmployeeRecords(
         employee_code=f"IDP-{uuid.uuid4().hex[:8]}",
-        first_name="Rhea", last_name="Okonkwo", birthdate="1990-01-01",
+        first_name="Rhea",
+        last_name="Okonkwo",
+        birthdate="1990-01-01",
     )
     db.add(emp)
     db.commit()
     db.refresh(emp)
+    db.add(
+        EmployeeShiftAssignment(
+            employee_id=emp.id,
+            shift_id=shift.id,
+            effective_from=date(2026, 1, 1),
+            assigned_by=_superuser_id(db),
+        )
+    )
+    db.commit()
     return emp
 
 
@@ -56,7 +91,32 @@ def _payload(employee_code: str, **over: object) -> dict:
     return body
 
 
-def _active_rows_for_key(db: Session, employee_id: uuid.UUID, key: str) -> list[DailyTimeRecord]:
+def test_dtr_without_an_effective_shift_assignment_is_rejected(
+    client, superuser_token_headers, db: Session
+):
+    """Attendance cannot be calculated against an implicit template shift."""
+    employee = EmployeeRecords(
+        employee_code=f"NOSHIFT-{uuid.uuid4().hex[:8]}",
+        first_name="No",
+        last_name="Shift",
+        birthdate="1990-01-01",
+    )
+    db.add(employee)
+    db.commit()
+    db.refresh(employee)
+
+    response = client.post(
+        f"{API}/daily-time-records/",
+        json=_payload(employee.employee_code),
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 422
+    assert "no shift is assigned" in response.json()["detail"].lower()
+
+
+def _active_rows_for_key(
+    db: Session, employee_id: uuid.UUID, key: str
+) -> list[DailyTimeRecord]:
     return list(
         db.exec(
             select(DailyTimeRecord).where(
@@ -69,20 +129,38 @@ def _active_rows_for_key(db: Session, employee_id: uuid.UUID, key: str) -> list[
 
 
 class TestReplayContract:
-    def test_first_create_201_replay_200_same_row(self, client, superuser_token_headers, employee, db):
-        r1 = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=KEY), headers=superuser_token_headers)
+    def test_first_create_201_replay_200_same_row(
+        self, client, superuser_token_headers, employee, db
+    ):
+        r1 = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=KEY),
+            headers=superuser_token_headers,
+        )
         assert r1.status_code == 201, r1.text
-        r2 = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=KEY), headers=superuser_token_headers)
+        r2 = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=KEY),
+            headers=superuser_token_headers,
+        )
         assert r2.status_code == 200, r2.text
         assert r2.json()["id"] == r1.json()["id"]
         assert len(_active_rows_for_key(db, employee.id, KEY)) == 1
 
-    def test_replay_preserves_actor_computed_and_source_authority(self, client, superuser_token_headers, employee, db):
-        first = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=KEY), headers=superuser_token_headers).json()
+    def test_replay_preserves_actor_computed_and_source_authority(
+        self, client, superuser_token_headers, employee, db
+    ):
+        first = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=KEY),
+            headers=superuser_token_headers,
+        ).json()
         fake = str(uuid.uuid4())
         spoof = _payload(employee.employee_code, source_ref=KEY)
         spoof.update({"created_by": fake, "rendered_minutes": 9999, "source": "csv"})
-        r = client.post(f"{API}/daily-time-records/", json=spoof, headers=superuser_token_headers)
+        r = client.post(
+            f"{API}/daily-time-records/", json=spoof, headers=superuser_token_headers
+        )
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["id"] == first["id"]
@@ -90,81 +168,420 @@ class TestReplayContract:
         assert body["rendered_minutes"] == first["rendered_minutes"] == 480
         assert body["source"] == "manual"
 
-    def test_same_key_changed_payload_is_409_and_original_untouched(self, client, superuser_token_headers, employee, db):
-        first = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=KEY), headers=superuser_token_headers).json()
-        changed = _payload(employee.employee_code, source_ref=KEY, logout_date="2026-08-04T19:00:00+00:00")
-        r = client.post(f"{API}/daily-time-records/", json=changed, headers=superuser_token_headers)
+    def test_same_key_changed_payload_is_409_and_original_untouched(
+        self, client, superuser_token_headers, employee, db
+    ):
+        first = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=KEY),
+            headers=superuser_token_headers,
+        ).json()
+        changed = _payload(
+            employee.employee_code,
+            source_ref=KEY,
+            logout_date="2026-08-04T19:00:00+00:00",
+        )
+        r = client.post(
+            f"{API}/daily-time-records/", json=changed, headers=superuser_token_headers
+        )
         assert r.status_code == 409
-        assert "reconcile manually" in r.json()["detail"].lower() or "changed" in r.json()["detail"].lower()
+        assert (
+            "reconcile manually" in r.json()["detail"].lower()
+            or "changed" in r.json()["detail"].lower()
+        )
         rows = _active_rows_for_key(db, employee.id, KEY)
         assert len(rows) == 1 and str(rows[0].id) == first["id"]
         assert rows[0].logout_date == datetime.fromisoformat(LOGOUT)
 
-    def test_same_key_different_shift_payload_is_409(self, client, superuser_token_headers, employee, db, shift):
-        client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=KEY, shift_code=shift.code), headers=superuser_token_headers)
-        r = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=KEY), headers=superuser_token_headers)
+    def test_same_key_different_shift_payload_is_409(
+        self, client, superuser_token_headers, employee, db, shift
+    ):
+        first = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=KEY),
+            headers=superuser_token_headers,
+        )
+        assert first.status_code == 201, first.text
+        other_shift = Shift(
+            code=f"NIGHT-{uuid.uuid4().hex[:8]}",
+            name="Night Shift",
+            start_time="22:00",
+            end_time="06:00",
+            lunch_break_duration=60,
+            total_hours_minus_lunch=420,
+        )
+        db.add(other_shift)
+        db.commit()
+        r = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(
+                employee.employee_code, source_ref=KEY, shift_code=other_shift.code
+            ),
+            headers=superuser_token_headers,
+        )
         assert r.status_code == 409
+        assert "assigned shift" in r.json()["detail"].lower()
         assert len(_active_rows_for_key(db, employee.id, KEY)) == 1
 
 
 class TestKeyPolicy:
-    def test_blank_source_ref_rejected_422(self, client, superuser_token_headers, employee):
-        r = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=""), headers=superuser_token_headers)
+    def test_blank_source_ref_rejected_422(
+        self, client, superuser_token_headers, employee
+    ):
+        r = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=""),
+            headers=superuser_token_headers,
+        )
         assert r.status_code == 422
 
-    def test_whitespace_only_source_ref_rejected_400(self, client, superuser_token_headers, employee):
-        r = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref="   "), headers=superuser_token_headers)
+    def test_whitespace_only_source_ref_rejected_400(
+        self, client, superuser_token_headers, employee
+    ):
+        r = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref="   "),
+            headers=superuser_token_headers,
+        )
         assert r.status_code == 400
         assert "blank" in r.json()["detail"]
 
-    def test_deleted_key_never_resurrected_retry_is_409_fresh_key_creates_new(self, client, superuser_token_headers, employee, db):
-        created = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=KEY), headers=superuser_token_headers).json()
-        d = client.delete(f"{API}/daily-time-records/{created['id']}", headers=superuser_token_headers)
+    def test_deleted_key_never_resurrected_retry_is_409_fresh_key_creates_new(
+        self, client, superuser_token_headers, employee, db
+    ):
+        created = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=KEY),
+            headers=superuser_token_headers,
+        ).json()
+        d = client.delete(
+            f"{API}/daily-time-records/{created['id']}", headers=superuser_token_headers
+        )
         assert d.status_code == 200
         # Automatic retry with the same identity must NOT resurrect the deleted punch.
-        r = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=KEY), headers=superuser_token_headers)
+        r = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=KEY),
+            headers=superuser_token_headers,
+        )
         assert r.status_code == 409
         assert "deleted" in r.json()["detail"].lower()
         assert len(_active_rows_for_key(db, employee.id, KEY)) == 0
         # A fresh explicit import identity creates a new row.
-        fresh = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=KEY + "-reimport"), headers=superuser_token_headers)
+        fresh = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=KEY + "-reimport"),
+            headers=superuser_token_headers,
+        )
         assert fresh.status_code == 201
         assert fresh.json()["id"] != created["id"]
 
-    def test_natural_key_punches_are_never_merged(self, client, superuser_token_headers, employee, db):
+    def test_natural_key_punches_are_never_merged(
+        self, client, superuser_token_headers, employee, db
+    ):
         """Same employee+times with two DIFFERENT opaque keys are two legitimate
         punches (or a deliberate re-import); idempotency never guesses by natural key."""
-        r1 = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref="dtr-import-b1-r0"), headers=superuser_token_headers)
-        r2 = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref="dtr-import-b2-r0"), headers=superuser_token_headers)
+        r1 = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref="dtr-import-b1-r0"),
+            headers=superuser_token_headers,
+        )
+        r2 = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(
+                employee.employee_code,
+                login_date="2026-08-05T08:00:00+00:00",
+                logout_date="2026-08-05T17:00:00+00:00",
+                source_ref="dtr-import-b2-r0",
+            ),
+            headers=superuser_token_headers,
+        )
         assert r1.status_code == 201 and r2.status_code == 201
         assert r1.json()["id"] != r2.json()["id"]
 
-    def test_keyless_manual_create_unaffected(self, client, superuser_token_headers, employee):
-        r = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code), headers=superuser_token_headers)
+    def test_keyless_manual_create_unaffected(
+        self, client, superuser_token_headers, employee
+    ):
+        r = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code),
+            headers=superuser_token_headers,
+        )
         assert r.status_code == 201
         assert r.json()["source_ref"] is None
 
-    def test_rejected_requests_leave_no_rows(self, client, superuser_token_headers, employee, db):
+
+class TestAtomicImportBatch:
+    def _request(
+        self, batch_id: uuid.UUID, employee_code: str, *, second_day: bool = False
+    ) -> dict:
+        rows = [
+            {
+                "employee_code": employee_code,
+                "login_date": LOGIN,
+                "logout_date": LOGOUT,
+            }
+        ]
+        if second_day:
+            rows.append(
+                {
+                    "employee_code": employee_code,
+                    "login_date": "2026-08-05T08:00:00+00:00",
+                    "logout_date": "2026-08-05T17:00:00+00:00",
+                }
+            )
+        return {"batch_id": str(batch_id), "rows": rows}
+
+    def test_preflight_is_read_only_commit_is_atomic_and_replayable(
+        self, client, superuser_token_headers, employee, db
+    ):
+        batch_id = uuid.uuid4()
+        payload = self._request(batch_id, employee.employee_code, second_day=True)
+        preflight = client.post(
+            f"{API}/daily-time-records/import-batches/preflight",
+            json=payload,
+            headers=superuser_token_headers,
+        )
+        assert preflight.status_code == 200, preflight.text
+        assert preflight.json()["valid"] is True
+        assert preflight.json()["issues"] == []
+        assert db.get(DtrImportBatch, batch_id) is None
+
+        first = client.post(
+            f"{API}/daily-time-records/import-batches/commit",
+            json=payload,
+            headers=superuser_token_headers,
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["created_count"] == 2
+        assert first.json()["replayed"] is False
+        assert len(first.json()["records"]) == 2
+
+        replay = client.post(
+            f"{API}/daily-time-records/import-batches/commit",
+            json=payload,
+            headers=superuser_token_headers,
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["created_count"] == 2
+        assert replay.json()["replayed"] is True
+        assert (
+            len(_active_rows_for_key(db, employee.id, f"dtr-import-{batch_id}-r0")) == 1
+        )
+        changed = self._request(batch_id, employee.employee_code)
+        conflict = client.post(
+            f"{API}/daily-time-records/import-batches/commit",
+            json=changed,
+            headers=superuser_token_headers,
+        )
+        assert conflict.status_code == 409
+        assert (
+            len(_active_rows_for_key(db, employee.id, f"dtr-import-{batch_id}-r0")) == 1
+        )
+
+    def test_batch_identity_cannot_replay_another_actors_records(
+        self, client, superuser_token_headers, employee, db
+    ):
+        batch_id = uuid.uuid4()
+        payload = DtrImportBatchRequest.model_validate(
+            self._request(batch_id, employee.employee_code)
+        )
+        owner_id = _superuser_id(db)
+        commit_import(session=db, request=payload, actor_id=owner_id)
+
+        other_actor = uuid.uuid4()
+        preflight = preflight_import(
+            session=db, request=payload, actor_id=other_actor
+        )
+        assert preflight.valid is False
+        assert preflight.issues[0].code == "batch_identity_unavailable"
+        with pytest.raises(HTTPException) as error:
+            commit_import(session=db, request=payload, actor_id=other_actor)
+        assert error.value.status_code == 404
+
+    def test_non_superuser_cannot_preflight_or_commit_foreign_employee(
+        self, client, db, employee
+    ):
+        other = EmployeeRecords(
+            employee_code=f"IDP-{uuid.uuid4().hex[:8]}",
+            first_name="Foreign",
+            last_name="Employee",
+            birthdate=date(1990, 1, 1),
+        )
+        db.add(other)
+        db.commit()
+        headers = _make_employee_user_with_dtr_add(
+            db, client, f"scope-{uuid.uuid4().hex[:8]}@example.com", employee
+        )
+        batch_id = uuid.uuid4()
+        payload = self._request(batch_id, other.employee_code)
+
+        preflight = client.post(
+            f"{API}/daily-time-records/import-batches/preflight",
+            json=payload,
+            headers=headers,
+        )
+        assert preflight.status_code == 200
+        assert preflight.json()["valid"] is False
+        assert preflight.json()["issues"][0]["code"] == "employee_out_of_scope"
+
+        commit = client.post(
+            f"{API}/daily-time-records/import-batches/commit",
+            json=payload,
+            headers=headers,
+        )
+        assert commit.status_code == 422
+        assert db.get(DtrImportBatch, batch_id) is None
+        assert _active_rows_for_key(db, other.id, f"dtr-import-{batch_id}-r0") == []
+
+    def test_duplicate_employee_work_date_blocks_entire_batch(
+        self, client, superuser_token_headers, employee, db
+    ):
+        batch_id = uuid.uuid4()
+        payload = self._request(batch_id, employee.employee_code)
+        payload["rows"].append(
+            {
+                "employee_code": employee.employee_code,
+                "login_date": "2026-08-04T09:00:00+00:00",
+                "logout_date": "2026-08-04T12:00:00+00:00",
+            }
+        )
+        preflight = client.post(
+            f"{API}/daily-time-records/import-batches/preflight",
+            json=payload,
+            headers=superuser_token_headers,
+        )
+        assert preflight.status_code == 200
+        assert preflight.json()["valid"] is False
+        assert preflight.json()["issues"][0]["code"] == "duplicate_employee_work_date"
+
+        commit = client.post(
+            f"{API}/daily-time-records/import-batches/commit",
+            json=payload,
+            headers=superuser_token_headers,
+        )
+        assert commit.status_code == 422
+        assert db.get(DtrImportBatch, batch_id) is None
+        assert _active_rows_for_key(db, employee.id, f"dtr-import-{batch_id}-r0") == []
+
+    def test_explicitly_merged_same_day_intervals_commit_as_one_daily_record(
+        self, client, superuser_token_headers, employee, db
+    ):
+        batch_id = uuid.uuid4()
+        payload = {
+            "batch_id": str(batch_id),
+            "rows": [{
+                "employee_code": employee.employee_code,
+                "login_date": "2026-08-04T08:00:00+00:00",
+                "logout_date": "2026-08-04T17:00:00+00:00",
+                "source_row": {"employee_code": employee.employee_code},
+                "intervals": [
+                    {
+                        "start_at": "2026-08-04T08:00:00+00:00",
+                        "end_at": "2026-08-04T12:00:00+00:00",
+                        "source_row": {"employee_code": employee.employee_code, "punch": "morning"},
+                    },
+                    {
+                        "start_at": "2026-08-04T13:00:00+00:00",
+                        "end_at": "2026-08-04T17:00:00+00:00",
+                        "source_row": {"employee_code": employee.employee_code, "punch": "afternoon"},
+                    },
+                ],
+            }],
+        }
+        preflight = client.post(
+            f"{API}/daily-time-records/import-batches/preflight",
+            json=payload,
+            headers=superuser_token_headers,
+        )
+        assert preflight.status_code == 200, preflight.text
+        assert preflight.json()["valid"] is True
+
+        committed = client.post(
+            f"{API}/daily-time-records/import-batches/commit",
+            json=payload,
+            headers=superuser_token_headers,
+        )
+        assert committed.status_code == 200, committed.text
+        assert committed.json()["created_count"] == 1
+        record_id = uuid.UUID(committed.json()["records"][0]["id"])
+        record = db.get(DailyTimeRecord, record_id)
+        assert record is not None
+        assert record.rendered_minutes == 480
+        assert record.interval_revision == 1
+        assert len(db.exec(select(DailyTimeRecord).where(
+            DailyTimeRecord.employee_id == employee.id,
+            DailyTimeRecord.work_date == date(2026, 8, 4),
+            DailyTimeRecord.is_deleted == False,  # noqa: E712
+        )).all()) == 1
+
+    def test_identical_saved_attendance_is_explicitly_excluded(
+        self, client, superuser_token_headers, employee
+    ):
+        first_batch = uuid.uuid4()
+        payload = self._request(first_batch, employee.employee_code)
+        first = client.post(
+            f"{API}/daily-time-records/import-batches/commit",
+            json=payload,
+            headers=superuser_token_headers,
+        )
+        assert first.status_code == 200, first.text
+
+        second_batch = uuid.uuid4()
+        repeated = client.post(
+            f"{API}/daily-time-records/import-batches/commit",
+            json=self._request(second_batch, employee.employee_code),
+            headers=superuser_token_headers,
+        )
+        assert repeated.status_code == 200, repeated.text
+        assert repeated.json()["created_count"] == 0
+        assert repeated.json()["excluded_count"] == 1
+        assert repeated.json()["records"] == []
+
+    def test_rejected_requests_leave_no_rows(
+        self, client, superuser_token_headers, employee, db
+    ):
         before = len(db.exec(select(DailyTimeRecord)).all())
         for payload in [
-            _payload(employee.employee_code, source_ref="   "),                      # 400 blank
-            _payload(employee.employee_code, source_ref=KEY, login_date=LOGOUT),     # 400 login>=logout
-            {"employee_code": "DOES-NOT-EXIST", "login_date": LOGIN, "logout_date": LOGOUT, "source_ref": KEY},  # 404
+            _payload(employee.employee_code, source_ref="   "),  # 400 blank
+            _payload(
+                employee.employee_code, source_ref=KEY, login_date=LOGOUT
+            ),  # 400 login>=logout
+            {
+                "employee_code": "DOES-NOT-EXIST",
+                "login_date": LOGIN,
+                "logout_date": LOGOUT,
+                "source_ref": KEY,
+            },  # 404
         ]:
-            assert client.post(f"{API}/daily-time-records/", json=payload, headers=superuser_token_headers).status_code in (400, 404)
+            assert client.post(
+                f"{API}/daily-time-records/",
+                json=payload,
+                headers=superuser_token_headers,
+            ).status_code in (400, 404)
         after = len(db.exec(select(DailyTimeRecord)).all())
         assert after == before
 
 
 class TestAuthorization:
-    def test_unauthorized_keyed_create_is_403_before_any_replay(self, client, superuser_token_headers, normal_user_token_headers, employee):
+    def test_unauthorized_keyed_create_is_403_before_any_replay(
+        self, client, superuser_token_headers, normal_user_token_headers, employee
+    ):
         """QA-01 requirement 4: the permission gate runs before the idempotency
         lookup — an unauthorized retry cannot read or replay a row at all."""
         key = f"dtr-import-auth-{uuid.uuid4().hex[:8]}"
         # First commit as superuser so a replay row EXISTS.
-        committed = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=key), headers=superuser_token_headers)
+        committed = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=key),
+            headers=superuser_token_headers,
+        )
         assert committed.status_code == 201
-        r = client.post(f"{API}/daily-time-records/", json=_payload(employee.employee_code, source_ref=key), headers=normal_user_token_headers)
+        r = client.post(
+            f"{API}/daily-time-records/",
+            json=_payload(employee.employee_code, source_ref=key),
+            headers=normal_user_token_headers,
+        )
         assert r.status_code == 403, r.text
 
 
@@ -185,7 +602,10 @@ class TestConcurrency:
         def worker(idx: int) -> None:
             with Session(engine) as s:
                 data = DailyTimeRecordCreate(
-                    employee_id=employee.id, login_date=login, logout_date=logout, source_ref=key
+                    employee_id=employee.id,
+                    login_date=login,
+                    logout_date=logout,
+                    source_ref=key,
                 )
                 barrier.wait()
                 row, replayed = create_dtr(session=s, data=data, actor_id=actor)
@@ -216,20 +636,9 @@ class TestConcurrency:
         assert len(rows) == 1
 
 
-@pytest.fixture
-def shift(db: Session) -> Shift:
-    srow = Shift(
-        code=f"DAY-{uuid.uuid4().hex[:8]}", name="Day Shift",
-        start_time="08:00", end_time="17:00",
-        lunch_break_duration=60, total_hours_minus_lunch=480,
-    )
-    db.add(srow)
-    db.commit()
-    db.refresh(srow)
-    return srow
-
-
-def _make_employee_user_with_dtr_add(db: Session, client: TestClient, email: str, linked_employee: EmployeeRecords) -> dict:
+def _make_employee_user_with_dtr_add(
+    db: Session, client: TestClient, email: str, linked_employee: EmployeeRecords
+) -> dict:
     """Non-superuser linked to `linked_employee`, granted daily_time_record:add."""
     from app.rbac.models import Role, RolePermission
     from app.rbac.selectors import get_module_by_code
@@ -239,7 +648,9 @@ def _make_employee_user_with_dtr_add(db: Session, client: TestClient, email: str
     from tests.utils.utils import random_lower_string
 
     password = random_lower_string()
-    user = create_user(session=db, user_create=UserCreate(email=email, password=password))
+    user = create_user(
+        session=db, user_create=UserCreate(email=email, password=password)
+    )
     db.refresh(linked_employee)
     linked_employee.user_id = user.id
     db.add(linked_employee)
@@ -254,7 +665,11 @@ def _make_employee_user_with_dtr_add(db: Session, client: TestClient, email: str
     db.commit()
 
     dtr_module = get_module_by_code(session=db, code="daily_time_record")
-    db.add(RolePermission(role_id=role.id, module_id=dtr_module.id, can_view=True, can_add=True))
+    db.add(
+        RolePermission(
+            role_id=role.id, module_id=dtr_module.id, can_view=True, can_add=True
+        )
+    )
     db.commit()
     return user_authentication_headers(client=client, email=email, password=password)
 
@@ -274,42 +689,73 @@ class TestReconcileEndpoint:
     def _reconcile(self, client, headers, pairs):
         return client.post(self.RECONCILE, json={"keys": pairs}, headers=headers)
 
-    def test_committed_pair_returns_record_id(self, client, superuser_token_headers, employee):
+    def test_committed_pair_returns_record_id(
+        self, client, superuser_token_headers, employee
+    ):
         created = client.post(
             f"{API}/daily-time-records/",
             json=_payload(employee.employee_code, source_ref=KEY),
             headers=superuser_token_headers,
         ).json()
-        r = self._reconcile(client, superuser_token_headers, [{"employee_code": employee.employee_code, "source_ref": KEY}])
+        r = self._reconcile(
+            client,
+            superuser_token_headers,
+            [{"employee_code": employee.employee_code, "source_ref": KEY}],
+        )
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["requested"] == 1 and body["unresolved"] == 0
         res = body["results"][0]
         assert res["status"] == "committed" and res["record_id"] == created["id"]
 
-    def test_deleted_pair_reports_deleted_never_committed(self, client, superuser_token_headers, employee, db):
+    def test_deleted_pair_reports_deleted_never_committed(
+        self, client, superuser_token_headers, employee, db
+    ):
         created = client.post(
             f"{API}/daily-time-records/",
             json=_payload(employee.employee_code, source_ref=KEY),
             headers=superuser_token_headers,
         ).json()
-        assert client.delete(f"{API}/daily-time-records/{created['id']}", headers=superuser_token_headers).status_code == 200
-        r = self._reconcile(client, superuser_token_headers, [{"employee_code": employee.employee_code, "source_ref": KEY}])
+        assert (
+            client.delete(
+                f"{API}/daily-time-records/{created['id']}",
+                headers=superuser_token_headers,
+            ).status_code
+            == 200
+        )
+        r = self._reconcile(
+            client,
+            superuser_token_headers,
+            [{"employee_code": employee.employee_code, "source_ref": KEY}],
+        )
         res = r.json()["results"][0]
         assert res["status"] == "deleted"
         assert len(_active_rows_for_key(db, employee.id, KEY)) == 0
 
     def test_absent_key_is_not_found(self, client, superuser_token_headers, employee):
-        r = self._reconcile(client, superuser_token_headers, [{"employee_code": employee.employee_code, "source_ref": "dtr-import-never-r0"}])
+        r = self._reconcile(
+            client,
+            superuser_token_headers,
+            [
+                {
+                    "employee_code": employee.employee_code,
+                    "source_ref": "dtr-import-never-r0",
+                }
+            ],
+        )
         assert r.status_code == 200
         assert r.json()["results"][0]["status"] == "not_found"
 
-    def test_same_key_other_employee_is_not_found_never_cross_match(self, client, superuser_token_headers, employee, db):
+    def test_same_key_other_employee_is_not_found_never_cross_match(
+        self, client, superuser_token_headers, employee, db
+    ):
         """Pairing is (employee, key) — a key committed for A must NEVER be
         reported as committed for B (no natural-key/global-key guessing)."""
         other = EmployeeRecords(
             employee_code=f"IDP-{uuid.uuid4().hex[:8]}",
-            first_name="Nia", last_name="Vasquez", birthdate="1991-02-02",
+            first_name="Nia",
+            last_name="Vasquez",
+            birthdate="1991-02-02",
         )
         db.add(other)
         db.commit()
@@ -319,27 +765,51 @@ class TestReconcileEndpoint:
             json=_payload(employee.employee_code, source_ref=KEY),
             headers=superuser_token_headers,
         )
-        r = self._reconcile(client, superuser_token_headers, [{"employee_code": other.employee_code, "source_ref": KEY}])
+        r = self._reconcile(
+            client,
+            superuser_token_headers,
+            [{"employee_code": other.employee_code, "source_ref": KEY}],
+        )
         assert r.json()["results"][0]["status"] == "not_found"
 
-    def test_unknown_employee_is_unresolved_not_not_found(self, client, superuser_token_headers):
-        r = self._reconcile(client, superuser_token_headers, [{"employee_code": "NO-SUCH-EMP", "source_ref": KEY}])
+    def test_unknown_employee_is_unresolved_not_not_found(
+        self, client, superuser_token_headers
+    ):
+        r = self._reconcile(
+            client,
+            superuser_token_headers,
+            [{"employee_code": "NO-SUCH-EMP", "source_ref": KEY}],
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["results"][0]["status"] == "unresolved"
         assert body["unresolved"] == 1
 
-    def test_over_capacity_batch_is_rejected_422(self, client, superuser_token_headers, employee):
-        pairs = [{"employee_code": employee.employee_code, "source_ref": f"dtr-import-big-r{i}"} for i in range(201)]
+    def test_over_capacity_batch_is_rejected_422(
+        self, client, superuser_token_headers, employee
+    ):
+        pairs = [
+            {
+                "employee_code": employee.employee_code,
+                "source_ref": f"dtr-import-big-r{i}",
+            }
+            for i in range(201)
+        ]
         r = self._reconcile(client, superuser_token_headers, pairs)
         assert r.status_code == 422
 
-    def test_not_found_then_late_commit_retry_is_200_replay_same_row(self, client, superuser_token_headers, employee, db):
+    def test_not_found_then_late_commit_retry_is_200_replay_same_row(
+        self, client, superuser_token_headers, employee, db
+    ):
         """Blocker 4 race-safe contract: not_found is NOT proof of non-commit.
         Original request commits late -> the retry with the SAME key replays
         the late row (200) instead of duplicating it."""
         key = f"dtr-import-late-{uuid.uuid4().hex[:8]}"
-        r = self._reconcile(client, superuser_token_headers, [{"employee_code": employee.employee_code, "source_ref": key}])
+        r = self._reconcile(
+            client,
+            superuser_token_headers,
+            [{"employee_code": employee.employee_code, "source_ref": key}],
+        )
         assert r.json()["results"][0]["status"] == "not_found"
 
         # Simulate the timed-out original request committing AFTER we looked.
@@ -348,7 +818,12 @@ class TestReconcileEndpoint:
         with Session(engine) as late:
             late_row, replayed = create_dtr(
                 session=late,
-                data=DailyTimeRecordCreate(employee_id=employee.id, login_date=login, logout_date=logout, source_ref=key),
+                data=DailyTimeRecordCreate(
+                    employee_id=employee.id,
+                    login_date=login,
+                    logout_date=logout,
+                    source_ref=key,
+                ),
                 actor_id=_superuser_id(db),
             )
         assert not replayed
@@ -363,37 +838,65 @@ class TestReconcileEndpoint:
         assert retry.json()["id"] == str(late_row.id)
         assert len(_active_rows_for_key(db, employee.id, key)) == 1
 
-    def test_non_superuser_settles_own_pair_and_unresolves_other_scope(self, client, superuser_token_headers, db, employee):
+    def test_non_superuser_settles_own_pair_and_unresolves_other_scope(
+        self, client, superuser_token_headers, db, employee, shift
+    ):
         """Row-level visibility mirrors the DTR list route (is_superuser gate):
         own employee reconciles definitely; foreign employees stay unresolved
         — missing visibility is NOT reported as missing data."""
         other = EmployeeRecords(
             employee_code=f"IDP-{uuid.uuid4().hex[:8]}",
-            first_name="Lara", last_name="Flores", birthdate="1988-03-03",
+            first_name="Lara",
+            last_name="Flores",
+            birthdate="1988-03-03",
         )
         db.add(other)
         db.commit()
         db.refresh(other)
+        db.add(
+            EmployeeShiftAssignment(
+                employee_id=other.id,
+                shift_id=shift.id,
+                effective_from=date(2026, 1, 1),
+                assigned_by=_superuser_id(db),
+            )
+        )
+        db.commit()
         own_key = f"dtr-import-own-{uuid.uuid4().hex[:8]}"
         foreign_key = f"dtr-import-foreign-{uuid.uuid4().hex[:8]}"
         for emp, k in ((employee, own_key), (other, foreign_key)):
-            assert client.post(
-                f"{API}/daily-time-records/",
-                json=_payload(emp.employee_code, source_ref=k),
-                headers=superuser_token_headers,
-            ).status_code == 201
+            assert (
+                client.post(
+                    f"{API}/daily-time-records/",
+                    json=_payload(emp.employee_code, source_ref=k),
+                    headers=superuser_token_headers,
+                ).status_code
+                == 201
+            )
 
-        headers = _make_employee_user_with_dtr_add(db, client, f"recon-{uuid.uuid4().hex[:8]}@example.com", employee)
-        r = self._reconcile(client, headers, [
-            {"employee_code": employee.employee_code, "source_ref": own_key},
-            {"employee_code": other.employee_code, "source_ref": foreign_key},
-        ])
+        headers = _make_employee_user_with_dtr_add(
+            db, client, f"recon-{uuid.uuid4().hex[:8]}@example.com", employee
+        )
+        r = self._reconcile(
+            client,
+            headers,
+            [
+                {"employee_code": employee.employee_code, "source_ref": own_key},
+                {"employee_code": other.employee_code, "source_ref": foreign_key},
+            ],
+        )
         assert r.status_code == 200, r.text
         results = {res["employee_code"]: res for res in r.json()["results"]}
         assert results[employee.employee_code]["status"] == "committed"
         assert results[other.employee_code]["status"] == "unresolved"
         assert r.json()["unresolved"] == 1
 
-    def test_reconcile_requires_add_permission(self, client, normal_user_token_headers, employee):
-        r = self._reconcile(client, normal_user_token_headers, [{"employee_code": employee.employee_code, "source_ref": KEY}])
+    def test_reconcile_requires_add_permission(
+        self, client, normal_user_token_headers, employee
+    ):
+        r = self._reconcile(
+            client,
+            normal_user_token_headers,
+            [{"employee_code": employee.employee_code, "source_ref": KEY}],
+        )
         assert r.status_code == 403, r.text

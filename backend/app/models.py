@@ -11,7 +11,14 @@ Import this module for its side effects only.
 from sqlmodel import SQLModel
 
 from app.attendance.adjustment_models import DtrAdjustment
-from app.attendance.models import DailyTimeRecord, Shift
+from app.attendance.models import (
+    DailyTimeRecord,
+    DtrAttendanceInterval,
+    DtrImportBatch,
+    DtrOvertimeDecision,
+    EmployeeShiftAssignment,
+    Shift,
+)
 from app.audit.models import AuditLog
 from app.auth.models import RefreshToken
 from app.employee.models import (
@@ -49,7 +56,9 @@ from app.payroll.models import (
     BIRBracket,
     ConnectorType,
     CutoffType,
+    EmployeePayGroupAssignment,
     EmployeeSalary,
+    EmployeeSalaryBulkBatch,
     IntegrationConfig,
     IntegrationMapping,
     Loan,
@@ -57,7 +66,10 @@ from app.payroll.models import (
     LoanType,
     PagIBIGBracket,
     PayrollAdjustmentType,
+    PayrollDeliveryOutbox,
     PayrollEntry,
+    PayrollPayGroup,
+    PayrollPolicyVersion,
     PayrollRun,
     PayrollRunStatus,
     PayType,
@@ -90,6 +102,8 @@ __all__ = [
     "EmployeeProjects",
     "EmployeeRecords",
     "EmployeeSalary",
+    "EmployeeSalaryBulkBatch",
+    "EmployeePayGroupAssignment",
     "HolidayConfig",
     "HolidayInstance",
     "IntegrationConfig",
@@ -109,8 +123,11 @@ __all__ = [
     "PagIBIGBracket",
     "PayrollAdjustmentType",
     "PayrollEntry",
+    "PayrollDeliveryOutbox",
     "PayrollRun",
     "PayrollRunStatus",
+    "PayrollPayGroup",
+    "PayrollPolicyVersion",
     "PayType",
     "Phase",
     "PhilHealthBracket",
@@ -121,5 +138,9 @@ __all__ = [
     "Subdivision",
     "Shift",
     "DailyTimeRecord",
+    "EmployeeShiftAssignment",
+    "DtrImportBatch",
+    "DtrAttendanceInterval",
+    "DtrOvertimeDecision",
     "DtrAdjustment",
 ]

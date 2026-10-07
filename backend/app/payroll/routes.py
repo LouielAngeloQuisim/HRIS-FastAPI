@@ -53,6 +53,7 @@ from app.payroll.models import (
     CutoffType,
     EmployeePayGroupAssignment,
     EmployeeSalaryBulkBatch,
+    EmployeeTaxYearDeclaration,
     PayrollContributionLedger,
     PayrollDeliveryOutbox,
     PayrollEntry,
@@ -81,6 +82,8 @@ from app.payroll.schemas import (
     EmployeeSalaryCreate,
     EmployeeSalaryRead,
     EmployeeSalaryUpdate,
+    EmployeeTaxYearDeclarationPublic,
+    EmployeeTaxYearDeclarationUpdate,
     FleetIntegrationConfigRead,
     FleetIntegrationMappingRead,
     IntegrationConfigCreate,
@@ -549,6 +552,57 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
         if entry.employee_id is None:
             return False
         employee_id = entry.employee_id
+
+        tax_declaration = session.exec(
+            select(EmployeeTaxYearDeclaration).where(
+                EmployeeTaxYearDeclaration.employee_id == employee_id,
+                EmployeeTaxYearDeclaration.tax_year == period_to.year,
+            )
+        ).first()
+        tax_reference = snapshot.get("tax_year_declaration")
+        if (tax_declaration is None) != (tax_reference is None):
+            return False
+        if tax_declaration is not None and tax_reference is not None:
+            if (
+                str(tax_declaration.id) != tax_reference.get("id")
+                or (tax_declaration.updated_at.isoformat() if tax_declaration.updated_at else None)
+                != tax_reference.get("updated_at")
+                or tax_declaration.is_verified != tax_reference.get("verified")
+            ):
+                return False
+
+        if "bir_schedule" in snapshot:
+            expected_bir_period = CutoffType(
+                str(snapshot.get("pay_group_cadence", "monthly"))
+            )
+            current_bir_rows = session.exec(
+                select(BIRBracket).where(
+                    BIRBracket.period == expected_bir_period,
+                    BIRBracket.effective_date <= period_to,
+                    col(BIRBracket.is_active).is_(True),
+                    col(BIRBracket.is_deleted).is_(False),
+                )
+                .order_by(col(BIRBracket.bracket_min))
+            ).all()
+            if current_bir_rows:
+                latest_bir_date = max(row.effective_date for row in current_bir_rows)
+                current_bir_snapshot = [
+                    {
+                        "id": str(row.id),
+                        "effective_date": row.effective_date.isoformat(),
+                        "bracket_min": str(row.bracket_min),
+                        "bracket_max": str(row.bracket_max) if row.bracket_max is not None else None,
+                        "base_tax": str(row.base_tax),
+                        "excess_rate": str(row.excess_rate),
+                        "source_reference": row.source_reference,
+                    }
+                    for row in current_bir_rows
+                    if row.effective_date == latest_bir_date
+                ]
+            else:
+                current_bir_snapshot = []
+            if current_bir_snapshot != snapshot.get("bir_schedule", []):
+                return False
 
         # Compare full scoped identity sets as well as row revisions. This
         # detects newly inserted records that a row-by-row snapshot check alone
@@ -2586,6 +2640,36 @@ def prepare_attendance_payroll_draft(
             )
             .order_by(col(EmployeeSalary.effective_date))
         ).all()
+        if not employee_salaries:
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="salary_missing",
+                    message="An effective salary is required to calculate this employee's payroll.",
+                )
+            )
+        else:
+            effective_salary_for_period = employee_salaries[-1]
+            if str(getattr(effective_salary_for_period.pay_type, "value", effective_salary_for_period.pay_type)) != "monthly":
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="pay_basis_unsupported",
+                        message="This attendance-driven calculation currently supports fixed monthly salary only; daily/hourly rules are not yet configured.",
+                    )
+                )
+            if effective_salary_for_period.non_taxable_allowance or effective_salary_for_period.de_minimis_monthly:
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="allowance_tax_treatment_unavailable",
+                        message="Allowance and de minimis tax treatment must be configured before this employee can be calculated.",
+                    )
+                )
+            if any(salary.effective_date > obj_in.date_from for salary in employee_salaries):
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="salary_change_split_unavailable",
+                        message="A salary change inside this pay period requires an approved effective-date split calculation.",
+                    )
+                )
         salary_refs = [
             {
                 "id": str(salary.id),
@@ -2673,15 +2757,33 @@ def prepare_attendance_payroll_draft(
                             message=str(exc),
                         )
                     )
-        # BIR annualization requires the employee's validated current-year
-        # taxable-compensation and withholding totals. Until those are persisted,
-        # keep the entry blocked instead of treating a missing value as zero.
-        blockers.append(
-            PayrollPreflightBlocker(
-                code="bir_ytd_unavailable",
-                message="BIR withholding cannot be calculated until this employee's current-year taxable compensation, prior withholding, and tax profile are recorded.",
+        tax_declaration = session.exec(
+            select(EmployeeTaxYearDeclaration).where(
+                EmployeeTaxYearDeclaration.employee_id == roster_entry.employee_id,
+                EmployeeTaxYearDeclaration.tax_year == obj_in.date_to.year,
             )
-        )
+        ).first()
+        if tax_declaration is None:
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="bir_ytd_unavailable",
+                    message="Enter and verify this employee's tax classification and opening year-to-date amounts before payroll review.",
+                )
+            )
+        elif not tax_declaration.is_verified:
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="bir_ytd_unverified",
+                    message="A payroll approver must verify this employee's tax-year declaration before calculation.",
+                )
+            )
+        elif tax_declaration.tax_classification != "ordinary":
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="bir_tax_classification_unsupported",
+                    message="Minimum-wage-earner tax treatment requires verified eligibility and compensation-limit rules before calculation.",
+                )
+            )
         dtr_rows = session.exec(
             select(DailyTimeRecord)
             .where(
@@ -2778,6 +2880,7 @@ def prepare_attendance_payroll_draft(
             "policy_versions": [{"id": str(policy.id), "version": policy.version}],
             "employee_id": str(roster_entry.employee_id),
             "pay_group_id": str(group.id),
+            "pay_group_cadence": group.cadence.value,
             "period": {
                 "from": obj_in.date_from.isoformat(),
                 "to": obj_in.date_to.isoformat(),
@@ -2785,9 +2888,42 @@ def prepare_attendance_payroll_draft(
         }
         if monthly_contributions is not None:
             snapshot["monthly_contributions"] = monthly_contributions
-        fingerprint = hashlib.sha256(
-            json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        if tax_declaration is not None:
+            snapshot["tax_year_declaration"] = {
+                "id": str(tax_declaration.id),
+                "updated_at": tax_declaration.updated_at.isoformat()
+                if tax_declaration.updated_at
+                else None,
+                "tax_classification": tax_declaration.tax_classification,
+                "taxable_compensation_ytd": str(tax_declaration.taxable_compensation_ytd),
+                "tax_withheld_ytd": str(tax_declaration.tax_withheld_ytd),
+                "previous_employer_included": tax_declaration.previous_employer_included,
+                "verified": tax_declaration.is_verified,
+            }
+        bir_period = group.cadence
+        effective_bir_rows = session.exec(
+            select(BIRBracket).where(
+                BIRBracket.period == bir_period,
+                BIRBracket.effective_date <= obj_in.date_to,
+                col(BIRBracket.is_active).is_(True),
+                col(BIRBracket.is_deleted).is_(False),
+            ).order_by(col(BIRBracket.bracket_min))
+        ).all()
+        if effective_bir_rows:
+            latest_bir_date = max(row.effective_date for row in effective_bir_rows)
+            snapshot["bir_schedule"] = [
+                {
+                    "id": str(row.id),
+                    "effective_date": row.effective_date.isoformat(),
+                    "bracket_min": str(row.bracket_min),
+                    "bracket_max": str(row.bracket_max) if row.bracket_max is not None else None,
+                    "base_tax": str(row.base_tax),
+                    "excess_rate": str(row.excess_rate),
+                    "source_reference": row.source_reference,
+                }
+                for row in effective_bir_rows
+                if row.effective_date == latest_bir_date
+            ]
         regular = (
             preview.regular_earnings
             if preview and preview.regular_earnings is not None
@@ -2819,6 +2955,55 @@ def prepare_attendance_payroll_draft(
         }
         deductions.update({f"{scheme}_employee": str(amount) for scheme, amount in employee_statutory.items()})
         total_deductions = attendance_deduction + sum(employee_statutory.values(), Decimal("0.00"))
+        taxable_pay = (
+            gross
+            - attendance_deduction
+            - sum(employee_statutory.values(), Decimal("0.00"))
+        )
+        bir_withholding = Decimal("0.00")
+        if tax_declaration is not None and tax_declaration.is_verified and tax_declaration.tax_classification == "ordinary":
+            if taxable_pay < 0:
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="bir_taxable_compensation_negative",
+                        message="Employee-side mandatory contributions exceed this period's gross earnings; BIR taxable compensation requires correction.",
+                    )
+                )
+            else:
+                try:
+                    is_year_end = obj_in.date_to == date(
+                        obj_in.date_to.year,
+                        12,
+                        calendar.monthrange(obj_in.date_to.year, 12)[1],
+                    )
+                    if is_year_end:
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="bir_year_end_adjustment_unavailable",
+                                message="Annualized BIR adjustment and reconciliation against year-to-date withholding are not yet implemented; finalization is blocked for the year-end payroll period.",
+                            )
+                        )
+                    bir_withholding = calculate_bir_tax(
+                        session,
+                        taxable_pay,
+                        group.cadence.value,
+                        obj_in.date_to.isoformat(),
+                    )
+                    snapshot["bir_calculation"] = {
+                        "method": "periodic_annex_e",
+                        "period_type": group.cadence.value,
+                        "taxable_compensation": str(taxable_pay),
+                        "withholding": str(bir_withholding),
+                        "schedule_effective_date": obj_in.date_to.isoformat(),
+                        "year_end_adjustment_pending": is_year_end,
+                    }
+                except StatutoryScheduleUnavailable as exc:
+                    blockers.append(
+                        PayrollPreflightBlocker(code="bir_schedule_unavailable", message=str(exc))
+                    )
+        if bir_withholding:
+            deductions["bir_withholding"] = str(bir_withholding)
+            total_deductions += bir_withholding
         net_pay = gross - total_deductions
         if monthly_contributions is None:
             # The monthly deduction is collected in the final period only.
@@ -2833,6 +3018,9 @@ def prepare_attendance_payroll_draft(
                     message="Calculated deductions exceed earnings; an authorized correction is required before review.",
                 )
             )
+        fingerprint = hashlib.sha256(
+            json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         session.add(
             PayrollEntry(
                 payroll_run_id=run.id,
@@ -2856,7 +3044,7 @@ def prepare_attendance_payroll_draft(
                 overtime_pay=overtime,
                 thirteenth_month=Decimal("0.00"),
                 non_taxable_income=Decimal("0.00"),
-                taxable_income=gross - sum(employee_statutory.values(), Decimal("0.00")),
+                taxable_income=taxable_pay,
                 review_state="blocked",
                 calculation_version="attendance-v1-provisional",
                 input_snapshot=snapshot,
@@ -3801,6 +3989,93 @@ async def get_payroll_status_counts(
 # --------------------------------------------------------------------------- #
 # Employee Salary Management Endpoints
 # --------------------------------------------------------------------------- #
+
+
+@router.get(
+    "/employees/{employee_id}/tax-year-declarations/{tax_year}",
+    response_model=EmployeeTaxYearDeclarationPublic,
+    dependencies=[Depends(require_permission("payroll", "view"))],
+)
+def get_employee_tax_year_declaration(
+    *, session: SessionDep, employee_id: uuid.UUID, tax_year: int
+) -> EmployeeTaxYearDeclarationPublic:
+    if tax_year < 2000 or tax_year > 2200:
+        raise HTTPException(status_code=422, detail="tax_year must be between 2000 and 2200")
+    row = session.exec(
+        select(EmployeeTaxYearDeclaration).where(
+            EmployeeTaxYearDeclaration.employee_id == employee_id,
+            EmployeeTaxYearDeclaration.tax_year == tax_year,
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Tax-year declaration not found")
+    return EmployeeTaxYearDeclarationPublic.model_validate(row)
+
+
+@router.put(
+    "/employees/{employee_id}/tax-year-declarations/{tax_year}",
+    response_model=EmployeeTaxYearDeclarationPublic,
+    dependencies=[Depends(require_permission("payroll", "approve"))],
+)
+def upsert_employee_tax_year_declaration(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    employee_id: uuid.UUID,
+    tax_year: int,
+    obj_in: EmployeeTaxYearDeclarationUpdate,
+) -> EmployeeTaxYearDeclarationPublic:
+    """Record reviewed tax classification and opening year-to-date totals."""
+    if tax_year < 2000 or tax_year > 2200:
+        raise HTTPException(status_code=422, detail="tax_year must be between 2000 and 2200")
+    employee = session.exec(
+        select(EmployeeRecords)
+        .where(
+            EmployeeRecords.id == employee_id,
+            col(EmployeeRecords.is_deleted).is_(False),
+        )
+        .with_for_update()
+    ).first()
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    row = session.exec(
+        select(EmployeeTaxYearDeclaration)
+        .where(
+            EmployeeTaxYearDeclaration.employee_id == employee_id,
+            EmployeeTaxYearDeclaration.tax_year == tax_year,
+        )
+        .with_for_update()
+    ).first()
+    now = datetime.now(timezone.utc)
+    if row is None:
+        row = EmployeeTaxYearDeclaration(employee_id=employee_id, tax_year=tax_year)
+    finalized = session.exec(
+        select(PayrollRun.id)
+        .where(
+            col(PayrollEntry.payroll_run_id) == col(PayrollRun.id),
+            PayrollEntry.employee_id == employee_id,
+            PayrollRun.date_to >= date(tax_year, 1, 1),
+            PayrollRun.date_to < date(tax_year + 1, 1, 1),
+            PayrollRun.workflow_status == "finalized",
+            col(PayrollRun.is_deleted).is_(False),
+            col(PayrollEntry.is_deleted).is_(False),
+        )
+    ).first()
+    if finalized:
+        raise HTTPException(
+            status_code=409,
+            detail="Tax-year opening inputs are locked after payroll finalization; use the reasoned tax correction workflow.",
+        )
+    for key, value in obj_in.model_dump(exclude={"is_verified"}).items():
+        setattr(row, key, value)
+    row.is_verified = obj_in.is_verified
+    row.verified_by = current_user.id if obj_in.is_verified else None
+    row.verified_at = now if obj_in.is_verified else None
+    row.updated_at = now
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return EmployeeTaxYearDeclarationPublic.model_validate(row)
 
 
 @router.get(

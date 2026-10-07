@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render } from 'vitest-browser-react'
+import { userEvent } from 'vitest/browser'
 import { EmployeeProfile } from './index'
 import { type EmployeeRecordsPublic } from '@/lib/api/types'
 
@@ -41,6 +42,8 @@ const mockEmployee: EmployeeRecordsPublic = {
   updated_at: '2020-01-01T00:00:00Z',
 }
 
+const { saveTaxInputs } = vi.hoisted(() => ({ saveTaxInputs: vi.fn() }))
+
 vi.mock('@/lib/api/employees', () => ({
   useEmployee: vi.fn(),
   fetchEmployee: vi.fn(),
@@ -49,6 +52,8 @@ vi.mock('@/lib/api/employees', () => ({
 vi.mock('@/lib/api/payroll', () => ({
   useEmployeeSalaries: () => ({ data: [], isPending: false, isError: false }),
   useEmployeePayGroupAssignments: () => ({ data: [], isPending: false, isError: false }),
+  useEmployeeTaxYearDeclaration: () => ({ data: null, isPending: false, isError: false }),
+  useSaveEmployeeTaxYearDeclaration: () => ({ mutate: saveTaxInputs, isPending: false, isError: false, isSuccess: false }),
 }))
 
 vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
@@ -90,5 +95,24 @@ describe('EmployeeProfile', () => {
     await expect
       .element(screen.getByText(/Government IDs/i))
       .toBeInTheDocument()
+  })
+
+  it('lets an authorized payroll approver enter and verify annual tax opening figures', async () => {
+    const { useEmployee } = await import('@/lib/api/employees')
+    vi.mocked(useEmployee).mockReturnValue({ data: mockEmployee, isPending: false, isError: false } as ReturnType<typeof useEmployee>)
+    const screen = await render(<EmployeeProfile />)
+
+    await expect.element(screen.getByText(/BIR tax-year inputs/i)).toBeInTheDocument()
+    await userEvent.fill(screen.getByLabelText(/Taxable compensation already paid this year/i), '125000.00')
+    await userEvent.fill(screen.getByLabelText(/Withholding tax already withheld this year/i), '4500.00')
+    await userEvent.click(screen.getByLabelText(/I reviewed these figures/i))
+    await userEvent.click(screen.getByRole('button', { name: /Save tax-year inputs/i }))
+
+    expect(saveTaxInputs).toHaveBeenCalledWith(expect.objectContaining({
+      tax_classification: 'ordinary',
+      taxable_compensation_ytd: '125000.00',
+      tax_withheld_ytd: '4500.00',
+      is_verified: true,
+    }))
   })
 })

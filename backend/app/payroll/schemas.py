@@ -241,6 +241,25 @@ class EmployeeSalaryList(SQLModel):
     count: int
 
 
+class EmployeeTaxYearDeclarationUpdate(SQLModel):
+    tax_classification: Literal["ordinary", "minimum_wage_earner"] = "ordinary"
+    taxable_compensation_ytd: Decimal = Field(default=Decimal("0.00"), ge=0, max_digits=14, decimal_places=2)
+    tax_withheld_ytd: Decimal = Field(default=Decimal("0.00"), ge=0, max_digits=14, decimal_places=2)
+    previous_employer_included: bool = False
+    source_reference: str | None = Field(default=None, max_length=512)
+    is_verified: bool = False
+
+
+class EmployeeTaxYearDeclarationPublic(EmployeeTaxYearDeclarationUpdate):
+    id: uuid.UUID
+    employee_id: uuid.UUID
+    tax_year: int
+    verified_by: uuid.UUID | None = None
+    verified_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class PayrollSalaryRosterItem(SQLModel):
     employee_id: uuid.UUID
     employee_code: str

@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-07
-Source commit: 053aba713c8164ea28a1941ed7702e87beeb3d9e
+Source commit: 06739466705e135fdf4cef49154001efcc1748b5
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 280 endpoints in 40 groups
+## Backend routes (`/api/*`): 282 endpoints in 40 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -240,7 +240,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/password-recovery-html-content/{email}`
 
-### `/api/v1/payroll` (73 routes)
+### `/api/v1/payroll` (75 routes)
 
 - `POST /api/v1/payroll/amortizations/{amortization_id}/pay`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/bir-brackets/`  `[perms: payroll:view]`
@@ -253,6 +253,8 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `GET /api/v1/payroll/employees/{employee_id}/payslip`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/employees/{employee_id}/salary`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/employees/{employee_id}/salary`  `[perms: payroll:add]`
+- `GET /api/v1/payroll/employees/{employee_id}/tax-year-declarations/{tax_year}`  `[perms: payroll:view]`
+- `PUT /api/v1/payroll/employees/{employee_id}/tax-year-declarations/{tax_year}`  `[perms: payroll:approve]`
 - `GET /api/v1/payroll/integrations`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/integrations`  `[perms: payroll:add]`
 - `DELETE /api/v1/payroll/integrations/mappings/{mapping_id}`  `[perms: payroll:delete]`
@@ -480,7 +482,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 39 revisions, single head `a0f1a2b3c4d5`
+## Migration chain (oldest -> newest): 40 revisions, single head `b1c2d3e4f5a6`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -524,6 +526,7 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 37. `8d9e0f1a2b3c` - Record source references and seed BIR Annex E when no schedule exists.
 38. `9e0f1a2b3c4d` - Seed the published 2025 SSS employer and employee contribution schedule.
 39. `a0f1a2b3c4d5` - Seed published PhilHealth and Pag-IBIG mandatory schedules when absent.
+40. `b1c2d3e4f5a6` - Store reviewed employee tax classification and opening YTD amounts.
 
 ### Migration anomalies (static findings, report-only)
 

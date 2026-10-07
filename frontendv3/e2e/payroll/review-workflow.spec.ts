@@ -146,7 +146,9 @@ test('blocked attendance payroll draft is visible in the review screen but canno
 
   await page.goto(`/payroll-runs/${draft.id}`)
   await expect(page.getByRole('heading', { name: 'Payroll review' })).toBeVisible()
-  await expect(page.getByText(/BIR withholding cannot be calculated until this employee's current-year taxable compensation/).first()).toBeVisible()
+  await expect(
+    page.getByText("Enter and verify this employee's tax classification and opening year-to-date amounts before payroll review."),
+  ).toBeVisible()
   await page.getByRole('button', { name: 'Start employee review' }).click()
   await expect(page.getByText('Resolve all payroll blockers before opening review.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Mark reviewed' })).toHaveCount(0)

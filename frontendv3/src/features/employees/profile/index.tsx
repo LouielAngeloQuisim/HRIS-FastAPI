@@ -12,6 +12,7 @@ import { useEmployee } from '@/lib/api/employees'
 import { useCan } from '@/context/permissions-provider'
 import { useEmployeePayGroupAssignments, useEmployeeSalaries } from '@/lib/api/payroll'
 import { fullName, type Employee } from '../data/schema'
+import { TaxYearDeclaration } from './tax-year-declaration'
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -138,6 +139,7 @@ function Compensation({ employeeId }: { employeeId: string }) {
 export function EmployeeProfile() {
   const { employeeId } = useParams({ from: '/_authenticated/employees/$employeeId' })
   const { data, isPending, isError } = useEmployee(employeeId)
+  const canViewPayroll = useCan('payroll', 'view')
 
   return (
     <div className='flex flex-col gap-4 p-4 sm:p-6'>
@@ -166,6 +168,7 @@ export function EmployeeProfile() {
           </div>
           <Overview employee={data} />
           <Compensation employeeId={data.id} />
+          {canViewPayroll ? <TaxYearDeclaration employeeId={data.id} taxYear={new Date().getFullYear()} /> : null}
         </>
       )}
     </div>

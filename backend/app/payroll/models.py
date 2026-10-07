@@ -285,6 +285,38 @@ class EmployeeSalary(SQLModel, table=True):
     updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
 
 
+class EmployeeTaxYearDeclaration(SQLModel, table=True):
+    """Verified employee tax classification and year-to-date opening figures.
+
+    These figures are supplied during payroll onboarding or when consolidating
+    a previous employer's BIR Form 2316. They are an opening balance, not a
+    substitute for the system's own finalized payroll ledger.
+    """
+
+    __tablename__ = "employee_tax_year_declaration"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "tax_year", name="uq_employee_tax_year_declaration"),
+        CheckConstraint("tax_year >= 2000 AND tax_year <= 2200", name="ck_employee_tax_year_range"),
+        CheckConstraint("tax_classification IN ('ordinary', 'minimum_wage_earner')", name="ck_employee_tax_classification"),
+        CheckConstraint("taxable_compensation_ytd >= 0 AND tax_withheld_ytd >= 0", name="ck_employee_tax_ytd_nonnegative"),
+        Index("ix_employee_tax_year_declaration_year", "tax_year"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    employee_id: uuid.UUID = Field(foreign_key="employee_records.id", ondelete="CASCADE", index=True)
+    tax_year: int
+    tax_classification: str = Field(default="ordinary", max_length=32)
+    taxable_compensation_ytd: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(14, 2))  # type: ignore
+    tax_withheld_ytd: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(14, 2))  # type: ignore
+    previous_employer_included: bool = Field(default=False)
+    is_verified: bool = Field(default=False)
+    source_reference: str | None = Field(default=None, max_length=512)
+    verified_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    verified_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+    updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+
+
 class PayrollPayGroup(SQLModel, table=True):
     """Company-defined payroll cadence and pay-date policy."""
 

@@ -73,6 +73,40 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
     expect((await page.request.get(`${apiUrl}/employees/${employee.id}`, { headers: await authHeaders(page) })).status()).toBe(200)
   })
 
+  test('records and reloads reviewed tax-year inputs from the employee profile', async ({ page }) => {
+    const unique = Date.now().toString(36)
+    const employee = await createParent(page, 'employees', {
+      employee_code: `TAX${unique}`,
+      first_name: 'Tax',
+      last_name: 'Review',
+      birthdate: '1990-01-01',
+    })
+    await page.goto(`/employees/${employee.id}`)
+    await expect(page.getByText(/BIR tax-year inputs/)).toBeVisible()
+    await page.getByLabel('Taxable compensation already paid this year').fill('125000.00')
+    await page.getByLabel('Withholding tax already withheld this year').fill('4500.00')
+    await page.getByLabel('Figures include a previous employer').check()
+    await page.getByLabel(/Source \/ review note/).fill('Form 2316 verified for test employee')
+    await page.getByLabel(/I reviewed these figures/).check()
+
+    const writing = waitForWrite(page, `payroll/employees/${employee.id}/tax-year-declarations`, 'PUT', String(new Date().getFullYear()))
+    await page.getByRole('button', { name: 'Save tax-year inputs' }).click()
+    const response = await assertWrite(await writing, 200)
+    expect(response.is_verified).toBe(true)
+    expect(response.taxable_compensation_ytd).toBe('125000.00')
+    expect(response.tax_withheld_ytd).toBe('4500.00')
+
+    const readback = await page.request.get(
+      `${apiUrl}/payroll/employees/${employee.id}/tax-year-declarations/${new Date().getFullYear()}`,
+      { headers: await authHeaders(page) },
+    )
+    expect(readback.status()).toBe(200)
+    expect((await readback.json()).id).toBe(response.id)
+    await page.reload()
+    await expect(page.getByText(/Reviewed by payroll approver/)).toBeVisible()
+    await expect(page.getByLabel('Taxable compensation already paid this year')).toHaveValue('125000.00')
+  })
+
   test('recovers a missing salary through setup and keeps unverified payroll execution blocked', async ({ page }) => {
     const unique = Date.now().toString(36)
     const employee = await createParent(page, 'employees', {

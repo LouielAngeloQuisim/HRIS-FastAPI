@@ -4,6 +4,7 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query'
+import { isAxiosError } from 'axios'
 import { api } from './client'
 import type {
   CutoffType,
@@ -19,6 +20,65 @@ import type {
 } from './types'
 
 const API = ''
+
+export interface EmployeeTaxYearDeclaration {
+  id: string
+  employee_id: string
+  tax_year: number
+  tax_classification: 'ordinary' | 'minimum_wage_earner'
+  taxable_compensation_ytd: string
+  tax_withheld_ytd: string
+  previous_employer_included: boolean
+  source_reference: string | null
+  is_verified: boolean
+  verified_by: string | null
+  verified_at: string | null
+}
+
+export type EmployeeTaxYearDeclarationInput = Pick<
+  EmployeeTaxYearDeclaration,
+  | 'tax_classification'
+  | 'taxable_compensation_ytd'
+  | 'tax_withheld_ytd'
+  | 'previous_employer_included'
+  | 'source_reference'
+> & { is_verified: boolean }
+
+export function useEmployeeTaxYearDeclaration(employeeId: string, taxYear: number) {
+  return useQuery({
+    queryKey: ['payroll-tax-year-declaration', employeeId, taxYear],
+    queryFn: async () => {
+      try {
+        return (
+          await api.get<EmployeeTaxYearDeclaration>(
+            `/payroll/employees/${employeeId}/tax-year-declarations/${taxYear}`,
+          )
+        ).data
+      } catch (error) {
+        if (isAxiosError(error) && error.response?.status === 404) return null
+        throw error
+      }
+    },
+    enabled: Boolean(employeeId && taxYear),
+  })
+}
+
+export function useSaveEmployeeTaxYearDeclaration(employeeId: string, taxYear: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: EmployeeTaxYearDeclarationInput) =>
+      api
+        .put<EmployeeTaxYearDeclaration>(
+          `/payroll/employees/${employeeId}/tax-year-declarations/${taxYear}`,
+          payload,
+        )
+        .then((response) => response.data),
+    onSuccess: () =>
+      qc.invalidateQueries({
+        queryKey: ['payroll-tax-year-declaration', employeeId, taxYear],
+      }),
+  })
+}
 
 // --- Review / generation payloads ------------------------------------------------
 export interface PayrollReviewLoan {

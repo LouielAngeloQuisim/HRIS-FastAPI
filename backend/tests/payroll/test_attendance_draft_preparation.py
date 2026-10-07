@@ -16,6 +16,7 @@ from app.employee.models import EmployeeRecords
 from app.payroll.models import (
     EmployeePayGroupAssignment,
     EmployeeSalary,
+    EmployeeTaxYearDeclaration,
     PayrollPayGroup,
     PayrollPolicyVersion,
     PayType,
@@ -125,7 +126,11 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
                 "frequency": "once_monthly",
                 "collection_period": "last_period",
             },
-            "statutory_sources_reviewed": ["https://www.sss.gov.ph/pay-contribution/"],
+            "statutory_sources_reviewed": [
+                "https://www.sss.gov.ph/pay-contribution/",
+                "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
+                "https://www.pagibigfund.gov.ph/",
+            ],
         },
         confirmed=True,
     )
@@ -170,3 +175,64 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         f"{API}/runs/{data['id']}/start-review", headers=superuser_token_headers
     )
     assert review.status_code == 409
+
+    # A reviewed tax-year opening input allows the supported ordinary
+    # semi-monthly path to calculate the current-period BIR withholding.
+    resolved_absence = db.exec(
+        select(DailyTimeRecord).where(
+            DailyTimeRecord.employee_id == employee.id,
+            DailyTimeRecord.work_date == absent_date,
+        )
+    ).first()
+    assert resolved_absence is not None
+    resolved_absence.login_date = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    resolved_absence.logout_date = datetime(2026, 10, 5, tzinfo=timezone.utc) + timedelta(hours=9)
+    resolved_absence.rendered_minutes = 480
+    resolved_absence.is_absent = False
+    resolved_absence.is_time_calculated = True
+    db.add(resolved_absence)
+    for day in range(16, 32):
+        work_date = date(2026, 10, day)
+        if work_date.weekday() >= 5:
+            continue
+        db.add(
+            DailyTimeRecord(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                login_date=datetime(2026, 10, day, tzinfo=timezone.utc),
+                logout_date=datetime(2026, 10, day, tzinfo=timezone.utc) + timedelta(hours=9),
+                work_date=work_date,
+                rendered_minutes=480,
+                overtime_minutes=0,
+                is_absent=False,
+                is_time_calculated=True,
+            )
+        )
+    db.add(
+        EmployeeTaxYearDeclaration(
+            employee_id=employee.id,
+            tax_year=2026,
+            tax_classification="ordinary",
+            taxable_compensation_ytd="0.00",
+            tax_withheld_ytd="0.00",
+            previous_employer_included=False,
+            is_verified=True,
+        )
+    )
+    db.commit()
+    second = client.post(
+        f"{API}/runs/prepare-attendance-draft",
+        json={**payload, "date_from": "2026-10-16", "date_to": "2026-10-31"},
+        headers=superuser_token_headers,
+    )
+    assert second.status_code == 201, second.text
+    second_entry = next(
+        row for row in second.json()["entries"] if row["employee_id"] == str(employee.id)
+    )
+    assert second_entry["taxable_income"] == "10850.00", second_entry["blockers"]
+    assert second_entry["deductions"]["bir_withholding"] == "64.95"
+    assert second_entry["deductions"]["statutory"] == {
+        "sss": "1300.00",
+        "philhealth": "650.00",
+        "pagibig": "200.00",
+    }

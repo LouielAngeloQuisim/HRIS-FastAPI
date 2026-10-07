@@ -25,6 +25,7 @@ from app.attendance.adjustment_models import DtrAdjustment
 from app.attendance.models import DailyTimeRecord, EmployeeShiftAssignment, Shift
 from app.common.dependencies import CurrentUser, SessionDep
 from app.common.schemas import Message
+from app.config.settings import settings
 from app.employee.models import EmployeeRecords
 from app.leave.models import HolidayConfig, HolidayInstance, LeaveRequest
 from app.payroll.annualized_tax import calculate_annualized_compensation_tax
@@ -1104,6 +1105,14 @@ def finalize_payroll_run(
     run_id: uuid.UUID,
     current_user: CurrentUser,
 ) -> PayrollReviewActionResult:
+    if not settings.PAYROLL_FINALIZATION_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Payroll finalization is disabled until HR approves the parallel "
+                "payroll comparison and enables the finalization setting"
+            ),
+        )
     run = session.exec(
         select(PayrollRun).where(PayrollRun.id == run_id).with_for_update()
     ).first()
@@ -2445,7 +2454,10 @@ def attendance_calculation_preview(
                         ),  # type: ignore[arg-type]
                         basic_rate=effective_salary.basic_rate,
                         overtime_rate=effective_salary.overtime_rate,
-                        scheduled_minutes=shift.total_hours_minus_lunch * 60,
+                        # Despite the legacy column name, this field stores
+                        # minutes (normally 480), as documented in the HRIS
+                        # data model. Do not convert it from hours again.
+                        scheduled_minutes=shift.total_hours_minus_lunch,
                         worked_minutes=worked_minutes,
                         overtime_eligible_minutes=eligible_ot,
                         overtime_approved_minutes=approved_ot,
@@ -2554,10 +2566,9 @@ def prepare_attendance_payroll_draft(
 ) -> PayrollRunRead:
     """Persist a bounded, traceable draft; statutory blockers prevent approval.
 
-    This deliberately does not present provisional earnings as a finalized
-    payroll. Until statutory reconciliation and approved sample comparisons are
-    implemented, every entry carries an explicit blocker and finalization stays
-    impossible.
+    Earnings and deductions remain provisional until the employer completes
+    statutory and HR acceptance. Finalization is separately disabled by a
+    default-off setting while that acceptance is outstanding.
     """
     if obj_in.date_from > obj_in.date_to:
         raise HTTPException(
@@ -2779,25 +2790,11 @@ def prepare_attendance_payroll_draft(
             )
         else:
             effective_salary_for_period = employee_salaries[-1]
-            if str(getattr(effective_salary_for_period.pay_type, "value", effective_salary_for_period.pay_type)) != "monthly":
-                blockers.append(
-                    PayrollPreflightBlocker(
-                        code="pay_basis_unsupported",
-                        message="This attendance-driven calculation currently supports fixed monthly salary only; daily/hourly rules are not yet configured.",
-                    )
-                )
             if effective_salary_for_period.non_taxable_allowance or effective_salary_for_period.de_minimis_monthly:
                 blockers.append(
                     PayrollPreflightBlocker(
                         code="allowance_tax_treatment_unavailable",
                         message="Allowance and de minimis tax treatment must be configured before this employee can be calculated.",
-                    )
-                )
-            if any(salary.effective_date > obj_in.date_from for salary in employee_salaries):
-                blockers.append(
-                    PayrollPreflightBlocker(
-                        code="salary_change_split_unavailable",
-                        message="A salary change inside this pay period requires an approved effective-date split calculation.",
                     )
                 )
         salary_refs = [

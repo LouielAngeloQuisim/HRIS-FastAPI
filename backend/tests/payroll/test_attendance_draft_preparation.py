@@ -4,6 +4,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
@@ -389,3 +390,151 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
     assert annual_tax_due == Decimal("9297.27")
     assert prior_withheld == Decimal("4000.00")
     assert withholding_adjustment == Decimal("5297.27")
+
+
+@pytest.mark.parametrize(
+    ("pay_type", "basic_rate"),
+    [(PayType.DAILY, "1000.00"), (PayType.HOURLY, "125.00")],
+)
+def test_daily_and_hourly_pay_bases_are_calculated_for_nonfinal_periods(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+    pay_type: PayType,
+    basic_rate: str,
+) -> None:
+    # Use historic periods that do not overlap broad/open-ended policies from
+    # other payroll API tests sharing the session-scoped database.
+    tax_year = 2023 if pay_type == PayType.DAILY else 2024
+    period_from = date(tax_year, 11, 1)
+    period_to = date(tax_year, 11, 15)
+    employee = EmployeeRecords(
+        employee_code=f"NONMONTHLY-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Nonmonthly",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2020, 1, 1),
+    )
+    group = PayrollPayGroup(
+        code=f"NM-{uuid.uuid4().hex[:8]}",
+        name="QA twice-monthly nonmonthly basis",
+        cadence="semi_monthly",
+        first_period_end_day=15,
+        second_period_end_day=31,
+        weekend_rule="next_business_day",
+    )
+    shift = Shift(
+        code=f"NM-{uuid.uuid4().hex[:8]}",
+        name="QA 8-hour weekday shift",
+        start_time="08:00",
+        end_time="17:00",
+        lunch_break_duration=60,
+        total_hours_minus_lunch=480,
+    )
+    db.add_all([employee, group, shift])
+    db.flush()
+    db.add_all(
+        [
+            EmployeeSalary(
+                employee_id=employee.id,
+                basic_rate=basic_rate,
+                effective_date=period_from,
+                pay_type=pay_type,
+            ),
+            EmployeePayGroupAssignment(
+                employee_id=employee.id,
+                pay_group_id=group.id,
+                effective_from=period_from,
+            ),
+            EmployeeShiftAssignment(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                effective_from=period_from,
+            ),
+            EmployeeTaxYearDeclaration(
+                employee_id=employee.id,
+                tax_year=tax_year,
+                tax_classification="ordinary",
+                opening_as_of=date(tax_year, 1, 1),
+                taxable_compensation_ytd="0.00",
+                tax_withheld_ytd="0.00",
+                previous_employer_included=False,
+                is_verified=True,
+            ),
+            PayrollPolicyVersion(
+                version=920_000 + int(uuid.uuid4().hex[:6], 16),
+                effective_from=period_from,
+                effective_to=period_to,
+                policy={
+                    "timezone": "Asia/Manila",
+                    "monthly_divisor": "22",
+                    "daily_partial_work": "pro_rated",
+                    "paid_leave": False,
+                    "paid_holidays": False,
+                    "break_minutes": 60,
+                    "grace_minutes": 0,
+                    "overtime_rule": {"multiplier": "1.25"},
+                    "premium_rules": {},
+                    "allowance_tax_treatment": {},
+                    "rounding_mode": "half_up",
+                    "contribution_collection": {
+                        "frequency": "once_monthly",
+                        "collection_period": "last_period",
+                    },
+                    "statutory_sources_reviewed": [
+                        "https://www.sss.gov.ph/pay-contribution/",
+                        "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
+                        "https://www.pagibigfund.gov.ph/",
+                    ],
+                },
+                confirmed=True,
+            ),
+        ]
+    )
+    for day in range(1, 16):
+        work_date = date(tax_year, 11, day)
+        if work_date.weekday() >= 5:
+            continue
+        db.add(
+            DailyTimeRecord(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                login_date=datetime(tax_year, 11, day, tzinfo=timezone.utc),
+                logout_date=datetime(tax_year, 11, day, tzinfo=timezone.utc)
+                + timedelta(hours=9),
+                work_date=work_date,
+                rendered_minutes=480,
+                overtime_minutes=0,
+                is_absent=False,
+                is_time_calculated=True,
+            )
+        )
+    db.commit()
+
+    response = client.post(
+        f"{API}/runs/prepare-attendance-draft",
+        json={
+            "pay_group_id": str(group.id),
+            "date_from": period_from.isoformat(),
+            "date_to": period_to.isoformat(),
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 201, response.text
+    entry = next(
+        row
+        for row in response.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert entry["gross_pay"] == "11000.00", {
+        "blockers": entry["blockers"],
+        "earnings": entry["earnings"],
+        "basic_rate": entry["basic_rate"],
+        "salaries": entry["input_snapshot"]["salary_versions"],
+        "attendance_count": len(entry["input_snapshot"]["attendance_revisions"]),
+    }
+    assert entry["earnings"]["provisional"] is True
+    assert "pay_basis_unsupported" not in {
+        blocker["code"] for blocker in entry["blockers"]
+    }
+    assert "bir_withholding" in entry["deductions"]

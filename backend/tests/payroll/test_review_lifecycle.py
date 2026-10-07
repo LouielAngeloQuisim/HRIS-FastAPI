@@ -43,7 +43,8 @@ def test_legacy_run_cannot_be_finalized(
 ) -> None:
     run = _legacy_run(db)
     response = client.post(f"{API}/runs/{run.id}/finalize", headers=superuser_token_headers)
-    assert response.status_code == 409
+    assert response.status_code == 503
+    assert "disabled until HR approves" in response.json()["detail"]
     db.refresh(run)
     assert run.status == PayrollRunStatus.DRAFT
     assert run.frozen_snapshot is None

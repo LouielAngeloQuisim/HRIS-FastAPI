@@ -1689,6 +1689,9 @@ def attendance_calculation_preview(
         blockers = list(employee_entry.blockers)
         formulas: list[str] = []
         refs: list[str] = []
+        calculation_groups: dict[
+            tuple[Decimal, str, Decimal, str], list[AttendancePayDay]
+        ] = {}
         results = []
         employee = employees.get(employee_entry.employee_id)
         employee_salaries = salaries_by_employee.get(employee_entry.employee_id, [])
@@ -1828,38 +1831,35 @@ def attendance_calculation_preview(
                     if dtr and dtr.overtime_approved
                     else 0
                 )
-                calculation = calculate_attendance_earnings(
-                    [
-                        AttendancePayDay(
-                            work_date=cursor,
-                            pay_type=str(
-                                getattr(
-                                    effective_salary.pay_type,
-                                    "value",
-                                    effective_salary.pay_type,
-                                )
-                            ),  # type: ignore[arg-type]
-                            basic_rate=effective_salary.basic_rate,
-                            overtime_rate=effective_salary.overtime_rate,
-                            scheduled_minutes=shift.total_hours_minus_lunch * 60,
-                            worked_minutes=worked_minutes,
-                            overtime_eligible_minutes=eligible_ot,
-                            overtime_approved_minutes=approved_ot,
-                            paid_absence=(paid_leave or paid_holiday) and dtr is None,
-                            absence=bool(
-                                (dtr and dtr.is_absent)
-                                or (
-                                    dtr is None
-                                    and resolved_no_punch_day
-                                    and not (paid_leave or paid_holiday)
-                                )
-                            ),
-                        )
-                    ],
-                    monthly_divisor=monthly_divisor,
-                    daily_partial_work=partial_rule,  # type: ignore[arg-type]
-                    overtime_multiplier=multiplier,
-                    rounding=str(policy.policy["rounding_mode"]),
+                rounding = str(policy.policy["rounding_mode"])
+                calculation_groups.setdefault(
+                    (monthly_divisor, partial_rule, multiplier, rounding), []
+                ).append(
+                    AttendancePayDay(
+                        work_date=cursor,
+                        pay_type=str(
+                            getattr(
+                                effective_salary.pay_type,
+                                "value",
+                                effective_salary.pay_type,
+                            )
+                        ),  # type: ignore[arg-type]
+                        basic_rate=effective_salary.basic_rate,
+                        overtime_rate=effective_salary.overtime_rate,
+                        scheduled_minutes=shift.total_hours_minus_lunch * 60,
+                        worked_minutes=worked_minutes,
+                        overtime_eligible_minutes=eligible_ot,
+                        overtime_approved_minutes=approved_ot,
+                        paid_absence=(paid_leave or paid_holiday) and dtr is None,
+                        absence=bool(
+                            (dtr and dtr.is_absent)
+                            or (
+                                dtr is None
+                                and resolved_no_punch_day
+                                and not (paid_leave or paid_holiday)
+                            )
+                        ),
+                    )
                 )
             except (
                 CalculationBlocker,
@@ -1876,7 +1876,6 @@ def attendance_calculation_preview(
                     )
                 )
                 break
-            results.append(calculation)
             if dtr:
                 refs.append(f"attendance:{dtr.id}:revision:{dtr.interval_revision}")
             refs.append(
@@ -1888,6 +1887,29 @@ def attendance_calculation_preview(
                 f"{cursor}: {effective_salary.pay_type.value} basis; {worked_minutes} worked minutes; {approved_ot} of {eligible_ot} overtime minutes approved"
             )
             cursor += timedelta(days=1)
+
+        for (monthly_divisor, partial_rule, multiplier, rounding), days in (
+            calculation_groups.items()
+        ):
+            if blockers:
+                break
+            try:
+                results.append(
+                    calculate_attendance_earnings(
+                        days,
+                        monthly_divisor=monthly_divisor,
+                        daily_partial_work=partial_rule,  # type: ignore[arg-type]
+                        overtime_multiplier=multiplier,
+                        rounding=rounding,
+                    )
+                )
+            except CalculationBlocker as exc:
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="calculation_input_invalid",
+                        message=str(exc),
+                    )
+                )
 
         regular = sum((result.regular for result in results), Decimal("0.00"))
         overtime = sum((result.overtime for result in results), Decimal("0.00"))

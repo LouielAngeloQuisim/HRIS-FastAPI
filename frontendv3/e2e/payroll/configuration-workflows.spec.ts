@@ -10,7 +10,7 @@ async function headers(page: Page) {
 }
 
 for (const [kind, fields, change] of [
-  ['sss', { msc_min: '2000', msc_max: '35000', employer_ss: '1234.56', employer_ec: '30', employer_mpf: '120.25', employee_ss: '567.89', employee_mpf: '110.50' }, { employer_ss: '1500.75' }],
+  ['sss', { msc_min: '2000', msc_max: '35000', compensation_min: '0', compensation_max: '35000', monthly_salary_credit: '35000', employer_ss: '1234.56', employer_ec: '30', employer_mpf: '120.25', employee_ss: '567.89', employee_mpf: '110.50' }, { employer_ss: '1500.75' }],
   ['philhealth', { salary_min: '10000', salary_max: '100000', rate: '5', employer_share: '2.5', employee_share: '2.5' }, { salary_min: '11000' }],
   ['pagibig', { salary_min: '1000', salary_max: '10000', employee_rate: '2', employer_rate: '2' }, { salary_min: '1100' }],
   ['bir', { period: 'semi_monthly', bracket_min: '100000.25', bracket_max: '', base_tax: '1234.56', excess_rate: '20' }, { base_tax: '1500.75' }],
@@ -64,7 +64,7 @@ test('real permission rejection keeps statutory form values and shows one action
   const config = new StatutoryConfigurationPage(page, 'sss')
   await config.open()
   await page.getByTestId('add-sss-button').click()
-  await config.fill({ msc_min: '2000', msc_max: '35000', employer_ss: '1234.56', employer_ec: '30', employer_mpf: '120.25', employee_ss: '567.89', employee_mpf: '110.50', effective_date: '2028-01-01' })
+  await config.fill({ msc_min: '2000', msc_max: '35000', compensation_min: '0', compensation_max: '35000', monthly_salary_credit: '35000', employer_ss: '1234.56', employer_ec: '30', employer_mpf: '120.25', employee_ss: '567.89', employee_mpf: '110.50', effective_date: '2028-01-01' })
   // Send the UI submission with the isolated view-only account's real token.
   // This exercises a real backend 403 rather than a fabricated failure body.
   await page.route('**/payroll/sss-brackets/', route => route.continue({ headers: { ...route.request().headers(), authorization: `Bearer ${restrictedToken}` } }))

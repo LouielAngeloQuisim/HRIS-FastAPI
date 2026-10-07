@@ -127,7 +127,7 @@ class LoanType(_StrEnum):
 
 
 class SSSBracket(SQLModel, table=True):
-    """SSS contribution bracket row (fixed peso amounts per MSC range).
+    """SSS schedule row mapping monthly compensation to MSC and contributions.
 
     Source: SSS Circular 2024-006 (15% total = 10% employer SS + 5% employee SS,
     EC employer-paid ₱10-30, MPF split above ₱20,000 MSC). MSC range ₱5,000-₱35,000.
@@ -141,6 +141,12 @@ class SSSBracket(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     msc_min: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
     msc_max: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
+    # Legacy fields above describe MSC ranges, not the employee compensation
+    # ranges used by the employer schedule. Keep them for stored-data/API
+    # compatibility, but require these fields for all new calculations.
+    compensation_min: Decimal | None = Field(default=None, sa_column=Numeric(12, 2))  # type: ignore
+    compensation_max: Decimal | None = Field(default=None, sa_column=Numeric(12, 2))  # type: ignore
+    monthly_salary_credit: Decimal | None = Field(default=None, sa_column=Numeric(12, 2))  # type: ignore
     employer_ss: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
     employer_ec: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
     employer_mpf: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore

@@ -54,7 +54,7 @@ BIR_PUBLIC_KEYS = {
 }
 PAGIBIG_PUBLIC_KEYS = {"id", "salary_min", "salary_max", "effective_date", "is_active", "is_deleted", "employee_rate", "employer_rate", "created_at", "updated_at"}
 SSS_PUBLIC_KEYS = {
-    "id", "msc_min", "msc_max", "employer_ss", "employer_ec", "employer_mpf",
+    "id", "msc_min", "msc_max", "compensation_min", "compensation_max", "monthly_salary_credit", "employer_ss", "employer_ec", "employer_mpf",
     "employee_ss", "employee_mpf", "effective_date", "is_active", "is_deleted", "created_at", "updated_at",
 }
 PHILHEALTH_PUBLIC_KEYS = {
@@ -71,11 +71,13 @@ PHILHEALTH_PUBLIC_KEYS = {
 def sss_brackets(db: Session) -> Generator[list[SSSBracket], None, None]:
     bracket1 = SSSBracket(
         msc_min=2000, msc_max=10000, employer_ss=1000, employer_ec=26,
+        compensation_min=2000, compensation_max=10000, monthly_salary_credit=10000,
         employer_mpf=0, employee_ss=500, employee_mpf=0,
         effective_date="2024-01-01", is_active=True,
     )
     bracket2 = SSSBracket(
         msc_min=10001, msc_max=30000, employer_ss=1026, employer_ec=30,
+        compensation_min=10001, compensation_max=None, monthly_salary_credit=30000,
         employer_mpf=0, employee_ss=500, employee_mpf=0,
         effective_date="2024-07-01", is_active=True,
     )
@@ -165,6 +167,25 @@ def bir_brackets(db: Session) -> Generator[list[BIRBracket], None, None]:
 
 class TestSSSCalculation:
 
+    def test_explicit_monthly_compensation_parameter(self, client: TestClient, superuser_token_headers, sss_brackets):
+        response = client.post(
+            f"{API}/sss/calculate",
+            params={"monthly_compensation": 10000.0, "effective_date": "2024-01-01"},
+            headers=superuser_token_headers,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["employee_share"] == 500.0
+        assert response.json()["employer_share"] == 1026.0
+
+    def test_sss_rejects_ambiguous_compensation_parameters(self, client: TestClient, superuser_token_headers):
+        response = client.post(
+            f"{API}/sss/calculate",
+            params={"monthly_compensation": 10000.0, "msc": 10000.0},
+            headers=superuser_token_headers,
+        )
+        assert response.status_code == 422
+        assert "exactly one" in response.text
+
     def test_full_range(self, client: TestClient, superuser_token_headers, sss_brackets):
         response = client.post(f"{API}/sss/calculate",
                                params={"msc": 10000.0, "effective_date": "2024-01-01"},
@@ -189,35 +210,34 @@ class TestSSSCalculation:
         assert data["total"] == 1526.0
 
     def test_second_bracket_rates(self, client: TestClient, superuser_token_headers, sss_brackets):
-        # msc=10001 with eff=01-01: only bracket 2000-10000 matches (eff<=01-01, ordered desc).
-        # 10001 > msc_max 10000 → clamped to 10000 → returns flat shares of that bracket.
+        # A salary band from the later effective schedule is selected by compensation.
         response = client.post(f"{API}/sss/calculate",
-                               params={"msc": 10001.0, "effective_date": "2024-01-01"},
+                               params={"msc": 10001.0, "effective_date": "2024-07-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == SSS_KEYS
         assert data["employee_share"] == 500.0
-        assert data["employer_share"] == 1026.0
-        assert data["total"] == 1526.0
+        assert data["employer_share"] == 1056.0
+        assert data["total"] == 1556.0
 
     def test_uncovered_sss_salary_is_a_configuration_conflict(self, client: TestClient, superuser_token_headers, sss_brackets):
         response = client.post(f"{API}/sss/calculate",
                                params={"msc": 1000.0, "effective_date": "2024-01-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 409, response.text
-        assert "No complete active SSS schedule" in response.text
+        assert "No SSS compensation band covers" in response.text
 
     def test_above_range_clamps_to_max(self, client: TestClient, superuser_token_headers, sss_brackets):
         response = client.post(f"{API}/sss/calculate",
-                               params={"msc": 10000.99, "effective_date": "2024-01-01"},
+                               params={"msc": 100000.0, "effective_date": "2024-07-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == SSS_KEYS
         assert data["employee_share"] == 500.0
-        assert data["employer_share"] == 1026.0
-        assert data["total"] == 1526.0
+        assert data["employer_share"] == 1056.0
+        assert data["total"] == 1556.0
 
     def test_latest_effective_date_selects_newest_bracket(self, client: TestClient, superuser_token_headers, sss_brackets):
         # eff=07-01: both brackets qualify, latest (10001-30000) selected.
@@ -605,18 +625,21 @@ class TestBatchContributionCalculation:
         rows = [
             SSSBracket(
                 msc_min=5000, msc_max=10000, employer_ss=1000,
+                compensation_min=0, compensation_max=9999.99, monthly_salary_credit=10000,
                 employer_ec=10, employer_mpf=0, employee_ss=500,
                 employee_mpf=0, effective_date="2025-01-01", is_active=True,
             ),
             SSSBracket(
                 msc_min=10001, msc_max=20000, employer_ss=2000,
+                compensation_min=10000, compensation_max=19999.99, monthly_salary_credit=20000,
                 employer_ec=30, employer_mpf=0, employee_ss=1000,
                 employee_mpf=0, effective_date="2025-01-01", is_active=True,
             ),
             SSSBracket(
-                msc_min=20001, msc_max=35000, employer_ss=3500,
-                employer_ec=30, employer_mpf=350, employee_ss=1000,
-                employee_mpf=350, effective_date="2025-01-01", is_active=True,
+                msc_min=20001, msc_max=35000, employer_ss=2000,
+                compensation_min=20000, compensation_max=None, monthly_salary_credit=35000,
+                employer_ec=30, employer_mpf=1500, employee_ss=1000,
+                employee_mpf=750, effective_date="2025-01-01", is_active=True,
             ),
         ]
         db.add_all(rows)
@@ -635,10 +658,10 @@ class TestBatchContributionCalculation:
             ) == Decimal("2030")
             assert calculate_sss_employee_share(
                 db, Decimal("35000"), "2025-02-01"
-            ) == Decimal("1350")
+            ) == Decimal("1750")
             assert calculate_sss_employer_share(
                 db, Decimal("40000"), "2025-02-01"
-            ) == Decimal("3880")
+            ) == Decimal("3530")
         finally:
             for row in rows:
                 db.delete(row)
@@ -674,7 +697,7 @@ class TestBatchContributionCalculation:
                                       bir_brackets):
         response = client.post(f"{API}/calculate-contributions/",
                                params={"gross_pay": 25000.0, "period_type": "monthly",
-                                       "effective_date": "2024-01-01"},
+                                       "effective_date": "2024-07-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
@@ -685,15 +708,15 @@ class TestBatchContributionCalculation:
 
         # Exact values computed via real calculator contract:
         assert c["sss_employee"] == 500.0
-        assert c["sss_employer"] == 1026.0
+        assert c["sss_employer"] == 1056.0
         assert c["philhealth_employee"] == 625.0
         assert c["philhealth_employer"] == 625.0
-        assert c["pagibig_employee"] == 100.0
-        assert c["pagibig_employer"] == 100.0
-        assert _dec(c["taxable_income"]) == Decimal("25000.00") - Decimal("500.00") - Decimal("625.00") - Decimal("100.00")
-        assert c["taxable_income"] == 23775.0
+        assert c["pagibig_employee"] == 200.0
+        assert c["pagibig_employer"] == 200.0
+        assert _dec(c["taxable_income"]) == Decimal("25000.00") - Decimal("500.00") - Decimal("625.00") - Decimal("200.00")
+        assert c["taxable_income"] == 23675.0
         # The selected bracket supplies one cumulative base tax plus tax on excess.
-        assert c["bir"] == 5569.99
+        assert c["bir"] == 5539.99
 
     def test_calculate_contributions_without_effective_date(self, client: TestClient, superuser_token_headers,
                                                              sss_brackets, philhealth_brackets, pagibig_brackets,
@@ -729,7 +752,7 @@ class TestBatchContributionCalculation:
                                        "effective_date": "2024-01-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 409, response.text
-        assert "No complete active SSS schedule" in response.text
+        assert "No SSS compensation band covers" in response.text
 
     def test_rejects_non_positive_gross_pay(self, client: TestClient, superuser_token_headers):
         response = client.post(f"{API}/calculate-contributions/",
@@ -834,7 +857,7 @@ class TestPayrollApiHealth:
             ("POST", f"{API}/pagibig/calculate/?salary=1000&effective_date=2024-01-01"),
             ("GET", f"{API}/bir-brackets/?period_type=monthly&effective_date=2024-01-01"),
             ("POST", f"{API}/bir/calculate/?taxable_income=15000&period_type=monthly"),
-            ("POST", f"{API}/calculate-contributions/?gross_pay=25000&period_type=monthly&effective_date=2024-01-01"),
+            ("POST", f"{API}/calculate-contributions/?gross_pay=25000&period_type=monthly&effective_date=2024-07-01"),
         ]
         for method, url in endpoints:
             if method == "GET":

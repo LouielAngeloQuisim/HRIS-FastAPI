@@ -64,6 +64,7 @@ test('blocked attendance payroll draft is visible in the review screen but canno
   // statutory rates and cannot unblock the payroll calculation itself.
   await createResource(page, 'sss-brackets/', {
     msc_min: '0.01', msc_max: '35000.00', employer_ss: '0', employer_ec: '0',
+    compensation_min: '0', compensation_max: null, monthly_salary_credit: '35000',
     employer_mpf: '0', employee_ss: '0', employee_mpf: '0', effective_date: '2026-10-01',
   })
   await createResource(page, 'philhealth-brackets/', {
@@ -130,7 +131,7 @@ test('blocked attendance payroll draft is visible in the review screen but canno
 
   await page.goto(`/payroll-runs/${draft.id}`)
   await expect(page.getByRole('heading', { name: 'Payroll review' })).toBeVisible()
-  await expect(page.getByText(/Approved statutory schedule amounts and BIR annualization\/YTD inputs are not yet calculated/)).toBeVisible()
+  await expect(page.getByText(/Approved statutory schedule amounts and BIR annualization\/YTD inputs are not yet calculated/).first()).toBeVisible()
   await page.getByRole('button', { name: 'Start employee review' }).click()
   await expect(page.getByText('Resolve all payroll blockers before opening review.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Mark reviewed' })).toHaveCount(0)

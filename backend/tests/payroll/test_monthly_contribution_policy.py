@@ -83,6 +83,9 @@ def test_policy_confirmation_requires_once_monthly_final_period_collection(
         SSSBracket(
             msc_min=0,
             msc_max=19999.99,
+            compensation_min=0,
+            compensation_max=19999.99,
+            monthly_salary_credit=20000,
             employer_ss=0,
             employer_ec=0,
             employer_mpf=0,
@@ -93,6 +96,9 @@ def test_policy_confirmation_requires_once_monthly_final_period_collection(
         SSSBracket(
             msc_min=20000,
             msc_max=35000,
+            compensation_min=20000,
+            compensation_max=None,
+            monthly_salary_credit=35000,
             employer_ss=0,
             employer_ec=0,
             employer_mpf=0,

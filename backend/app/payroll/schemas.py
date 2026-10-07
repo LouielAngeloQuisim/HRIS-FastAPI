@@ -28,6 +28,9 @@ from app.payroll.models import (
 class SSSBracketBase(SQLModel):
     msc_min: Decimal
     msc_max: Decimal
+    compensation_min: Decimal
+    compensation_max: Decimal | None = None
+    monthly_salary_credit: Decimal
     employer_ss: Decimal
     employer_ec: Decimal
     employer_mpf: Decimal
@@ -43,6 +46,9 @@ class SSSBracketCreate(SSSBracketBase):
 class SSSBracketUpdate(SQLModel):
     msc_min: Decimal | None = None
     msc_max: Decimal | None = None
+    compensation_min: Decimal | None = None
+    compensation_max: Decimal | None = None
+    monthly_salary_credit: Decimal | None = None
     employer_ss: Decimal | None = None
     employer_ec: Decimal | None = None
     employer_mpf: Decimal | None = None

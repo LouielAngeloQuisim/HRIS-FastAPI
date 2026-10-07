@@ -39,14 +39,12 @@ def _get_effective_bracket(session: Session, model: type[T], as_of: date) -> T |
 
 
 def _get_effective_sss_bracket(
-    session: Session, msc: Decimal, as_of: date
+    session: Session, monthly_compensation: Decimal, as_of: date
 ) -> SSSBracket | None:
-    """Select an SSS row from the complete latest effective schedule.
+    """Map compensation to its row in the latest effective employer schedule.
 
-    SSSBracket is a range table: every MSC band for one effective date is a
-    separate row. Selecting the first row for that date (as the generic
-    effective-row helper does for single-row rate tables) silently applied the
-    wrong employee/employer amounts to most salary levels.
+    SSS employer tables are compensation ranges mapped to MSC. The legacy
+    ``msc_min``/``msc_max`` columns are not valid selectors for employee pay.
     """
     rows = session.exec(
         select(SSSBracket)
@@ -55,18 +53,25 @@ def _get_effective_sss_bracket(
             col(SSSBracket.is_deleted).is_(False),
             col(SSSBracket.is_active).is_(True),
         )
-        .order_by(col(SSSBracket.effective_date).desc(), col(SSSBracket.msc_min))
+        .order_by(col(SSSBracket.effective_date).desc(), col(SSSBracket.compensation_min))
     ).all()
     if not rows:
         return None
     latest_date = rows[0].effective_date
     schedule = [row for row in rows if row.effective_date == latest_date]
     matching = next(
-        (row for row in schedule if row.msc_min <= msc <= row.msc_max), None
+        (
+            row
+            for row in schedule
+            if row.compensation_min is not None
+            and row.compensation_min <= monthly_compensation
+            and (
+                row.compensation_max is None
+                or monthly_compensation <= row.compensation_max
+            )
+        ),
+        None,
     )
-    # The published schedule caps contributions at its final MSC band.
-    if matching is None and msc > max(row.msc_max for row in schedule):
-        return max(schedule, key=lambda row: row.msc_max)
     return matching
 
 
@@ -103,30 +108,26 @@ def _get_effective_pagibig_bracket(
 
 
 def calculate_sss_employee_share(
-    session: Session, msc: Decimal, effective_date: str | None = None
+    session: Session, monthly_compensation: Decimal, effective_date: str | None = None
 ) -> Decimal:
     as_of = _effective_date(effective_date)
-    bracket = _get_effective_sss_bracket(session, msc, as_of)
+    bracket = _get_effective_sss_bracket(session, monthly_compensation, as_of)
     if not bracket:
         raise StatutoryScheduleUnavailable(
-            f"No complete active SSS schedule is effective on {as_of.isoformat()}"
+            f"No SSS compensation band covers PHP {monthly_compensation} on {as_of.isoformat()}"
         )
-    if msc < bracket.msc_min:
-        return Decimal("0.00")
     return bracket.employee_ss + bracket.employee_mpf
 
 
 def calculate_sss_employer_share(
-    session: Session, msc: Decimal, effective_date: str | None = None
+    session: Session, monthly_compensation: Decimal, effective_date: str | None = None
 ) -> Decimal:
     as_of = _effective_date(effective_date)
-    bracket = _get_effective_sss_bracket(session, msc, as_of)
+    bracket = _get_effective_sss_bracket(session, monthly_compensation, as_of)
     if not bracket:
         raise StatutoryScheduleUnavailable(
-            f"No complete active SSS schedule is effective on {as_of.isoformat()}"
+            f"No SSS compensation band covers PHP {monthly_compensation} on {as_of.isoformat()}"
         )
-    if msc < bracket.msc_min:
-        return Decimal("0.00")
     return bracket.employer_ss + bracket.employer_ec + bracket.employer_mpf
 
 

@@ -12,7 +12,13 @@ from sqlmodel import Session, select
 
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords
-from app.payroll.models import BIRBracket, EmployeeSalary, PagIBIGBracket, PhilHealthBracket, SSSBracket
+from app.payroll.models import (
+    BIRBracket,
+    EmployeeSalary,
+    PagIBIGBracket,
+    PhilHealthBracket,
+    SSSBracket,
+)
 
 API = f"{settings.API_V1_STR}/payroll"
 
@@ -48,6 +54,9 @@ class TestSSSBracketCrud:
         create_data = {
             "msc_min": 2000.0,
             "msc_max": 10000.0,
+            "compensation_min": 0.0,
+            "compensation_max": 10000.0,
+            "monthly_salary_credit": 10000.0,
             "employer_ss": 1000.0,
             "employer_ec": 26.0,
             "employer_mpf": 0.0,

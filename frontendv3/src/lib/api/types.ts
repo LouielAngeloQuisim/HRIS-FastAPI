@@ -924,6 +924,9 @@ export interface SSSBracketPublic {
   id: string
   msc_min: string
   msc_max: string
+  compensation_min: string | null
+  compensation_max: string | null
+  monthly_salary_credit: string | null
   employer_ss: string
   employer_ec: string
   employer_mpf: string
@@ -939,6 +942,9 @@ export interface SSSBracketPublic {
 export interface SSSBracketCreate {
   msc_min: number
   msc_max: number
+  compensation_min: number
+  compensation_max?: number | null
+  monthly_salary_credit: number
   employer_ss: number
   employer_ec: number
   employer_mpf: number
@@ -951,6 +957,9 @@ export interface SSSBracketCreate {
 export interface SSSBracketUpdate {
   msc_min?: number
   msc_max?: number
+  compensation_min?: number
+  compensation_max?: number | null
+  monthly_salary_credit?: number
   employer_ss?: number
   employer_ec?: number
   employer_mpf?: number

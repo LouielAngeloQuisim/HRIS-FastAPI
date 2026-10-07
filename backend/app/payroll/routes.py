@@ -333,12 +333,19 @@ def _range_schedule_errors(
 ) -> list[str]:
     if not rows:
         return [f"{label} has no active effective schedule"]
-    ordered = sorted(rows, key=lambda row: Decimal(str(getattr(row, minimum_field))))
+    try:
+        ordered = sorted(
+            rows, key=lambda row: Decimal(str(getattr(row, minimum_field)))
+        )
+    except (InvalidOperation, TypeError, ValueError):
+        return [f"{label} contains a missing or invalid lower bound"]
     errors: list[str] = []
     previous_maximum: Decimal | None = None
     for row in ordered:
         minimum = Decimal(str(getattr(row, minimum_field)))
         maximum_value = getattr(row, maximum_field)
+        if minimum_field == "compensation_min" and getattr(row, "monthly_salary_credit", None) is None:
+            errors.append(f"{label} contains a row without a monthly salary credit")
         maximum = Decimal(str(maximum_value)) if maximum_value is not None else None
         if not minimum.is_finite() or (maximum is not None and not maximum.is_finite()):
             errors.append(f"{label} contains a non-finite range")
@@ -369,12 +376,16 @@ def _statutory_schedule_errors(session: Session, as_of: date) -> list[str]:
     errors.extend(
         _range_schedule_errors(
             sss_rows,
-            minimum_field="msc_min",
-            maximum_field="msc_max",
-            label="SSS schedule",
-            open_ended_top=False,
+            minimum_field="compensation_min",
+            maximum_field="compensation_max",
+            label="SSS compensation schedule",
+            open_ended_top=True,
         )
     )
+    for row in sss_rows:
+        if row.monthly_salary_credit is None or row.monthly_salary_credit <= 0:
+            errors.append("SSS schedule contains a row without a positive monthly salary credit")
+            break
     philhealth_rows = _latest_effective_rows(session, PhilHealthBracket, as_of)
     if len(philhealth_rows) != 1:
         errors.append("PhilHealth requires exactly one active floor/ceiling schedule row")
@@ -3253,15 +3264,26 @@ async def calculate_contributions_endpoint(
 @router.post("/sss/calculate")
 async def calculate_sss(
     *,
-    msc: Decimal = Query(..., gt=0, description="Monthly Salary Credit"),
+    monthly_compensation: Decimal | None = Query(default=None, gt=0),
+    msc: Decimal | None = Query(
+        default=None, gt=0, deprecated=True,
+        description="Deprecated alias; this value is monthly compensation, not MSC",
+    ),
     effective_date: str | None = Query(default=None),
     session: SessionDep,
     _current_user: CurrentUser,
 ) -> dict[str, Any]:
-    """Calculate total SSS contribution (employee + employer) for a given MSC."""
+    """Calculate total SSS contribution from monthly compensation mapping."""
+    if (monthly_compensation is None) == (msc is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide exactly one of monthly_compensation or deprecated msc",
+        )
+    compensation = monthly_compensation if monthly_compensation is not None else msc
+    assert compensation is not None
     try:
-        employee = calculate_sss_employee_share(session, msc, effective_date)
-        employer = calculate_sss_employer_share(session, msc, effective_date)
+        employee = calculate_sss_employee_share(session, compensation, effective_date)
+        employer = calculate_sss_employer_share(session, compensation, effective_date)
     except StatutoryScheduleUnavailable as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {

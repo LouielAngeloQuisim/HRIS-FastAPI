@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-07
-Source commit: 64a48a1822ff4c93f7c3af1b576a0d9b526f337d
+Source commit: 053aba713c8164ea28a1941ed7702e87beeb3d9e
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
@@ -480,7 +480,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 37 revisions, single head `8d9e0f1a2b3c`
+## Migration chain (oldest -> newest): 39 revisions, single head `a0f1a2b3c4d5`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -522,6 +522,8 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 35. `67e279f8c3cc` - Add monthly payroll contribution ledger
 36. `7c8d9e0f1a2b` - Add compensation-to-MSC mapping fields to SSS schedules.
 37. `8d9e0f1a2b3c` - Record source references and seed BIR Annex E when no schedule exists.
+38. `9e0f1a2b3c4d` - Seed the published 2025 SSS employer and employee contribution schedule.
+39. `a0f1a2b3c4d5` - Seed published PhilHealth and Pag-IBIG mandatory schedules when absent.
 
 ### Migration anomalies (static findings, report-only)
 
@@ -529,9 +531,11 @@ Derived by `scripts/gen-map.sh` from the migration source text only. These
 are NOT defects proven by running anything: each needs human review before
 any action. Historical migration files are never modified by the generator.
 
-6 finding(s):
+8 finding(s):
 
 - `3009113137ba` (add notification and audit_log tables): `upgrade()` contains no `op.*` call (effectively a no-op migration; its child may carry the intended work)
+- `9e0f1a2b3c4d` (Seed the published 2025 SSS employer and employee contribution schedule.): `upgrade()` contains no `op.*` call (effectively a no-op migration; its child may carry the intended work)
+- `a0f1a2b3c4d5` (Seed published PhilHealth and Pag-IBIG mandatory schedules when absent.): `upgrade()` contains no `op.*` call (effectively a no-op migration; its child may carry the intended work)
 - `3f0e3e733925` (change employee_salary unique constraint to include effective_date), `f176e167c8e7` (change employee_salary unique constraint to include effective_date): identical normalized `upgrade()` constraint-operation signature
 - `54ff6e36652b` (add_payroll_tables): description mentions table creation but `upgrade()` contains no `op.create_table` call
 - `7286295e0903` (add employee core and org structure tables): creates native enum type(s) `employeestatus` in `upgrade()` with no matching `DROP TYPE` in its `downgrade()` (downgrade leaves the postgres type orphaned; enum cleanup would need a follow-up migration or explicit ops runbook)

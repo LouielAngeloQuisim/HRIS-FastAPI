@@ -48,7 +48,6 @@ def test_inactive_configuration_is_not_used_by_calculator(db: Session, slug: str
     from decimal import Decimal
 
     from app.payroll.calc import (
-        StatutoryScheduleUnavailable,
         calculate_bir_tax,
         calculate_pagibig_employee_share,
         calculate_philhealth_employee_share,
@@ -62,7 +61,12 @@ def test_inactive_configuration_is_not_used_by_calculator(db: Session, slug: str
         # The official active Annex E table remains authoritative; this newly
         # created inactive row must not override it for the same period.
         assert calculators[slug](db, Decimal('150000'), 'monthly', '2026-02-01') == Decimal('29375.05')
+    elif slug == 'philhealth':
+        # The seeded 2025 schedule remains effective; an inactive 2026 row
+        # must not replace its 5% employee share.
+        assert calculators[slug](db, Decimal('20000'), '2026-02-01') == Decimal('500.00')
     else:
-        with pytest.raises(StatutoryScheduleUnavailable):
-            calculators[slug](db, Decimal('20000'), '2026-02-01')
+        # The seeded 2024 schedule remains effective; an inactive 2026 row
+        # must not replace the employee's capped share.
+        assert calculators[slug](db, Decimal('20000'), '2026-02-01') == Decimal('200.00')
     assert db.get(model, row.id) is not None

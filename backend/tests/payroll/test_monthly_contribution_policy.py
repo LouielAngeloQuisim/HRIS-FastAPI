@@ -71,13 +71,6 @@ def test_policy_confirmation_requires_once_monthly_final_period_collection(
         headers=superuser_token_headers,
     )
     assert valid.status_code == 201, valid.text
-    unconfigured = client.post(
-        f"{API}/policies/{valid.json()['id']}/confirm",
-        headers=superuser_token_headers,
-    )
-    assert unconfigured.status_code == 422
-    assert "schedule_errors" in unconfigured.json()["detail"]
-
     effective_date = date(2099, 1, 1)
     schedule_rows = [
         SSSBracket(

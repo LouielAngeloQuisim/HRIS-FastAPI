@@ -60,29 +60,10 @@ test('blocked attendance payroll draft is visible in the review screen but canno
       ],
     },
   })
-  // The policy confirmation gate requires contiguous complete schedules. The
-  // outer SSS fixture bands only complete the table shape; the employee falls
-  // in the published 25,750–26,249.99 / ₱26,000 MSC band. This test fixture is
-  // isolated and is not an activated production schedule.
-  for (const row of [
-    { min: '0.01', max: '25749.99', msc: '5000.00', er: '500.00', ee: '250.00', mpf: '0.00' },
-    { min: '25750.00', max: '26249.99', msc: '26000.00', er: '2600.00', ee: '1300.00', mpf: '300.00' },
-    { min: '26250.00', max: null, msc: '35000.00', er: '3500.00', ee: '1750.00', mpf: '750.00' },
-  ]) {
-    await createResource(page, 'sss-brackets/', {
-      msc_min: row.msc, msc_max: row.msc, employer_ss: row.er, employer_ec: '30.00',
-      compensation_min: row.min, compensation_max: row.max, monthly_salary_credit: row.msc,
-      employer_mpf: row.mpf, employee_ss: row.ee, employee_mpf: row.mpf, effective_date: '2025-01-01',
-    })
-  }
-  await createResource(page, 'philhealth-brackets/', {
-    salary_min: '10000.00', salary_max: '100000.00', rate: '5',
-    employer_share: '2.5', employee_share: '2.5', effective_date: '2025-01-01',
-  })
-  await createResource(page, 'pagibig-brackets/', {
-    salary_min: '0.01', salary_max: '10000.00', employee_rate: '2',
-    employer_rate: '2', effective_date: '2024-02-01',
-  })
+  // The migration supplies the complete official 2025 SSS schedule. Do not
+  // insert overlapping fake SSS bands into this integration journey.
+  // Published PhilHealth and Pag-IBIG schedules are seeded by migration;
+  // this workflow verifies the configured schedules without fake overlaps.
   const confirmedPolicy = await page.request.post(`${apiUrl}/payroll/policies/${policy.id}/confirm`, {
     headers: await bearer(page),
   })
@@ -174,19 +155,20 @@ test('blocked attendance payroll draft is visible in the review screen but canno
   expect(saved.status()).toBe(200)
   const savedRun = await saved.json()
   expect(savedRun.workflow_status).toBe('draft')
-  expect(savedRun.entries[0].review_state).toBe('blocked')
-  const entry = savedRun.entries[0]
+  const entry = savedRun.entries.find((candidate: { employee_id: string }) => candidate.employee_id === employee.id)
+  expect(entry, 'The prepared run must include this test employee').toBeTruthy()
+  expect(entry.review_state).toBe('blocked')
   expect(entry.blockers.map((blocker: { code: string }) => blocker.code)).toContain('bir_ytd_unavailable')
   expect(
     entry.input_snapshot.monthly_contributions,
     JSON.stringify({ blockers: entry.blockers, snapshot: entry.input_snapshot }),
   ).toBeTruthy()
   expect(entry.input_snapshot.monthly_contributions.month).toBe('2026-10')
-  expect(entry.deductions.sss_employee).toBe('1600.00')
+  expect(entry.deductions.sss_employee).toBe('1300.00')
   expect(entry.deductions.philhealth_employee).toBe('650.00')
   expect(entry.deductions.pagibig_employee).toBe('200.00')
   expect(entry.deductions.employer_contributions).toEqual({
-    sss: '2930.00',
+    sss: '2630.00',
     philhealth: '650.00',
     pagibig: '200.00',
   })

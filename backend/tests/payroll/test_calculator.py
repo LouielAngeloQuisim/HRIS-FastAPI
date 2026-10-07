@@ -40,14 +40,6 @@ def _assert_share_shape(data: dict[str, Any]) -> None:
 def test_monthly_contribution_snapshot_uses_each_effective_schedule(
     db: Session,
 ) -> None:
-    sss_row = SSSBracket(
-        msc_min=Decimal("5000"), msc_max=Decimal("35000"),
-        compensation_min=Decimal("0"), compensation_max=None,
-        monthly_salary_credit=Decimal("26000"), employer_ss=Decimal("2600"),
-        employer_ec=Decimal("30"), employer_mpf=Decimal("300"),
-        employee_ss=Decimal("1300"), employee_mpf=Decimal("300"),
-        effective_date=date(2025, 1, 1),
-    )
     philhealth_row = PhilHealthBracket(
         salary_min=Decimal("10000"), salary_max=Decimal("100000"),
         rate=Decimal("5"), employer_share=Decimal("2.5"),
@@ -58,7 +50,9 @@ def test_monthly_contribution_snapshot_uses_each_effective_schedule(
         employee_rate=Decimal("2"), employer_rate=Decimal("2"),
         effective_date=date(2024, 2, 1),
     )
-    db.add_all([sss_row, philhealth_row, pagibig_row])
+    # SSS 2025 is seeded from the published employer schedule in the migration;
+    # use it instead of inserting an overlapping test-only row.
+    db.add_all([philhealth_row, pagibig_row])
     db.flush()
 
     snapshot = _monthly_contribution_snapshot(
@@ -75,8 +69,8 @@ def test_monthly_contribution_snapshot_uses_each_effective_schedule(
     )
 
     assert snapshot["month"] == "2026-10"
-    assert _dec(snapshot["schemes"]["sss"]["employee"]) == Decimal("1600")
-    assert _dec(snapshot["schemes"]["sss"]["employer"]) == Decimal("2930")
+    assert _dec(snapshot["schemes"]["sss"]["employee"]) == Decimal("1300")
+    assert _dec(snapshot["schemes"]["sss"]["employer"]) == Decimal("2630")
     assert _dec(snapshot["schemes"]["philhealth"]["employee"]) == Decimal("650")
     assert _dec(snapshot["schemes"]["philhealth"]["employer"]) == Decimal("650")
     assert _dec(snapshot["schemes"]["pagibig"]["employee"]) == Decimal("200")
@@ -86,7 +80,7 @@ def test_monthly_contribution_snapshot_uses_each_effective_schedule(
         for scheme in snapshot["schemes"].values()
         for row in scheme["schedule_rows"]
     )
-    for row in (sss_row, philhealth_row, pagibig_row):
+    for row in (philhealth_row, pagibig_row):
         db.delete(row)
     db.flush()
 
@@ -790,8 +784,9 @@ class TestBatchContributionCalculation:
     def test_calculate_contributions_without_effective_date(self, client: TestClient, superuser_token_headers,
                                                              sss_brackets, philhealth_brackets, pagibig_brackets,
                                                              bir_brackets):
-        # No effective_date → today → latest bracket selection (eff=07-01).
-        # SSS: 10001-30000 bracket → msc=15000 in range → emp=500, er=1056
+        # No effective_date → today → latest applicable effective schedule.
+        # SSS 2025: ₱15,000 compensation maps to ₱15,000 MSC; employee=₱750,
+        # employer regular SS=₱1,500 plus EC=₱30.
         # PH: 15000 >= min 15000, <= max 40001 → exact → 15000*5%/2 = 375.0
         # PI: 15000 > max 10000 → clamp → 10000*2%=200 for each share.
         response = client.post(f"{API}/calculate-contributions/",
@@ -803,15 +798,15 @@ class TestBatchContributionCalculation:
         c = data["contributions"]
         assert set(c) == BATCH_CONTRIBUTION_KEYS
 
-        assert c["sss_employee"] == 500.0
-        assert c["sss_employer"] == 1056.0
+        assert c["sss_employee"] == 750.0
+        assert c["sss_employer"] == 1530.0
         assert c["philhealth_employee"] == 375.0
         assert c["philhealth_employer"] == 375.0
         assert c["pagibig_employee"] == 200.0
         assert c["pagibig_employer"] == 200.0
-        assert _dec(c["taxable_income"]) == Decimal("15000.00") - Decimal("500.00") - Decimal("375.00") - Decimal("200.00")
-        assert c["taxable_income"] == 13925.0
-        assert c["bir"] == 2960.41
+        assert _dec(c["taxable_income"]) == Decimal("15000.00") - Decimal("750.00") - Decimal("375.00") - Decimal("200.00")
+        assert c["taxable_income"] == 13675.0
+        assert c["bir"] == 2897.91
 
     def test_calculate_contributions_with_incomplete_sss_schedule_fails_closed(self, client: TestClient, superuser_token_headers,
                                                     sss_brackets, philhealth_brackets, pagibig_brackets,
@@ -902,11 +897,12 @@ class TestBracketListEndpoints:
         response = client.get(f"{API}/sss-brackets/", headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         brackets = response.json()
-        assert len(brackets) == 2
+        assert len(brackets) == 63
         for b in brackets:
             assert set(b) == SSS_PUBLIC_KEYS
         dates = {b["effective_date"] for b in brackets}
-        assert dates == {"2024-01-01", "2024-07-01"}
+        assert dates == {"2024-01-01", "2024-07-01", "2025-01-01"}
+        assert sum(b["effective_date"] == "2025-01-01" for b in brackets) == 61
 
 
 # --------------------------------------------------------------------------- #

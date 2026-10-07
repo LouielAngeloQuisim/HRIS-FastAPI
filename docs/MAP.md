@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
-Generated: 2026-10-07
-Source commit: 426cd87f5c525bebdd21c546ccea1545ee46d1ab
+Generated: 2026-10-08
+Source commit: 9236d21bad45fc38dc005cf09166af642058da36
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 282 endpoints in 40 groups
+## Backend routes (`/api/*`): 283 endpoints in 40 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -240,7 +240,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/password-recovery-html-content/{email}`
 
-### `/api/v1/payroll` (75 routes)
+### `/api/v1/payroll` (76 routes)
 
 - `POST /api/v1/payroll/amortizations/{amortization_id}/pay`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/bir-brackets/`  `[perms: payroll:view]`
@@ -300,6 +300,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `GET /api/v1/payroll/runs/{run_id}/delivery-status`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/runs/{run_id}/delivery/{job_id}/address`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/runs/{run_id}/delivery/{job_id}/resend`  `[perms: payroll:edit]`
+- `GET /api/v1/payroll/runs/{run_id}/entries/{entry_id}/payslip.pdf`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/runs/{run_id}/entries/{entry_id}/review`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/runs/{run_id}/finalize`  `[perms: payroll:approve]`
 - `GET /api/v1/payroll/runs/{run_id}/payslips`  `[perms: payroll:view]`

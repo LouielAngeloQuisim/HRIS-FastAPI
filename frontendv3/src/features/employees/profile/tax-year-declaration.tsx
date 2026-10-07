@@ -15,6 +15,7 @@ export function TaxYearDeclaration({ employeeId, taxYear }: Props) {
   const query = useEmployeeTaxYearDeclaration(employeeId, taxYear)
   const save = useSaveEmployeeTaxYearDeclaration(employeeId, taxYear)
   const [classification, setClassification] = useState<'ordinary' | 'minimum_wage_earner'>('ordinary')
+  const [openingAsOf, setOpeningAsOf] = useState('')
   const [taxableYtd, setTaxableYtd] = useState('0.00')
   const [withheldYtd, setWithheldYtd] = useState('0.00')
   const [previousEmployer, setPreviousEmployer] = useState(false)
@@ -25,6 +26,7 @@ export function TaxYearDeclaration({ employeeId, taxYear }: Props) {
     const row = query.data
     if (!row) return
     setClassification(row.tax_classification)
+    setOpeningAsOf(row.opening_as_of ?? '')
     setTaxableYtd(row.taxable_compensation_ytd)
     setWithheldYtd(row.tax_withheld_ytd)
     setPreviousEmployer(row.previous_employer_included)
@@ -39,6 +41,7 @@ export function TaxYearDeclaration({ employeeId, taxYear }: Props) {
     event.preventDefault()
     save.mutate({
       tax_classification: classification,
+      opening_as_of: openingAsOf,
       taxable_compensation_ytd: taxableYtd,
       tax_withheld_ytd: withheldYtd,
       previous_employer_included: previousEmployer,
@@ -63,6 +66,9 @@ export function TaxYearDeclaration({ employeeId, taxYear }: Props) {
                 <option value='ordinary'>Ordinary compensation earner</option>
                 <option value='minimum_wage_earner'>Minimum-wage earner (requires HR confirmation)</option>
               </select>
+            </label>
+            <label className='flex flex-col gap-1 text-sm'>Opening balances are complete through
+              <Input type='date' required value={openingAsOf} onChange={(event) => setOpeningAsOf(event.target.value)} />
             </label>
             <div className='grid gap-3 sm:grid-cols-2'>
               <label className='flex flex-col gap-1 text-sm'>Taxable compensation already paid this year

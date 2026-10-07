@@ -243,6 +243,7 @@ class EmployeeSalaryList(SQLModel):
 
 class EmployeeTaxYearDeclarationUpdate(SQLModel):
     tax_classification: Literal["ordinary", "minimum_wage_earner"] = "ordinary"
+    opening_as_of: date
     taxable_compensation_ytd: Decimal = Field(default=Decimal("0.00"), ge=0, max_digits=14, decimal_places=2)
     tax_withheld_ytd: Decimal = Field(default=Decimal("0.00"), ge=0, max_digits=14, decimal_places=2)
     previous_employer_included: bool = False

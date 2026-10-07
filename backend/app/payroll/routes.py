@@ -27,6 +27,7 @@ from app.common.dependencies import CurrentUser, SessionDep
 from app.common.schemas import Message
 from app.employee.models import EmployeeRecords
 from app.leave.models import HolidayConfig, HolidayInstance, LeaveRequest
+from app.payroll.annualized_tax import calculate_annualized_compensation_tax
 from app.payroll.attendance_calculator import (
     AttendancePayDay,
     CalculationBlocker,
@@ -538,6 +539,115 @@ def _statutory_schedule_errors(session: Session, as_of: date) -> list[str]:
     return errors
 
 
+def _bir_finalized_history(
+    session: Session,
+    employee_id: uuid.UUID,
+    tax_year: int,
+    after: date,
+    before: date,
+    coverage_start: date,
+) -> tuple[list[dict[str, str]], Decimal, Decimal, bool]:
+    """Return finalized BIR inputs and prove continuous payroll-period coverage."""
+    rows = session.exec(
+        select(PayrollEntry, PayrollRun)
+        .join(PayrollRun, col(PayrollRun.id) == col(PayrollEntry.payroll_run_id))
+        .where(
+            PayrollEntry.employee_id == employee_id,
+            col(PayrollEntry.review_state).in_(["reviewed", "excluded"]),
+            col(PayrollEntry.is_deleted).is_(False),
+            PayrollRun.workflow_status == "finalized",
+            col(PayrollRun.status).in_([PayrollRunStatus.APPROVED, PayrollRunStatus.PAID]),
+            col(PayrollRun.is_deleted).is_(False),
+            PayrollRun.date_from > after,
+            PayrollRun.date_from >= date(tax_year, 1, 1),
+            PayrollRun.date_to < before,
+        )
+        .order_by(col(PayrollRun.date_from), col(PayrollRun.date_to), col(PayrollEntry.id))
+    ).all()
+    history: list[dict[str, str]] = []
+    taxable_total = Decimal("0.00")
+    withheld_total = Decimal("0.00")
+    complete = True
+    coverage_cursor = coverage_start
+    for entry, run in rows:
+        coverage_from = max(run.date_from, coverage_start)
+        coverage_to = min(run.date_to, before - timedelta(days=1))
+        if coverage_from <= coverage_to:
+            if coverage_from > coverage_cursor:
+                complete = False
+            if coverage_to >= coverage_cursor:
+                coverage_cursor = coverage_to + timedelta(days=1)
+        if entry.review_state == "excluded":
+            history.append(
+                {
+                    "entry_id": str(entry.id),
+                    "run_id": str(run.id),
+                    "date_from": run.date_from.isoformat(),
+                    "date_to": run.date_to.isoformat(),
+                    "excluded": "true",
+                    "taxable_compensation": "0.00",
+                    "tax_withheld": "0.00",
+                }
+            )
+            continue
+        calculation = entry.input_snapshot.get("bir_calculation")
+        withheld_value = entry.deductions.get("bir_withholding")
+        if not isinstance(calculation, dict) or withheld_value is None:
+            complete = False
+            history.append(
+                {
+                    "entry_id": str(entry.id),
+                    "run_id": str(run.id),
+                    "date_from": run.date_from.isoformat(),
+                    "date_to": run.date_to.isoformat(),
+                    "unavailable": "true",
+                }
+            )
+            continue
+        try:
+            taxable = Decimal(str(calculation["taxable_compensation"]))
+            withheld = Decimal(str(withheld_value))
+        except (KeyError, InvalidOperation, TypeError, ValueError):
+            complete = False
+            history.append(
+                {
+                    "entry_id": str(entry.id),
+                    "run_id": str(run.id),
+                    "date_from": run.date_from.isoformat(),
+                    "date_to": run.date_to.isoformat(),
+                    "unavailable": "true",
+                }
+            )
+            continue
+        if not taxable.is_finite() or not withheld.is_finite() or taxable < 0:
+            complete = False
+            history.append(
+                {
+                    "entry_id": str(entry.id),
+                    "run_id": str(run.id),
+                    "date_from": run.date_from.isoformat(),
+                    "date_to": run.date_to.isoformat(),
+                    "unavailable": "true",
+                }
+            )
+            continue
+        taxable_total += taxable
+        withheld_total += withheld
+        history.append(
+            {
+                "entry_id": str(entry.id),
+                "run_id": str(run.id),
+                "date_from": run.date_from.isoformat(),
+                "date_to": run.date_to.isoformat(),
+                "taxable_compensation": str(taxable),
+                "tax_withheld": str(withheld),
+            }
+        )
+    if coverage_cursor < before:
+        complete = False
+    return history, taxable_total, withheld_total, complete
+
+
 def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> bool:
     snapshot = entry.input_snapshot
     try:
@@ -602,6 +712,26 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
             else:
                 current_bir_snapshot = []
             if current_bir_snapshot != snapshot.get("bir_schedule", []):
+                return False
+
+        if "bir_year_to_date_history" in snapshot:
+            history_config = snapshot["bir_year_to_date_history"]
+            opening_as_of = date.fromisoformat(str(history_config["opening_as_of"]))
+            coverage_start = date.fromisoformat(str(history_config["coverage_start"]))
+            current_history, _, _, current_history_complete = _bir_finalized_history(
+                session,
+                employee_id,
+                period_to.year,
+                opening_as_of,
+                period_from,
+                coverage_start,
+            )
+            recorded_history = history_config.get("finalized_entries", [])
+            if (
+                current_history != recorded_history
+                or current_history_complete
+                != history_config.get("complete")
+            ):
                 return False
 
         # Compare full scoped identity sets as well as row revisions. This
@@ -2977,31 +3107,109 @@ def prepare_attendance_payroll_draft(
                         calendar.monthrange(obj_in.date_to.year, 12)[1],
                     )
                     if is_year_end:
-                        blockers.append(
-                            PayrollPreflightBlocker(
-                                code="bir_year_end_adjustment_unavailable",
-                                message="Annualized BIR adjustment and reconciliation against year-to-date withholding are not yet implemented; finalization is blocked for the year-end payroll period.",
+                        opening_as_of = tax_declaration.opening_as_of
+                        employee_row = session.get(EmployeeRecords, roster_entry.employee_id)
+                        if (
+                            opening_as_of is None
+                            or opening_as_of.year != obj_in.date_to.year
+                            or opening_as_of >= obj_in.date_from
+                        ):
+                            blockers.append(
+                                PayrollPreflightBlocker(
+                                    code="bir_ytd_opening_date_invalid",
+                                    message="Set a verified opening-balance date in this tax year, before the final payroll period.",
+                                )
                             )
+                            history_rows: list[dict[str, str]] = []
+                            history_taxable = Decimal("0.00")
+                            history_withheld = Decimal("0.00")
+                            history_complete = False
+                        else:
+                            coverage_start = max(
+                                opening_as_of + timedelta(days=1),
+                                date(obj_in.date_to.year, 1, 1),
+                                employee_row.date_hired
+                                if employee_row and employee_row.date_hired
+                                else date(obj_in.date_to.year, 1, 1),
+                            )
+                            (
+                                history_rows,
+                                history_taxable,
+                                history_withheld,
+                                history_complete,
+                            ) = _bir_finalized_history(
+                                session,
+                                roster_entry.employee_id,
+                                obj_in.date_to.year,
+                                opening_as_of,
+                                obj_in.date_from,
+                                coverage_start,
+                            )
+                        if opening_as_of is not None and not history_complete:
+                            blockers.append(
+                                PayrollPreflightBlocker(
+                                    code="bir_ytd_history_unavailable",
+                                    message="Finalized payroll does not provide a complete tax-year history after the opening-balance date; reconcile the missing periods before the annual adjustment.",
+                                )
+                            )
+                        elif opening_as_of is not None:
+                            assert tax_declaration is not None
+                            prior_taxable = (
+                                tax_declaration.taxable_compensation_ytd
+                                + history_taxable
+                            )
+                            prior_withheld = (
+                                tax_declaration.tax_withheld_ytd + history_withheld
+                            )
+                            annual_taxable = prior_taxable + taxable_pay
+                            annual_tax_due = calculate_annualized_compensation_tax(
+                                annual_taxable
+                            )
+                            bir_withholding = annual_tax_due - prior_withheld
+                            snapshot["bir_year_to_date_history"] = {
+                                "opening_taxable_compensation": str(
+                                    tax_declaration.taxable_compensation_ytd
+                                ),
+                                "opening_tax_withheld": str(
+                                    tax_declaration.tax_withheld_ytd
+                                ),
+                                "opening_as_of": opening_as_of.isoformat(),
+                                "coverage_start": coverage_start.isoformat(),
+                                "finalized_entries": history_rows,
+                                "finalized_taxable_compensation": str(history_taxable),
+                                "finalized_tax_withheld": str(history_withheld),
+                                "complete": history_complete,
+                            }
+                            snapshot["bir_calculation"] = {
+                                "method": "annualized_rr_11_2018_2023_onward",
+                                "taxable_compensation": str(taxable_pay),
+                                "annual_taxable_compensation": str(annual_taxable),
+                                "annual_tax_due": str(annual_tax_due),
+                                "prior_tax_withheld": str(prior_withheld),
+                                "withholding": str(bir_withholding),
+                                "schedule_reference": "https://bir-cdn.bir.gov.ph/local/pdf/RR%20No.%2011-2018.pdf",
+                                "year_end_adjustment_pending": False,
+                            }
+                    else:
+                        bir_withholding = calculate_bir_tax(
+                            session,
+                            taxable_pay,
+                            group.cadence.value,
+                            obj_in.date_to.isoformat(),
                         )
-                    bir_withholding = calculate_bir_tax(
-                        session,
-                        taxable_pay,
-                        group.cadence.value,
-                        obj_in.date_to.isoformat(),
-                    )
-                    snapshot["bir_calculation"] = {
-                        "method": "periodic_annex_e",
-                        "period_type": group.cadence.value,
-                        "taxable_compensation": str(taxable_pay),
-                        "withholding": str(bir_withholding),
-                        "schedule_effective_date": obj_in.date_to.isoformat(),
-                        "year_end_adjustment_pending": is_year_end,
-                    }
+                        snapshot["bir_calculation"] = {
+                            "method": "periodic_annex_e",
+                            "period_type": group.cadence.value,
+                            "taxable_compensation": str(taxable_pay),
+                            "withholding": str(bir_withholding),
+                            "schedule_effective_date": obj_in.date_to.isoformat(),
+                            "year_end_adjustment_pending": False,
+                        }
                 except StatutoryScheduleUnavailable as exc:
                     blockers.append(
                         PayrollPreflightBlocker(code="bir_schedule_unavailable", message=str(exc))
                     )
-        if bir_withholding:
+        if "bir_calculation" in snapshot:
             deductions["bir_withholding"] = str(bir_withholding)
             total_deductions += bir_withholding
         net_pay = gross - total_deductions
@@ -4028,6 +4236,11 @@ def upsert_employee_tax_year_declaration(
     """Record reviewed tax classification and opening year-to-date totals."""
     if tax_year < 2000 or tax_year > 2200:
         raise HTTPException(status_code=422, detail="tax_year must be between 2000 and 2200")
+    if obj_in.opening_as_of.year != tax_year or obj_in.opening_as_of > date.today():
+        raise HTTPException(
+            status_code=422,
+            detail="opening_as_of must be a date in the declared tax year that is not in the future",
+        )
     employee = session.exec(
         select(EmployeeRecords)
         .where(

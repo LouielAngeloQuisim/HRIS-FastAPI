@@ -38,6 +38,7 @@ def test_tax_year_declaration_upsert_and_get(
     url = f"{API}/employees/{employee.id}/tax-year-declarations/2026"
     payload = {
         "tax_classification": "ordinary",
+        "opening_as_of": "2026-06-30",
         "taxable_compensation_ytd": "120000.00",
         "tax_withheld_ytd": "5000.00",
         "previous_employer_included": True,
@@ -51,6 +52,7 @@ def test_tax_year_declaration_upsert_and_get(
     body = created.json()
     assert body["employee_id"] == str(employee.id)
     assert body["tax_year"] == 2026
+    assert body["opening_as_of"] == "2026-06-30"
     assert body["taxable_compensation_ytd"] == "120000.00"
     assert body["tax_withheld_ytd"] == "5000.00"
     assert body["previous_employer_included"] is True
@@ -93,6 +95,6 @@ def test_tax_year_declaration_rejects_invalid_year_and_negative_amounts(
     assert client.put(f"{base}/1999", json={}, headers=superuser_token_headers).status_code == 422
     assert client.put(
         f"{base}/2026",
-        json={"taxable_compensation_ytd": "-0.01"},
+        json={"opening_as_of": "2027-01-01", "taxable_compensation_ytd": "-0.01"},
         headers=superuser_token_headers,
     ).status_code == 422

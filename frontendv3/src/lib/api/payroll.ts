@@ -26,6 +26,7 @@ export interface EmployeeTaxYearDeclaration {
   employee_id: string
   tax_year: number
   tax_classification: 'ordinary' | 'minimum_wage_earner'
+  opening_as_of: string | null
   taxable_compensation_ytd: string
   tax_withheld_ytd: string
   previous_employer_included: boolean
@@ -38,6 +39,7 @@ export interface EmployeeTaxYearDeclaration {
 export type EmployeeTaxYearDeclarationInput = Pick<
   EmployeeTaxYearDeclaration,
   | 'tax_classification'
+  | 'opening_as_of'
   | 'taxable_compensation_ytd'
   | 'tax_withheld_ytd'
   | 'previous_employer_included'

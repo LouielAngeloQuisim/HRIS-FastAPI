@@ -103,6 +103,7 @@ describe('EmployeeProfile', () => {
     const screen = await render(<EmployeeProfile />)
 
     await expect.element(screen.getByText(/BIR tax-year inputs/i)).toBeInTheDocument()
+    await userEvent.fill(screen.getByLabelText(/Opening balances are complete through/i), '2026-09-30')
     await userEvent.fill(screen.getByLabelText(/Taxable compensation already paid this year/i), '125000.00')
     await userEvent.fill(screen.getByLabelText(/Withholding tax already withheld this year/i), '4500.00')
     await userEvent.click(screen.getByLabelText(/I reviewed these figures/i))
@@ -110,6 +111,7 @@ describe('EmployeeProfile', () => {
 
     expect(saveTaxInputs).toHaveBeenCalledWith(expect.objectContaining({
       tax_classification: 'ordinary',
+      opening_as_of: '2026-09-30',
       taxable_compensation_ytd: '125000.00',
       tax_withheld_ytd: '4500.00',
       is_verified: true,

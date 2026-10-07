@@ -306,6 +306,7 @@ class EmployeeTaxYearDeclaration(SQLModel, table=True):
     employee_id: uuid.UUID = Field(foreign_key="employee_records.id", ondelete="CASCADE", index=True)
     tax_year: int
     tax_classification: str = Field(default="ordinary", max_length=32)
+    opening_as_of: date | None = None
     taxable_compensation_ytd: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(14, 2))  # type: ignore
     tax_withheld_ytd: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(14, 2))  # type: ignore
     previous_employer_included: bool = Field(default=False)

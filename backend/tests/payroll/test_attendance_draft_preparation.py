@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -108,8 +109,8 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         )
     policy = PayrollPolicyVersion(
         version=900_000 + int(uuid.uuid4().hex[:6], 16),
-        effective_from=date(2026, 9, 1),
-        effective_to=None,
+        effective_from=date(2026, 10, 1),
+        effective_to=date(2026, 10, 31),
         policy={
             "timezone": "Asia/Manila",
             "monthly_divisor": "22",
@@ -213,6 +214,7 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
             employee_id=employee.id,
             tax_year=2026,
             tax_classification="ordinary",
+            opening_as_of=date(2026, 9, 30),
             taxable_compensation_ytd="0.00",
             tax_withheld_ytd="0.00",
             previous_employer_included=False,
@@ -236,3 +238,154 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         "philhealth": "650.00",
         "pagibig": "200.00",
     }
+
+
+def test_december_draft_uses_annualized_tax_and_opening_balance(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    employee = EmployeeRecords(
+        employee_code=f"YEAR-END-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Year End",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2020, 1, 1),
+    )
+    group = PayrollPayGroup(
+        code=f"YE-{uuid.uuid4().hex[:8]}",
+        name="QA twice-monthly year-end",
+        cadence="semi_monthly",
+        first_period_end_day=15,
+        second_period_end_day=31,
+        weekend_rule="next_business_day",
+    )
+    shift = Shift(
+        code=f"YE-{uuid.uuid4().hex[:8]}",
+        name="Year-end 8-hour weekday shift",
+        start_time="08:00",
+        end_time="17:00",
+        lunch_break_duration=60,
+        total_hours_minus_lunch=480,
+    )
+    db.add_all([employee, group, shift])
+    db.flush()
+    db.add_all(
+        [
+            EmployeeSalary(
+                employee_id=employee.id,
+                basic_rate="26000.00",
+                effective_date=date(2026, 1, 1),
+                pay_type=PayType.MONTHLY,
+            ),
+            EmployeePayGroupAssignment(
+                employee_id=employee.id,
+                pay_group_id=group.id,
+                effective_from=date(2026, 1, 1),
+            ),
+            EmployeeShiftAssignment(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                effective_from=date(2026, 1, 1),
+            ),
+            EmployeeTaxYearDeclaration(
+                employee_id=employee.id,
+                tax_year=2026,
+                tax_classification="ordinary",
+                opening_as_of=date(2026, 12, 15),
+                taxable_compensation_ytd="300000.00",
+                tax_withheld_ytd="4000.00",
+                previous_employer_included=True,
+                source_reference="QA verified opening YTD example",
+                is_verified=True,
+            ),
+            PayrollPolicyVersion(
+                version=910_000 + int(uuid.uuid4().hex[:6], 16),
+                effective_from=date(2026, 1, 1),
+                effective_to=date(2026, 12, 31),
+                policy={
+                    "timezone": "Asia/Manila",
+                    "monthly_divisor": "22",
+                    "daily_partial_work": "pro_rated",
+                    "paid_leave": False,
+                    "paid_holidays": False,
+                    "break_minutes": 60,
+                    "grace_minutes": 0,
+                    "overtime_rule": {"multiplier": "1.25"},
+                    "premium_rules": {},
+                    "allowance_tax_treatment": {},
+                    "rounding_mode": "half_up",
+                    "contribution_collection": {
+                        "frequency": "once_monthly",
+                        "collection_period": "last_period",
+                    },
+                    "statutory_sources_reviewed": [
+                        "https://www.sss.gov.ph/pay-contribution/",
+                        "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
+                        "https://www.pagibigfund.gov.ph/",
+                    ],
+                },
+                confirmed=True,
+            ),
+        ]
+    )
+    # Full-month attendance is needed to establish the once-monthly statutory
+    # contribution basis, even though this is the final half-month run.
+    for day in range(1, 32):
+        work_date = date(2026, 12, day)
+        if work_date.weekday() >= 5:
+            continue
+        db.add(
+            DailyTimeRecord(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                login_date=datetime(2026, 12, day, tzinfo=timezone.utc),
+                logout_date=datetime(2026, 12, day, tzinfo=timezone.utc)
+                + timedelta(hours=9),
+                work_date=work_date,
+                rendered_minutes=480,
+                overtime_minutes=0,
+                is_absent=False,
+                is_time_calculated=True,
+            )
+        )
+    db.commit()
+
+    response = client.post(
+        f"{API}/runs/prepare-attendance-draft",
+        json={
+            "pay_group_id": str(group.id),
+            "date_from": "2026-12-16",
+            "date_to": "2026-12-31",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 201, response.text
+    entry = next(
+        item
+        for item in response.json()["entries"]
+        if item["employee_id"] == str(employee.id)
+    )
+    assert "bir_year_end_adjustment_unavailable" not in {
+        blocker["code"] for blocker in entry["blockers"]
+    }
+    assert "bir_ytd_history_unavailable" not in {
+        blocker["code"] for blocker in entry["blockers"]
+    }
+    assert entry["input_snapshot"]["bir_year_to_date_history"]["complete"] is True
+    assert entry["input_snapshot"]["bir_year_to_date_history"]["finalized_entries"] == []
+    assert entry["input_snapshot"]["bir_calculation"]["method"] == (
+        "annualized_rr_11_2018_2023_onward"
+    )
+    annual_taxable = Decimal(
+        entry["input_snapshot"]["bir_calculation"]["annual_taxable_compensation"]
+    )
+    annual_tax_due = Decimal(
+        entry["input_snapshot"]["bir_calculation"]["annual_tax_due"]
+    )
+    prior_withheld = Decimal(
+        entry["input_snapshot"]["bir_calculation"]["prior_tax_withheld"]
+    )
+    withholding_adjustment = Decimal(entry["deductions"]["bir_withholding"])
+    assert annual_taxable == Decimal("311981.82")
+    assert annual_tax_due == Decimal("9297.27")
+    assert prior_withheld == Decimal("4000.00")
+    assert withholding_adjustment == Decimal("5297.27")

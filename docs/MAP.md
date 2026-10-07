@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-07
-Source commit: 06739466705e135fdf4cef49154001efcc1748b5
+Source commit: 426cd87f5c525bebdd21c546ccea1545ee46d1ab
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
@@ -482,7 +482,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 40 revisions, single head `b1c2d3e4f5a6`
+## Migration chain (oldest -> newest): 41 revisions, single head `c2d3e4f5a6b7`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -527,6 +527,7 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 38. `9e0f1a2b3c4d` - Seed the published 2025 SSS employer and employee contribution schedule.
 39. `a0f1a2b3c4d5` - Seed published PhilHealth and Pag-IBIG mandatory schedules when absent.
 40. `b1c2d3e4f5a6` - Store reviewed employee tax classification and opening YTD amounts.
+41. `c2d3e4f5a6b7` - Track the date covered by opening tax-year balances.
 
 ### Migration anomalies (static findings, report-only)
 

@@ -83,6 +83,7 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
     })
     await page.goto(`/employees/${employee.id}`)
     await expect(page.getByText(/BIR tax-year inputs/)).toBeVisible()
+    await page.getByLabel('Opening balances are complete through').fill(`${new Date().getFullYear()}-09-30`)
     await page.getByLabel('Taxable compensation already paid this year').fill('125000.00')
     await page.getByLabel('Withholding tax already withheld this year').fill('4500.00')
     await page.getByLabel('Figures include a previous employer').check()
@@ -95,6 +96,7 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
     expect(response.is_verified).toBe(true)
     expect(response.taxable_compensation_ytd).toBe('125000.00')
     expect(response.tax_withheld_ytd).toBe('4500.00')
+    expect(response.opening_as_of).toBe(`${new Date().getFullYear()}-09-30`)
 
     const readback = await page.request.get(
       `${apiUrl}/payroll/employees/${employee.id}/tax-year-declarations/${new Date().getFullYear()}`,

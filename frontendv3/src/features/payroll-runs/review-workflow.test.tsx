@@ -192,6 +192,29 @@ describe('PayrollRunDetail review workflow', () => {
       })
   })
 
+  it('shows calculation lines and named source-revision counts', async () => {
+    usePayrollRunMock.mockReturnValue({
+      data: run('in_review', { ...entry, review_state: 'ready', blockers: [] }),
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+
+    const screen = await render(<PayrollRunDetail />)
+    await userEvent.click(
+      screen.getByText('Calculation breakdown and source history')
+    )
+
+    await expect
+      .element(screen.getByText(/Formula: gross earnings/))
+      .toBeVisible()
+    await expect.element(screen.getByText('regular')).toBeVisible()
+    await expect.element(screen.getByText('Source revisions')).toBeVisible()
+    await expect
+      .element(screen.getByText('Attendance', { exact: true }))
+      .toBeVisible()
+  })
+
   it('sends the entry fingerprint and requires a reason for exclusion', async () => {
     usePayrollRunMock.mockReturnValue({
       data: run('in_review', { ...entry, review_state: 'ready', blockers: [] }),

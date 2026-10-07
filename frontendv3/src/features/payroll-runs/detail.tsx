@@ -25,6 +25,29 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
+function calculationLines(
+  value: Record<string, unknown> | null,
+  prefix = ''
+): Array<{ label: string; value: string }> {
+  if (!value) return []
+  return Object.entries(value).flatMap(([key, item]) => {
+    const label = [prefix, key.replace(/_/g, ' ')].filter(Boolean).join(' · ')
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      return calculationLines(item as Record<string, unknown>, label)
+    }
+    if (
+      typeof item === 'number' ||
+      (typeof item === 'string' && /^-?\d+(\.\d+)?$/.test(item))
+    ) {
+      return [{ label, value: `₱${Number(item).toLocaleString()}` }]
+    }
+    if (typeof item === 'string' && item.trim()) {
+      return [{ label, value: item }]
+    }
+    return []
+  })
+}
+
 export function PayrollRunDetail() {
   const canView = useCan('payroll', 'view')
   const canEdit = useCan('payroll', 'edit')
@@ -434,20 +457,87 @@ export function PayrollRunDetail() {
                         ))}
                       </ul>
                     )}
-                    <details className='text-xs'>
-                      <summary>Calculation inputs and lines</summary>
-                      <pre className='mt-2 max-h-64 overflow-auto rounded bg-muted p-2 whitespace-pre-wrap'>
-                        {JSON.stringify(
-                          {
-                            calculation_version: entry.calculation_version,
-                            input_snapshot: entry.input_snapshot,
-                            earnings: entry.earnings,
-                            deductions: entry.deductions,
-                          },
-                          null,
-                          2
-                        )}
-                      </pre>
+                    <details className='text-sm'>
+                      <summary>
+                        Calculation breakdown and source history
+                      </summary>
+                      <div className='mt-2 grid gap-3 rounded bg-muted p-3'>
+                        <p className='text-xs text-muted-foreground'>
+                          Formula: gross earnings − employee deductions = net
+                          pay · Version:{' '}
+                          {entry.calculation_version ?? 'unavailable'}
+                        </p>
+                        <p className='text-xs text-muted-foreground'>
+                          Gross {formatCurrency(entry.gross_pay)} − deductions{' '}
+                          {formatCurrency(entry.total_deductions)} = net{' '}
+                          {formatCurrency(entry.net_pay)}
+                        </p>
+                        <div className='grid gap-3 md:grid-cols-2'>
+                          {(
+                            [
+                              ['Earnings', entry.earnings],
+                              [
+                                'Deductions and employer contributions',
+                                entry.deductions,
+                              ],
+                            ] as Array<[string, Record<string, unknown> | null]>
+                          ).map(([heading, lines]) => {
+                            const items = calculationLines(lines)
+                            return (
+                              <div key={heading as string}>
+                                <h3 className='font-medium'>{heading}</h3>
+                                {items.length ? (
+                                  <dl className='mt-1 space-y-1'>
+                                    {items.map((item) => (
+                                      <div
+                                        key={`${item.label}-${item.value}`}
+                                        className='flex justify-between gap-3 text-xs'
+                                      >
+                                        <dt className='capitalize'>
+                                          {item.label}
+                                        </dt>
+                                        <dd className='text-right'>
+                                          {item.value}
+                                        </dd>
+                                      </div>
+                                    ))}
+                                  </dl>
+                                ) : (
+                                  <p className='text-xs text-muted-foreground'>
+                                    None
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <div>
+                          <h3 className='font-medium'>Source revisions</h3>
+                          <dl className='mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs md:grid-cols-4'>
+                            {[
+                              ['Attendance', 'attendance_revisions'],
+                              ['Salary', 'salary_versions'],
+                              ['Shifts', 'shift_assignments'],
+                              ['Pay group', 'pay_group_assignments'],
+                              ['Leave', 'leave_revisions'],
+                              ['Holidays', 'holiday_revisions'],
+                              ['Policy', 'policy_versions'],
+                            ].map(([label, key]) => (
+                              <div
+                                key={key}
+                                className='flex justify-between gap-2'
+                              >
+                                <dt>{label}</dt>
+                                <dd>
+                                  {Array.isArray(entry.input_snapshot[key])
+                                    ? entry.input_snapshot[key].length
+                                    : 0}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </div>
+                      </div>
                     </details>
                     {canEdit &&
                       data.workflow_status === 'in_review' &&

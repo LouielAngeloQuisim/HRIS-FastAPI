@@ -1139,7 +1139,9 @@ export interface PayrollEntryPublic {
   review_state: 'blocked' | 'ready' | 'reviewed' | 'excluded'
   reviewed_by: string | null
   reviewed_at: string | null
+  calculation_version: string | null
   input_fingerprint: string | null
+  input_snapshot: Record<string, unknown>
   blockers: Array<{ code: string; message: string; work_date?: string }>
   created_at: string | null
 }

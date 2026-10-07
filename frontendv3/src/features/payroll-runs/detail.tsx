@@ -288,6 +288,8 @@ export function PayrollRunDetail() {
                       <pre className='mt-2 max-h-64 overflow-auto rounded bg-muted p-2 whitespace-pre-wrap'>
                         {JSON.stringify(
                           {
+                            calculation_version: entry.calculation_version,
+                            input_snapshot: entry.input_snapshot,
                             earnings: entry.earnings,
                             deductions: entry.deductions,
                           },

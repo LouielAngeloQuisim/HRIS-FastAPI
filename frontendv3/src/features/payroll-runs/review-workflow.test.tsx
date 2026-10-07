@@ -63,7 +63,9 @@ const entry = {
   review_state: 'blocked' as 'blocked' | 'ready' | 'reviewed' | 'excluded',
   reviewed_by: null,
   reviewed_at: null,
+  calculation_version: 'attendance-v1-provisional',
   input_fingerprint: 'a'.repeat(64),
+  input_snapshot: {},
   blockers: [
     {
       code: 'statutory_calculation_unavailable',

@@ -152,7 +152,7 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     assert entry["net_pay"] == "11818.18"
     assert entry["earnings"]["provisional"] is True
     assert any(
-        blocker["code"] == "statutory_calculation_unavailable"
+        blocker["code"] == "bir_ytd_unavailable"
         for blocker in entry["blockers"]
     )
     assert entry["input_fingerprint"]

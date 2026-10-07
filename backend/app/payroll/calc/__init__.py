@@ -4,7 +4,7 @@ No hardcoded rates. All values come from the bracket tables in the database.
 """
 
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, TypeVar
 
 from sqlmodel import Session, col, select
@@ -59,17 +59,28 @@ def _get_effective_sss_bracket(
         return None
     latest_date = rows[0].effective_date
     schedule = [row for row in rows if row.effective_date == latest_date]
-    matching = next(
-        (
-            row
-            for row in schedule
-            if row.compensation_min is not None
-            and row.compensation_min <= monthly_compensation
-            and (
-                row.compensation_max is None
-                or monthly_compensation <= row.compensation_max
+
+    def contains_compensation(row: SSSBracket) -> bool:
+        if row.compensation_min is None:
+            return False
+        try:
+            lower = Decimal(str(row.compensation_min))
+            upper = (
+                Decimal(str(row.compensation_max))
+                if row.compensation_max is not None
+                else None
             )
-        ),
+        except InvalidOperation:
+            return False
+        return (
+            lower.is_finite()
+            and (upper is None or upper.is_finite())
+            and lower <= monthly_compensation
+            and (upper is None or monthly_compensation <= upper)
+        )
+
+    matching = next(
+        (row for row in schedule if contains_compensation(row)),
         None,
     )
     return matching

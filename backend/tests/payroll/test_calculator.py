@@ -6,6 +6,7 @@ contribution/tax/share relationships, validation-error envelope, and list-endpoi
 from __future__ import annotations
 
 from collections.abc import Generator
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -15,6 +16,7 @@ from sqlmodel import Session
 
 from app.config.settings import settings
 from app.payroll.models import BIRBracket, PagIBIGBracket, PhilHealthBracket, SSSBracket
+from app.payroll.routes import _monthly_contribution_snapshot
 
 # --------------------------------------------------------------------------- #
 # Helpers / constants
@@ -33,6 +35,60 @@ def _dec(value: float | str) -> Decimal:
 def _assert_share_shape(data: dict[str, Any]) -> None:
     assert set(data) == {"employee_share", "employer_share", "total"}
     assert all(isinstance(v, float) for v in data.values())
+
+
+def test_monthly_contribution_snapshot_uses_each_effective_schedule(
+    db: Session,
+) -> None:
+    sss_row = SSSBracket(
+        msc_min=Decimal("5000"), msc_max=Decimal("35000"),
+        compensation_min=Decimal("0"), compensation_max=None,
+        monthly_salary_credit=Decimal("26000"), employer_ss=Decimal("2600"),
+        employer_ec=Decimal("30"), employer_mpf=Decimal("300"),
+        employee_ss=Decimal("1300"), employee_mpf=Decimal("300"),
+        effective_date=date(2025, 1, 1),
+    )
+    philhealth_row = PhilHealthBracket(
+        salary_min=Decimal("10000"), salary_max=Decimal("100000"),
+        rate=Decimal("5"), employer_share=Decimal("2.5"),
+        employee_share=Decimal("2.5"), effective_date=date(2025, 1, 1),
+    )
+    pagibig_row = PagIBIGBracket(
+        salary_min=Decimal("0.01"), salary_max=Decimal("10000"),
+        employee_rate=Decimal("2"), employer_rate=Decimal("2"),
+        effective_date=date(2024, 2, 1),
+    )
+    db.add_all([sss_row, philhealth_row, pagibig_row])
+    db.flush()
+
+    snapshot = _monthly_contribution_snapshot(
+        session=db,
+        sss_monthly_compensation=Decimal("26000"),
+        philhealth_basic_salary=Decimal("26000"),
+        pagibig_monthly_salary=Decimal("26000"),
+        contribution_month=date(2026, 10, 1),
+        source_urls=[
+            "https://www.sss.gov.ph/pay-contribution/",
+            "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
+            "https://www.pagibigfund.gov.ph/document/pdf/circulars/provident/HDMF%20Circular%20No.%20274.pdf",
+        ],
+    )
+
+    assert snapshot["month"] == "2026-10"
+    assert _dec(snapshot["schemes"]["sss"]["employee"]) == Decimal("1600")
+    assert _dec(snapshot["schemes"]["sss"]["employer"]) == Decimal("2930")
+    assert _dec(snapshot["schemes"]["philhealth"]["employee"]) == Decimal("650")
+    assert _dec(snapshot["schemes"]["philhealth"]["employer"]) == Decimal("650")
+    assert _dec(snapshot["schemes"]["pagibig"]["employee"]) == Decimal("200")
+    assert _dec(snapshot["schemes"]["pagibig"]["employer"]) == Decimal("200")
+    assert all(
+        row["id"] and row["effective_date"]
+        for scheme in snapshot["schemes"].values()
+        for row in scheme["schedule_rows"]
+    )
+    for row in (sss_row, philhealth_row, pagibig_row):
+        db.delete(row)
+    db.flush()
 
 
 # Actual response-shape constants verified against routes.py handlers

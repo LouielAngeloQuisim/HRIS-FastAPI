@@ -306,6 +306,122 @@ def _stage_monthly_contribution_ledger(
             )
 
 
+def _monthly_contribution_snapshot(
+    *,
+    session: Session,
+    sss_monthly_compensation: Decimal,
+    philhealth_basic_salary: Decimal,
+    pagibig_monthly_salary: Decimal,
+    contribution_month: date,
+    source_urls: Sequence[str],
+) -> dict[str, Any]:
+    """Calculate the three monthly contribution shares from active schedules.
+
+    This currently supports a fixed monthly salary basis. Daily/hourly and
+    mid-month compensation changes are blocked by the caller until their
+    statutory monthly assessment basis is available.
+    """
+    effective_date = contribution_month.replace(day=calendar.monthrange(
+        contribution_month.year, contribution_month.month
+    )[1])
+    sss_employee = calculate_sss_employee_share(
+        session, sss_monthly_compensation, effective_date.isoformat()
+    )
+    sss_employer = calculate_sss_employer_share(
+        session, sss_monthly_compensation, effective_date.isoformat()
+    )
+    philhealth_employee = calculate_philhealth_employee_share(
+        session, philhealth_basic_salary, effective_date.isoformat()
+    )
+    philhealth_employer = calculate_philhealth_employer_share(
+        session, philhealth_basic_salary, effective_date.isoformat()
+    )
+    pagibig_employee = calculate_pagibig_employee_share(
+        session, pagibig_monthly_salary, effective_date.isoformat()
+    )
+    pagibig_employer = calculate_pagibig_employer_share(
+        session, pagibig_monthly_salary, effective_date.isoformat()
+    )
+
+    def sources(model: type[Any]) -> list[dict[str, str]]:
+        rows = session.exec(
+            select(model)
+            .where(
+                model.effective_date <= effective_date,
+                col(model.is_active).is_(True),
+                col(model.is_deleted).is_(False),
+            )
+            .order_by(col(model.effective_date).desc())
+        ).all()
+        if not rows:
+            return []
+        latest = rows[0].effective_date
+        return [
+            {"id": str(row.id), "effective_date": row.effective_date.isoformat()}
+            for row in rows
+            if row.effective_date == latest
+        ]
+
+    scheme_models = {
+        "sss": SSSBracket,
+        "philhealth": PhilHealthBracket,
+        "pagibig": PagIBIGBracket,
+    }
+
+
+    schedule_rows = {scheme: sources(model) for scheme, model in scheme_models.items()}
+    if any(not rows for rows in schedule_rows.values()):
+        raise StatutoryScheduleUnavailable(
+            "One or more monthly contribution schedules are unavailable"
+        )
+    scheme_sources = {
+        "sss": "sss.gov.ph",
+        "philhealth": "philhealth.gov.ph",
+        "pagibig": "pagibigfund.gov.ph",
+    }
+    official_sources = {
+        scheme: [
+            url
+            for url in source_urls
+            if isinstance(url, str)
+            if (hostname := (urlparse(url).hostname or "")) == domain
+            or hostname.endswith(f".{domain}")
+        ]
+        for scheme, domain in scheme_sources.items()
+    }
+    if any(not urls for urls in official_sources.values()):
+        raise StatutoryScheduleUnavailable(
+            "Confirmed payroll policy is missing an official source for a contribution schedule"
+        )
+    amount_lines = {
+        "sss": (sss_monthly_compensation, sss_employee, sss_employer),
+        "philhealth": (philhealth_basic_salary, philhealth_employee, philhealth_employer),
+        "pagibig": (pagibig_monthly_salary, pagibig_employee, pagibig_employer),
+    }
+    return {
+        "month": contribution_month.strftime("%Y-%m"),
+        "schemes": {
+            scheme: {
+                "basis": str(basis),
+                "employee": str(employee),
+                "employer": str(employer),
+                "source_references": official_sources[scheme],
+                "schedule_rows": schedule_rows[scheme],
+            }
+            for scheme, (basis, employee, employer) in amount_lines.items()
+        },
+    }
+
+
+def _same_calendar_day(value: date | datetime | str, expected: date) -> bool:
+    """Compare date-shaped values consistently across SQLModel serialization."""
+    if isinstance(value, str):
+        normalized = date.fromisoformat(value[:10])
+    else:
+        normalized = value.date() if isinstance(value, datetime) else value
+    return normalized == expected
+
+
 def _latest_effective_rows(
     session: Session, model: Any, as_of: date, *, period: str | None = None
 ) -> list[Any]:
@@ -1378,7 +1494,8 @@ def preflight_payroll_run(
         session=session, group_id=pay_group_id, month=month
     )
     if not any(
-        period.date_from == date_from and period.date_to == date_to
+        _same_calendar_day(period.date_from, date_from)
+        and _same_calendar_day(period.date_to, date_to)
         for period in configured_periods
     ):
         raise HTTPException(
@@ -2346,16 +2463,18 @@ def prepare_attendance_payroll_draft(
             detail="Exactly one confirmed payroll policy must cover the prepared period",
         )
     policy = policies[0]
+    configured_periods = list_pay_group_periods(
+        session=session,
+        group_id=obj_in.pay_group_id,
+        month=obj_in.date_from.strftime("%Y-%m"),
+    )
+
     period = next(
         (
             candidate
-            for candidate in list_pay_group_periods(
-                session=session,
-                group_id=obj_in.pay_group_id,
-                month=obj_in.date_from.strftime("%Y-%m"),
-            )
-            if candidate.date_from == obj_in.date_from
-            and candidate.date_to == obj_in.date_to
+            for candidate in configured_periods
+            if _same_calendar_day(candidate.date_from, obj_in.date_from)
+            and _same_calendar_day(candidate.date_to, obj_in.date_to)
         ),
         None,
     )
@@ -2364,6 +2483,65 @@ def prepare_attendance_payroll_draft(
             status_code=422,
             detail="Date range must match a complete configured pay-group period",
         )
+
+    month_start = obj_in.date_to.replace(day=1)
+    month_end = month_start.replace(
+        day=calendar.monthrange(month_start.year, month_start.month)[1]
+    )
+    full_month_previews: dict[uuid.UUID, PayrollAttendanceCalculationEntry] = {}
+    if obj_in.date_to == month_end:
+        # The preview endpoint accepts only complete configured earning
+        # periods. Build the statutory monthly basis from those slices instead
+        # of asking it to evaluate an invalid all-month range for a split-pay
+        # group.
+        for configured_period in configured_periods:
+            slice_preview = attendance_calculation_preview(
+                session=session,
+                pay_group_id=obj_in.pay_group_id,
+                date_from=date.fromisoformat(str(configured_period.date_from)[:10]),
+                date_to=date.fromisoformat(str(configured_period.date_to)[:10]),
+                skip=0,
+                limit=200,
+            )
+            for entry in slice_preview.entries:
+                previous = full_month_previews.get(entry.employee_id)
+                if previous is None:
+                    full_month_previews[entry.employee_id] = entry
+                    continue
+                full_month_previews[entry.employee_id] = PayrollAttendanceCalculationEntry(
+                    employee_id=entry.employee_id,
+                    employee_code=entry.employee_code,
+                    employee_name=entry.employee_name,
+                    regular_earnings=(
+                        previous.regular_earnings + entry.regular_earnings
+                        if previous.regular_earnings is not None
+                        and entry.regular_earnings is not None
+                        else None
+                    ),
+                    approved_overtime=(
+                        previous.approved_overtime + entry.approved_overtime
+                        if previous.approved_overtime is not None
+                        and entry.approved_overtime is not None
+                        else None
+                    ),
+                    attendance_deduction=(
+                        previous.attendance_deduction + entry.attendance_deduction
+                        if previous.attendance_deduction is not None
+                        and entry.attendance_deduction is not None
+                        else None
+                    ),
+                    gross_before_statutory=(
+                        previous.gross_before_statutory + entry.gross_before_statutory
+                        if previous.gross_before_statutory is not None
+                        and entry.gross_before_statutory is not None
+                        else None
+                    ),
+                    blockers=[*previous.blockers, *entry.blockers],
+                    formula=[*previous.formula, *entry.formula],
+                    source_references=sorted(
+                        set(previous.source_references + entry.source_references)
+                    ),
+                )
 
     now = datetime.now(timezone.utc)
     run = PayrollRun(
@@ -2398,15 +2576,6 @@ def prepare_attendance_payroll_draft(
             )
         else:
             blockers.extend(preview.blockers)
-        # These remain named blockers, not zero-valued payroll deductions. The
-        # app is not allowed to finalize or email until the full statutory and
-        # contribution calculation is implemented and HR samples are approved.
-        blockers.append(
-            PayrollPreflightBlocker(
-                code="statutory_calculation_unavailable",
-                message="Approved statutory schedule amounts and BIR annualization/YTD inputs are not yet calculated for this employee.",
-            )
-        )
         employee_salaries = session.exec(
             select(EmployeeSalary)
             .where(
@@ -2427,6 +2596,92 @@ def prepare_attendance_payroll_draft(
             }
             for salary in employee_salaries
         ]
+        monthly_contributions: dict[str, Any] | None = None
+        final_period_of_month = obj_in.date_to.day == calendar.monthrange(
+            obj_in.date_to.year, obj_in.date_to.month
+        )[1]
+        if final_period_of_month:
+            month_start = obj_in.date_to.replace(day=1)
+            salary_changes_in_month = [
+                salary
+                for salary in employee_salaries
+                if salary.effective_date > month_start
+            ]
+            effective_salary = employee_salaries[-1] if employee_salaries else None
+            if effective_salary is None:
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="monthly_contribution_salary_missing",
+                        message="A monthly salary is required to calculate this employee's once-monthly statutory contributions.",
+                    )
+                )
+            elif str(getattr(effective_salary.pay_type, "value", effective_salary.pay_type)) != "monthly":
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="monthly_contribution_basis_unsupported",
+                        message="Once-monthly statutory contributions currently require a fixed monthly salary basis; daily/hourly conversion must be configured first.",
+                    )
+                )
+            elif salary_changes_in_month:
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="monthly_contribution_salary_changed",
+                        message="A salary change during the contribution month needs an approved split-basis rule before contributions can be calculated.",
+                    )
+                )
+            else:
+                try:
+                    full_month = full_month_previews.get(roster_entry.employee_id)
+                    if full_month is None:
+                        raise StatutoryScheduleUnavailable(
+                            "Full-month attendance calculation did not return this employee"
+                        )
+                    if full_month.blockers:
+                        raise StatutoryScheduleUnavailable(
+                            "Resolve the full month's attendance and overtime blockers before assessing SSS compensation"
+                        )
+                    if effective_salary.non_taxable_allowance or effective_salary.de_minimis_monthly:
+                        raise StatutoryScheduleUnavailable(
+                            "Additional allowances need an approved scheme-specific contribution treatment"
+                        )
+                    if full_month.approved_overtime:
+                        raise StatutoryScheduleUnavailable(
+                            "Approved overtime needs an approved scheme-specific contribution treatment"
+                        )
+                    sss_basis = full_month.regular_earnings
+                    if sss_basis is None or sss_basis <= 0:
+                        raise StatutoryScheduleUnavailable(
+                            "Full-month eligible earnings are required for the SSS compensation basis"
+                        )
+                    policy_sources = policy.policy.get("statutory_sources_reviewed", [])
+                    if not isinstance(policy_sources, list):
+                        raise StatutoryScheduleUnavailable(
+                            "Confirmed payroll policy has no reviewed statutory source list"
+                        )
+                    monthly_contributions = _monthly_contribution_snapshot(
+                        session=session,
+                        sss_monthly_compensation=sss_basis,
+                        philhealth_basic_salary=effective_salary.basic_rate,
+                        pagibig_monthly_salary=effective_salary.basic_rate,
+                        contribution_month=month_start,
+                        source_urls=policy_sources,
+                    )
+                except StatutoryScheduleUnavailable as exc:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="statutory_schedule_unavailable",
+                            message=str(exc),
+                        )
+                    )
+        # BIR annualization requires the employee's validated current-year
+        # taxable-compensation and withholding totals. Until those are persisted,
+        # keep the entry blocked instead of treating a missing value as zero.
+        blockers.append(
+            PayrollPreflightBlocker(
+                code="bir_ytd_unavailable",
+                message="BIR withholding cannot be calculated until this employee's current-year taxable compensation, prior withholding, and tax profile are recorded.",
+            )
+        )
         dtr_rows = session.exec(
             select(DailyTimeRecord)
             .where(
@@ -2528,6 +2783,8 @@ def prepare_attendance_payroll_draft(
                 "to": obj_in.date_to.isoformat(),
             },
         }
+        if monthly_contributions is not None:
+            snapshot["monthly_contributions"] = monthly_contributions
         fingerprint = hashlib.sha256(
             json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -2547,11 +2804,35 @@ def prepare_attendance_payroll_draft(
             else Decimal("0.00")
         )
         gross = regular + overtime
-        deductions = {
+        employee_statutory = {
+            scheme: Decimal(str(values["employee"]))
+            for scheme, values in monthly_contributions["schemes"].items()
+        } if monthly_contributions is not None else {}
+        employer_statutory = {
+            scheme: Decimal(str(values["employer"]))
+            for scheme, values in monthly_contributions["schemes"].items()
+        } if monthly_contributions is not None else {}
+        deductions: dict[str, Any] = {
             "attendance": str(attendance_deduction),
-            "statutory": None,
-            "employer_contributions": None,
+            "statutory": {key: str(value) for key, value in employee_statutory.items()},
+            "employer_contributions": {key: str(value) for key, value in employer_statutory.items()},
         }
+        deductions.update({f"{scheme}_employee": str(amount) for scheme, amount in employee_statutory.items()})
+        total_deductions = attendance_deduction + sum(employee_statutory.values(), Decimal("0.00"))
+        net_pay = gross - total_deductions
+        if monthly_contributions is None:
+            # The monthly deduction is collected in the final period only.
+            # A non-final period has no contribution snapshot by design.
+            deductions.update(
+                {f"{scheme}_employee": "0.00" for scheme in ("sss", "philhealth", "pagibig")}
+            )
+        if net_pay < 0:
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="negative_net_pay",
+                    message="Calculated deductions exceed earnings; an authorized correction is required before review.",
+                )
+            )
         session.add(
             PayrollEntry(
                 payroll_run_id=run.id,
@@ -2570,12 +2851,12 @@ def prepare_attendance_payroll_draft(
                 },
                 deductions=deductions,
                 gross_pay=gross,
-                total_deductions=attendance_deduction,
-                net_pay=gross - attendance_deduction,
+                total_deductions=total_deductions,
+                net_pay=net_pay,
                 overtime_pay=overtime,
                 thirteenth_month=Decimal("0.00"),
                 non_taxable_income=Decimal("0.00"),
-                taxable_income=gross,
+                taxable_income=gross - sum(employee_statutory.values(), Decimal("0.00")),
                 review_state="blocked",
                 calculation_version="attendance-v1-provisional",
                 input_snapshot=snapshot,

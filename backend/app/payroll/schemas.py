@@ -408,7 +408,9 @@ class PayrollEntryPublic(SQLModel):
     review_state: str = "ready"
     reviewed_by: uuid.UUID | None = None
     reviewed_at: datetime | None = None
+    calculation_version: str | None = None
     input_fingerprint: str | None = None
+    input_snapshot: dict[str, Any] = Field(default_factory=dict)
     blockers: list[dict[str, str]] = Field(default_factory=list)
 
 

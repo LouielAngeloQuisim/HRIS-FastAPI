@@ -15,7 +15,7 @@ def test_official_employer_schedule_has_all_61_effective_bands(db: Session) -> N
             SSSBracket.effective_date == date(2025, 1, 1),
             SSSBracket.is_active.is_(True),  # type: ignore[attr-defined]
             SSSBracket.is_deleted.is_(False),  # type: ignore[attr-defined]
-        )
+        ).order_by(SSSBracket.compensation_min)
     ).all()
 
     assert len(rows) == 61

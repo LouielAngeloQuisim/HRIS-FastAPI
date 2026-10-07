@@ -19,11 +19,13 @@ from app.payroll.models import (
     EmployeePayGroupAssignment,
     EmployeeSalary,
     EmployeeTaxYearDeclaration,
+    SSSBracket,
     PayrollPayGroup,
     PayrollPolicyVersion,
     PayType,
 )
-from app.payroll.payroll_tables import PayrollRun
+from app.payroll.payroll_tables import PayrollEntry, PayrollRun
+from app.payroll.routes import _payroll_entry_inputs_are_current
 
 API = f"{settings.API_V1_STR}/payroll"
 
@@ -239,6 +241,26 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         "philhealth": "650.00",
         "pagibig": "200.00",
     }
+    sss_snapshot = second_entry["input_snapshot"]["monthly_contributions"]["schemes"]["sss"]["schedule_rows"]
+    assert sss_snapshot
+    assert sss_snapshot[0]["updated_at"]
+    assert sss_snapshot[0]["values"]["employee_ss"]
+    payroll_entry = db.get(PayrollEntry, uuid.UUID(second_entry["id"]))
+    assert payroll_entry is not None
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
+    # An in-place edit must invalidate the frozen draft even when its row ID
+    # and effective date remain unchanged.
+    bracket = db.get(SSSBracket, uuid.UUID(sss_snapshot[0]["id"]))
+    assert bracket is not None
+    original_employee_ss = bracket.employee_ss
+    bracket.employee_ss += Decimal("1.00")
+    db.add(bracket)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    bracket.employee_ss = original_employee_ss
+    db.add(bracket)
+    db.commit()
 
 
 def test_december_draft_uses_annualized_tax_and_opening_balance(

@@ -343,7 +343,19 @@ def _monthly_contribution_snapshot(
         session, pagibig_monthly_salary, effective_date.isoformat()
     )
 
-    def sources(model: type[Any]) -> list[dict[str, str]]:
+    schedule_fields = {
+        "sss": (
+            "msc_min", "msc_max", "compensation_min", "compensation_max",
+            "monthly_salary_credit", "employer_ss", "employer_ec",
+            "employer_mpf", "employee_ss", "employee_mpf",
+        ),
+        "philhealth": (
+            "salary_min", "salary_max", "rate", "employer_share", "employee_share",
+        ),
+        "pagibig": ("salary_min", "salary_max", "employee_rate", "employer_rate"),
+    }
+
+    def sources(model: type[Any], fields: Sequence[str]) -> list[dict[str, Any]]:
         rows = session.exec(
             select(model)
             .where(
@@ -351,16 +363,26 @@ def _monthly_contribution_snapshot(
                 col(model.is_active).is_(True),
                 col(model.is_deleted).is_(False),
             )
-            .order_by(col(model.effective_date).desc())
+            .order_by(col(model.effective_date).desc(), col(model.id))
         ).all()
         if not rows:
             return []
         latest = rows[0].effective_date
-        return [
-            {"id": str(row.id), "effective_date": row.effective_date.isoformat()}
-            for row in rows
-            if row.effective_date == latest
-        ]
+        snapshots: list[dict[str, Any]] = []
+        for row in rows:
+            if row.effective_date != latest:
+                continue
+            snapshots.append({
+                "id": str(row.id),
+                "effective_date": row.effective_date.isoformat(),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "values": {
+                    field: str(getattr(row, field))
+                    if getattr(row, field) is not None else None
+                    for field in fields
+                },
+            })
+        return snapshots
 
     scheme_models = {
         "sss": SSSBracket,
@@ -370,7 +392,10 @@ def _monthly_contribution_snapshot(
 
 
 
-    schedule_rows = {scheme: sources(model) for scheme, model in scheme_models.items()}
+    schedule_rows = {
+        scheme: sources(model, schedule_fields[scheme])
+        for scheme, model in scheme_models.items()
+    }
     if any(not rows for rows in schedule_rows.values()):
         raise StatutoryScheduleUnavailable(
             "One or more monthly contribution schedules are unavailable"
@@ -818,6 +843,57 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
                 current_bir_snapshot = []
             if current_bir_snapshot != snapshot.get("bir_schedule", []):
                 return False
+
+        monthly_snapshot = snapshot.get("monthly_contributions")
+        if monthly_snapshot is not None:
+            month = date.fromisoformat(f"{monthly_snapshot['month']}-01")
+            month_end = month.replace(day=calendar.monthrange(month.year, month.month)[1])
+            statutory_models: dict[str, tuple[type[Any], tuple[str, ...]]] = {
+                "sss": (
+                    SSSBracket,
+                    (
+                        "msc_min", "msc_max", "compensation_min", "compensation_max",
+                        "monthly_salary_credit", "employer_ss", "employer_ec",
+                        "employer_mpf", "employee_ss", "employee_mpf",
+                    ),
+                ),
+                "philhealth": (
+                    PhilHealthBracket,
+                    ("salary_min", "salary_max", "rate", "employer_share", "employee_share"),
+                ),
+                "pagibig": (
+                    PagIBIGBracket,
+                    ("salary_min", "salary_max", "employee_rate", "employer_rate"),
+                ),
+            }
+            recorded_schemes = monthly_snapshot.get("schemes", {})
+            for scheme, (model, fields) in statutory_models.items():
+                rows = session.exec(
+                    select(model)
+                    .where(
+                        model.effective_date <= month_end,
+                        col(model.is_active).is_(True),
+                        col(model.is_deleted).is_(False),
+                    )
+                    .order_by(col(model.effective_date).desc(), col(model.id))
+                ).all()
+                latest_date = rows[0].effective_date if rows else None
+                current_rows = [
+                    {
+                        "id": str(row.id),
+                        "effective_date": row.effective_date.isoformat(),
+                        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                        "values": {
+                            field: str(getattr(row, field))
+                            if getattr(row, field) is not None else None
+                            for field in fields
+                        },
+                    }
+                    for row in rows
+                    if row.effective_date == latest_date
+                ]
+                if current_rows != recorded_schemes.get(scheme, {}).get("schedule_rows", []):
+                    return False
 
         if "bir_year_to_date_history" in snapshot:
             history_config = snapshot["bir_year_to_date_history"]

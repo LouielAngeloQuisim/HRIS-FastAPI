@@ -128,6 +128,7 @@ def normal_user_token_headers(client: TestClient, db: Session) -> dict[str, str]
 
 # Phase 1 tables, ordered so FK-referencing tables are deleted first.
 PHASE1_TABLES = [
+    "payroll_contribution_ledger",
     "emp_task",
     "employee_projects",
     "category",

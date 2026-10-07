@@ -8,6 +8,7 @@ import calendar
 import hashlib
 import json
 import uuid
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 from datetime import time as time_of_day
 from decimal import Decimal, InvalidOperation
@@ -51,6 +52,7 @@ from app.payroll.models import (
     CutoffType,
     EmployeePayGroupAssignment,
     EmployeeSalaryBulkBatch,
+    PayrollContributionLedger,
     PayrollDeliveryOutbox,
     PayrollEntry,
     PayrollPayGroup,
@@ -138,6 +140,149 @@ def _payroll_review_counts(session: Session, run_id: uuid.UUID) -> tuple[int, in
     excluded = sum(entry.review_state == "excluded" for entry in entries)
     unresolved = len(entries) - reviewed - excluded
     return reviewed, excluded, unresolved
+
+
+def _stage_monthly_contribution_ledger(
+    *, session: Session, run: PayrollRun, entries: Sequence[PayrollEntry], actor_id: uuid.UUID
+) -> None:
+    """Stage the single monthly statutory collection in the final pay period.
+
+    The caller commits this with payroll finalization. Amounts must already be
+    present in the reviewed entry and in its frozen monthly contribution input;
+    this function never calculates or guesses statutory values.
+    """
+    if run.date_from is None or run.date_to is None:
+        raise HTTPException(status_code=409, detail="Payroll period dates are required")
+    if (run.date_from.year, run.date_from.month) != (run.date_to.year, run.date_to.month):
+        raise HTTPException(
+            status_code=409,
+            detail="Monthly statutory collection cannot span calendar months",
+        )
+    month_end = calendar.monthrange(run.date_to.year, run.date_to.month)[1]
+    if run.date_to.day != month_end:
+        for entry in entries:
+            if entry.review_state == "excluded":
+                continue
+            for scheme in ("sss", "philhealth", "pagibig"):
+                try:
+                    amount = Decimal(str(entry.deductions.get(f"{scheme}_employee", "0")))
+                except (InvalidOperation, TypeError, ValueError) as exc:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Entry {entry.id} has an invalid {scheme} deduction line",
+                    ) from exc
+                if amount != 0:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"{scheme} may be collected only in the final payroll period of the month",
+                    )
+        return
+    month = run.date_to.replace(day=1)
+    schemes = ("sss", "philhealth", "pagibig")
+    for entry in entries:
+        if entry.review_state == "excluded":
+            continue
+        monthly = entry.input_snapshot.get("monthly_contributions")
+        if not isinstance(monthly, dict) or monthly.get("month") != month.strftime("%Y-%m"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Entry {entry.id} lacks a reviewed monthly contribution snapshot",
+            )
+        amounts = monthly.get("schemes")
+        if not isinstance(amounts, dict):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Entry {entry.id} has no monthly statutory scheme breakdown",
+            )
+        for scheme in schemes:
+            values = amounts.get(scheme)
+            if not isinstance(values, dict):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Entry {entry.id} is missing {scheme} monthly contribution data",
+                )
+            try:
+                basis = Decimal(str(values["basis"]))
+                employee_amount = Decimal(str(values["employee"]))
+                employer_amount = Decimal(str(values["employer"]))
+            except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Entry {entry.id} has invalid {scheme} contribution amounts",
+                ) from exc
+            if (
+                not all(value.is_finite() for value in (basis, employee_amount, employer_amount))
+                or basis <= 0
+                or employee_amount < 0
+                or employer_amount < 0
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Entry {entry.id} has invalid {scheme} contribution inputs",
+                )
+            deduction_key = f"{scheme}_employee"
+            try:
+                reviewed_employee_amount = Decimal(str(entry.deductions[deduction_key]))
+            except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Entry {entry.id} is missing its reviewed {scheme} deduction line",
+                ) from exc
+            if reviewed_employee_amount != employee_amount:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Entry {entry.id} {scheme} deduction differs from the monthly snapshot",
+                )
+            source_references = values.get("source_references")
+            official_domain = {
+                "sss": "sss.gov.ph",
+                "philhealth": "philhealth.gov.ph",
+                "pagibig": "pagibigfund.gov.ph",
+            }[scheme]
+            if (
+                not isinstance(source_references, list)
+                or not source_references
+                or any(
+                    not isinstance(url, str)
+                    or not url.startswith("https://")
+                    or not (
+                        (hostname := (urlparse(url).hostname or "")) == official_domain
+                        or hostname.endswith(f".{official_domain}")
+                    )
+                    for url in source_references
+                )
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Entry {entry.id} has no reviewed source reference for {scheme}",
+                )
+            prior = session.exec(
+                select(PayrollContributionLedger.id).where(
+                    PayrollContributionLedger.employee_id == entry.employee_id,
+                    PayrollContributionLedger.scheme == scheme,
+                    PayrollContributionLedger.contribution_month == month,
+                    PayrollContributionLedger.sequence == 0,
+                )
+            ).first()
+            if prior is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Employee {entry.employee_id} already has a {scheme} collection for {month:%Y-%m}",
+                )
+            session.add(
+                PayrollContributionLedger(
+                    employee_id=entry.employee_id,
+                    payroll_entry_id=entry.id,
+                    scheme=scheme,
+                    contribution_month=month,
+                    monthly_basis=basis,
+                    employee_amount=employee_amount,
+                    employer_amount=employer_amount,
+                    calculation_snapshot={"month": monthly["month"], "values": values},
+                    source_references=source_references,
+                    created_by=actor_id,
+                )
+            )
 
 
 def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> bool:
@@ -653,6 +798,18 @@ def finalize_payroll_run(
             status_code=409,
             detail="Payroll range no longer matches a configured pay-group period",
         )
+    contribution_policy = policy.policy.get("contribution_collection")
+    if not isinstance(contribution_policy, dict) or (
+        contribution_policy.get("frequency") != "once_monthly"
+        or contribution_policy.get("collection_period") != "last_period"
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="The confirmed policy does not specify once-monthly contribution collection",
+        )
+    _stage_monthly_contribution_ledger(
+        session=session, run=run, entries=entries, actor_id=current_user.id
+    )
     try:
         delivery_timezone = ZoneInfo(str(policy.policy["timezone"]))
     except (KeyError, ZoneInfoNotFoundError) as exc:
@@ -2106,7 +2263,7 @@ def prepare_attendance_payroll_draft(
         blockers.append(
             PayrollPreflightBlocker(
                 code="statutory_calculation_unavailable",
-                message="Statutory withholding, contribution timing/YTD reconciliation, and employer contributions are not yet calculated.",
+                message="Approved statutory schedule amounts and BIR annualization/YTD inputs are not yet calculated for this employee.",
             )
         )
         employee_salaries = session.exec(
@@ -2623,6 +2780,24 @@ def confirm_payroll_policy(
             raise HTTPException(
                 status_code=422, detail=f"{key} must be a non-empty policy object"
             )
+    # The selected company rule is one statutory collection per calendar
+    # month. An explicit final-period trigger prevents a twice-monthly run
+    # from withholding a full monthly amount twice.
+    contribution_collection = row.policy["contribution_collection"]
+    if (
+        contribution_collection.get("frequency") != "once_monthly"
+        or contribution_collection.get("collection_period") != "last_period"
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Contribution collection must be configured once per calendar month on the final pay period.",
+                "required": {
+                    "frequency": "once_monthly",
+                    "collection_period": "last_period",
+                },
+            },
+        )
     official_hosts = (
         "bir.gov.ph",
         "sss.gov.ph",
@@ -3080,11 +3255,6 @@ async def get_payroll_run(
     run, entries = select_payroll_run_with_entries(session, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Payroll run not found")
-    if run.workflow_status != "finalized" and run.status not in {
-        PayrollRunStatus.APPROVED,
-        PayrollRunStatus.PAID,
-    }:
-        raise HTTPException(status_code=409, detail="Payslips are available only for finalized payroll runs")
 
     entry_list = [PayrollEntryRead.model_validate(e) for e in entries]
     return PayrollRunRead.model_validate(run, update={"entries": entry_list})

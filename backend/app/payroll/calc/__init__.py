@@ -66,6 +66,35 @@ def _get_effective_sss_bracket(
     return matching
 
 
+def _get_effective_pagibig_bracket(
+    session: Session, salary: Decimal, as_of: date
+) -> PagIBIGBracket | None:
+    """Select the salary band from the latest effective Pag-IBIG schedule."""
+    rows = session.exec(
+        select(PagIBIGBracket)
+        .where(
+            col(PagIBIGBracket.effective_date) <= as_of,
+            col(PagIBIGBracket.is_deleted).is_(False),
+            col(PagIBIGBracket.is_active).is_(True),
+        )
+        .order_by(
+            col(PagIBIGBracket.effective_date).desc(),
+            col(PagIBIGBracket.salary_min),
+        )
+    ).all()
+    if not rows:
+        return None
+    effective_date = rows[0].effective_date
+    schedule = [row for row in rows if row.effective_date == effective_date]
+    matching = next(
+        (row for row in schedule if row.salary_min <= salary <= row.salary_max), None
+    )
+    # The top published fund-salary band also defines the contribution cap.
+    if matching is None and salary > max(row.salary_max for row in schedule):
+        return max(schedule, key=lambda row: row.salary_max)
+    return matching
+
+
 # --- SSS -----------------------------------------------------------------------
 
 
@@ -127,7 +156,7 @@ def calculate_pagibig_employee_share(
     session: Session, salary: Decimal, effective_date: str | None = None
 ) -> Decimal:
     as_of = _effective_date(effective_date)
-    bracket = _get_effective_bracket(session, PagIBIGBracket, as_of)
+    bracket = _get_effective_pagibig_bracket(session, salary, as_of)
     if not bracket:
         return Decimal("0.00")
     if salary < bracket.salary_min:
@@ -141,7 +170,7 @@ def calculate_pagibig_employer_share(
     session: Session, salary: Decimal, effective_date: str | None = None
 ) -> Decimal:
     as_of = _effective_date(effective_date)
-    bracket = _get_effective_bracket(session, PagIBIGBracket, as_of)
+    bracket = _get_effective_pagibig_bracket(session, salary, as_of)
     if not bracket:
         return Decimal("0.00")
     if salary < bracket.salary_min:

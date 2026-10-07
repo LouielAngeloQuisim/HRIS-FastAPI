@@ -120,6 +120,73 @@ export function usePayrollRun(id: string | undefined) {
   })
 }
 
+export interface PayrollReviewActionResult {
+  run_id: string
+  entry_id: string | null
+  workflow_status: string
+  reviewed_count: number
+  excluded_count: number
+  unresolved_count: number
+}
+
+function usePayrollReviewMutation<TPayload>(
+  mutationFn: (payload: TPayload) => Promise<PayrollReviewActionResult>,
+  runId: string
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['payroll-runs', runId] }),
+        qc.invalidateQueries({ queryKey: ['payroll-runs'] }),
+      ])
+    },
+  })
+}
+
+export function useStartPayrollReview(runId: string) {
+  return usePayrollReviewMutation(
+    () =>
+      api
+        .post<PayrollReviewActionResult>(`/payroll/runs/${runId}/start-review`)
+        .then((r) => r.data),
+    runId
+  )
+}
+
+export function useReviewPayrollEntry(runId: string) {
+  return usePayrollReviewMutation(
+    (payload: {
+      entryId: string
+      action: 'reviewed' | 'excluded'
+      expected_input_fingerprint: string
+      reason?: string
+    }) =>
+      api
+        .post<PayrollReviewActionResult>(
+          `/payroll/runs/${runId}/entries/${payload.entryId}/review`,
+          {
+            action: payload.action,
+            expected_input_fingerprint: payload.expected_input_fingerprint,
+            reason: payload.reason,
+          }
+        )
+        .then((r) => r.data),
+    runId
+  )
+}
+
+export function useFinalizePayrollRun(runId: string) {
+  return usePayrollReviewMutation(
+    () =>
+      api
+        .post<PayrollReviewActionResult>(`/payroll/runs/${runId}/finalize`)
+        .then((r) => r.data),
+    runId
+  )
+}
+
 export async function previewPayroll(
   data: PayrollPreviewPayload
 ): Promise<PayrollPreviewEntry[]> {
@@ -401,7 +468,9 @@ export function useSalaryRoster(missingSalary: boolean) {
         .get<{
           data: PayrollSalaryRosterItem[]
           count: number
-        }>('/payroll/salary-roster', { params: { missing_salary: missingSalary, limit: 500 } })
+        }>('/payroll/salary-roster', {
+          params: { missing_salary: missingSalary, limit: 500 },
+        })
         .then((r) => r.data),
   })
 }

@@ -112,19 +112,27 @@ def philhealth_brackets(db: Session) -> Generator[list[PhilHealthBracket], None,
 @pytest.fixture(scope="function")
 def pagibig_brackets(db: Session) -> Generator[list[PagIBIGBracket], None, None]:
     bracket1 = PagIBIGBracket(
-        salary_min=1000, salary_max=1500, employee_rate=2.0, employer_rate=2.0,
+        salary_min=0.01, salary_max=1500, employee_rate=1.0, employer_rate=2.0,
         effective_date="2024-01-01", is_active=True,
     )
     bracket2 = PagIBIGBracket(
-        salary_min=1501, salary_max=10000, employee_rate=1.0, employer_rate=2.0,
-        effective_date="2024-07-01", is_active=True,
+        salary_min=1500.01, salary_max=5000, employee_rate=2.0, employer_rate=2.0,
+        effective_date="2024-01-01", is_active=True,
     )
-    db.add(bracket1)
-    db.add(bracket2)
+    bracket3 = PagIBIGBracket(
+        salary_min=0.01, salary_max=1500, employee_rate=1.0, employer_rate=2.0,
+        effective_date="2024-02-01", is_active=True,
+    )
+    bracket4 = PagIBIGBracket(
+        salary_min=1500.01, salary_max=10000, employee_rate=2.0, employer_rate=2.0,
+        effective_date="2024-02-01", is_active=True,
+    )
+    rows = [bracket1, bracket2, bracket3, bracket4]
+    db.add_all(rows)
     db.commit()
-    yield [bracket1, bracket2]
-    db.delete(bracket1)
-    db.delete(bracket2)
+    yield rows
+    for row in rows:
+        db.delete(row)
     db.commit()
 
 
@@ -366,7 +374,7 @@ class TestPagIBIGCalculation:
 
     def test_calculate_employee_share_high_salary(self, client: TestClient, superuser_token_headers, pagibig_brackets):
         response = client.post(f"{API}/pagibig/calculate",
-                               params={"salary": 1800.0, "effective_date": "2024-07-01"},
+                               params={"salary": 1800.0, "effective_date": "2024-02-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
@@ -374,21 +382,21 @@ class TestPagIBIGCalculation:
         assert isinstance(data["employee_share"], float)
         assert isinstance(data["employer_share"], float)
         assert isinstance(data["total"], float)
-        # 1800 * 1% = 18.00, 1800 * 2% = 36.00
-        assert data["employee_share"] == 18.0
+        # Above ₱1,500, employee and employer rates are both 2%.
+        assert data["employee_share"] == 36.0
         assert data["employer_share"] == 36.0
-        assert data["total"] == 54.0
+        assert data["total"] == 72.0
 
     def test_calculate_employee_share_very_high_salary(self, client: TestClient, superuser_token_headers, pagibig_brackets):
         response = client.post(f"{API}/pagibig/calculate",
-                               params={"salary": 5000.0, "effective_date": "2024-07-01"},
+                               params={"salary": 5000.0, "effective_date": "2024-02-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == PAGIBIG_KEYS
-        assert data["employee_share"] == 50.0
+        assert data["employee_share"] == 100.0
         assert data["employer_share"] == 100.0
-        assert data["total"] == 150.0
+        assert data["total"] == 200.0
 
     def test_first_bracket_rates_and_upper_bound(self, client: TestClient, superuser_token_headers, pagibig_brackets):
         response = client.post(f"{API}/pagibig/calculate",
@@ -397,9 +405,9 @@ class TestPagIBIGCalculation:
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == PAGIBIG_KEYS
-        assert data["employee_share"] == 30.0
+        assert data["employee_share"] == 15.0
         assert data["employer_share"] == 30.0
-        assert data["total"] == 60.0
+        assert data["total"] == 45.0
 
         response = client.post(f"{API}/pagibig/calculate",
                                params={"salary": 1000.0, "effective_date": "2024-01-01"},
@@ -407,39 +415,39 @@ class TestPagIBIGCalculation:
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == PAGIBIG_KEYS
-        assert data["employee_share"] == 20.0
+        assert data["employee_share"] == 10.0
         assert data["employer_share"] == 20.0
-        assert data["total"] == 40.0
+        assert data["total"] == 30.0
 
-    def test_one_centavo_below_min_yields_zero(self, client: TestClient, superuser_token_headers, pagibig_brackets):
+    def test_low_compensation_uses_employee_one_percent_rate(self, client: TestClient, superuser_token_headers, pagibig_brackets):
         response = client.post(f"{API}/pagibig/calculate",
                                params={"salary": 999.99, "effective_date": "2024-01-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["employee_share"] == 0.0
-        assert data["employer_share"] == 0.0
-        assert data["total"] == 0.0
+        assert data["employee_share"] == 10.0
+        assert data["employer_share"] == 20.0
+        assert data["total"] == 30.0
 
     def test_above_max_clamps_basis_to_max(self, client: TestClient, superuser_token_headers, pagibig_brackets):
         response = client.post(f"{API}/pagibig/calculate",
-                               params={"salary": 2000.0, "effective_date": "2024-01-01"},
+                               params={"salary": 7000.0, "effective_date": "2024-01-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
         assert set(data) == PAGIBIG_KEYS
-        assert data["employee_share"] == 30.0
-        assert data["total"] == 60.0
+        assert data["employee_share"] == 100.0
+        assert data["total"] == 200.0
 
     def test_latest_effective_date(self, client: TestClient, superuser_token_headers, pagibig_brackets):
         response = client.post(f"{API}/pagibig/calculate",
-                               params={"salary": 5000.0, "effective_date": "2024-07-01"},
+                               params={"salary": 5000.0, "effective_date": "2024-02-01"},
                                headers=superuser_token_headers)
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["employee_share"] == 50.0
+        assert data["employee_share"] == 100.0
         assert data["employer_share"] == 100.0
-        assert data["total"] == 150.0
+        assert data["total"] == 200.0
 
     def test_zero_salary(self, client: TestClient, superuser_token_headers, pagibig_brackets):
         # Route declares salary: Decimal = Query(..., gt=0); salary=0 is a 422 validation error.
@@ -457,9 +465,21 @@ class TestPagIBIGCalculation:
             assert response.status_code == 200, response.text
             data = response.json()
             _assert_share_shape(data)
-            expected_emp = float(_dec(bracket.salary_min) * _dec(bracket.employee_rate) / Decimal("100"))
+            expected_emp = float(
+                (
+                    _dec(bracket.salary_min)
+                    * _dec(bracket.employee_rate)
+                    / Decimal("100")
+                ).quantize(Decimal("0.01"))
+            )
             assert data["employee_share"] == expected_emp
-            expected_er = float(_dec(bracket.salary_min) * _dec(bracket.employer_rate) / Decimal("100"))
+            expected_er = float(
+                (
+                    _dec(bracket.salary_min)
+                    * _dec(bracket.employer_rate)
+                    / Decimal("100")
+                ).quantize(Decimal("0.01"))
+            )
             assert data["employer_share"] == expected_er
 
     def test_rejects_non_positive_salary(self, client: TestClient, superuser_token_headers, pagibig_brackets):
@@ -632,6 +652,31 @@ class TestBatchContributionCalculation:
                 db.delete(row)
             db.commit()
 
+    def test_pagibig_selects_rate_band_and_caps_monthly_fund_salary(
+        self, db: Session, pagibig_brackets: list[PagIBIGBracket]
+    ) -> None:
+        from app.payroll.calc import (
+            calculate_pagibig_employee_share,
+            calculate_pagibig_employer_share,
+        )
+
+        as_of = "2024-02-01"
+        assert calculate_pagibig_employee_share(
+            db, Decimal("1500"), as_of
+        ) == Decimal("15.00")
+        assert calculate_pagibig_employer_share(
+            db, Decimal("1500"), as_of
+        ) == Decimal("30.00")
+        assert calculate_pagibig_employee_share(
+            db, Decimal("1500.01"), as_of
+        ) == Decimal("30.00")
+        assert calculate_pagibig_employee_share(
+            db, Decimal("25000"), as_of
+        ) == Decimal("200.00")
+        assert calculate_pagibig_employer_share(
+            db, Decimal("25000"), as_of
+        ) == Decimal("200.00")
+
     def test_calculate_contributions(self, client: TestClient, superuser_token_headers,
                                       sss_brackets, philhealth_brackets, pagibig_brackets,
                                       bir_brackets):
@@ -651,12 +696,12 @@ class TestBatchContributionCalculation:
         assert c["sss_employer"] == 1026.0
         assert c["philhealth_employee"] == 625.0
         assert c["philhealth_employer"] == 625.0
-        assert c["pagibig_employee"] == 30.0
-        assert c["pagibig_employer"] == 30.0
-        assert _dec(c["taxable_income"]) == Decimal("25000.00") - Decimal("500.00") - Decimal("625.00") - Decimal("30.00")
-        assert c["taxable_income"] == 23845.0
+        assert c["pagibig_employee"] == 100.0
+        assert c["pagibig_employer"] == 100.0
+        assert _dec(c["taxable_income"]) == Decimal("25000.00") - Decimal("500.00") - Decimal("625.00") - Decimal("100.00")
+        assert c["taxable_income"] == 23775.0
         # The selected bracket supplies one cumulative base tax plus tax on excess.
-        assert c["bir"] == 5590.99
+        assert c["bir"] == 5569.99
 
     def test_calculate_contributions_without_effective_date(self, client: TestClient, superuser_token_headers,
                                                              sss_brackets, philhealth_brackets, pagibig_brackets,
@@ -664,7 +709,7 @@ class TestBatchContributionCalculation:
         # No effective_date → today → latest bracket selection (eff=07-01).
         # SSS: 10001-30000 bracket → msc=15000 in range → emp=500, er=1056
         # PH: 15000 >= min 15000, <= max 40001 → exact → 15000*5%/2 = 375.0
-        # PI: 15000 > max 10000 → clamp → 10000*1%=100, 10000*2%=200
+        # PI: 15000 > max 10000 → clamp → 10000*2%=200 for each share.
         response = client.post(f"{API}/calculate-contributions/",
                                params={"gross_pay": 15000.0, "period_type": "monthly"},
                                headers=superuser_token_headers)
@@ -678,11 +723,11 @@ class TestBatchContributionCalculation:
         assert c["sss_employer"] == 1056.0
         assert c["philhealth_employee"] == 375.0
         assert c["philhealth_employer"] == 375.0
-        assert c["pagibig_employee"] == 100.0
+        assert c["pagibig_employee"] == 200.0
         assert c["pagibig_employer"] == 200.0
-        assert _dec(c["taxable_income"]) == Decimal("15000.00") - Decimal("500.00") - Decimal("375.00") - Decimal("100.00")
-        assert c["taxable_income"] == 14025.0
-        assert c["bir"] == 2985.41
+        assert _dec(c["taxable_income"]) == Decimal("15000.00") - Decimal("500.00") - Decimal("375.00") - Decimal("200.00")
+        assert c["taxable_income"] == 13925.0
+        assert c["bir"] == 2960.41
 
     def test_calculate_contributions_low_gross_pay(self, client: TestClient, superuser_token_headers,
                                                     sss_brackets, philhealth_brackets, pagibig_brackets,
@@ -698,11 +743,11 @@ class TestBatchContributionCalculation:
         assert c["sss_employer"] == 0.0
         assert c["philhealth_employee"] == 250.0
         assert c["philhealth_employer"] == 250.0
-        assert c["pagibig_employee"] == 20.0
+        assert c["pagibig_employee"] == 10.0
         assert c["pagibig_employer"] == 20.0
-        assert _dec(c["taxable_income"]) == Decimal("1000.00") - Decimal("250.00") - Decimal("20.00")
-        assert c["taxable_income"] == 730.0
-        assert c["bir"] == 146.0
+        assert _dec(c["taxable_income"]) == Decimal("1000.00") - Decimal("250.00") - Decimal("10.00")
+        assert c["taxable_income"] == 740.0
+        assert c["bir"] == 148.0
 
     def test_rejects_non_positive_gross_pay(self, client: TestClient, superuser_token_headers):
         response = client.post(f"{API}/calculate-contributions/",
@@ -754,10 +799,21 @@ class TestBracketListEndpoints:
         for bracket in brackets:
             assert set(bracket) == PAGIBIG_PUBLIC_KEYS
         payload = {
-            (bracket["salary_min"], bracket["employee_rate"], bracket["employer_rate"])
+            (
+                bracket["effective_date"],
+                bracket["salary_min"],
+                bracket["salary_max"],
+                bracket["employee_rate"],
+                bracket["employer_rate"],
+            )
             for bracket in brackets
         }
-        assert payload == {("1000.00", "2.000", "2.000"), ("1501.00", "1.000", "2.000")}
+        assert payload == {
+            ("2024-01-01", "0.01", "1500.00", "1.000", "2.000"),
+            ("2024-01-01", "1500.01", "5000.00", "2.000", "2.000"),
+            ("2024-02-01", "0.01", "1500.00", "1.000", "2.000"),
+            ("2024-02-01", "1500.01", "10000.00", "2.000", "2.000"),
+        }
 
     def test_list_bir_brackets(self, client: TestClient, superuser_token_headers, bir_brackets):
         response = client.get(f"{API}/bir-brackets/",

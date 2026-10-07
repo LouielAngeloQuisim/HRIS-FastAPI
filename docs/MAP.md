@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-07
-Source commit: e6d22c95076c859bb867239eadf108be29ae3892
+Source commit: 398955c39421d9c321cc56694c0bcdf8a426a39c
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
@@ -480,7 +480,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 34 revisions, single head `9d04b5c6d7e8`
+## Migration chain (oldest -> newest): 35 revisions, single head `67e279f8c3cc`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -519,6 +519,7 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 32. `7b8293a4b5c6` - Record idempotent identities for atomic, explicit salary batches.
 33. `8c93a4b5c6d7` - Enforce one active daily attendance record per employee and work date.
 34. `9d04b5c6d7e8` - Add payroll review snapshots and durable payslip-delivery outbox.
+35. `67e279f8c3cc` - Add monthly payroll contribution ledger
 
 ### Migration anomalies (static findings, report-only)
 

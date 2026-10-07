@@ -18,6 +18,7 @@ from typing import Any
 from pydantic import GetCoreSchemaHandler
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     DateTime,
     Index,
     Numeric,
@@ -491,6 +492,74 @@ class PayrollEntry(SQLModel, table=True):
     deleted_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
     created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
     updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+
+
+class PayrollContributionLedger(SQLModel, table=True):
+    """Immutable monthly statutory contribution collection record.
+
+    Sequence zero is the single regular collection for an employee/scheme/month.
+    Later rows are reasoned corrections and never overwrite the finalized amount.
+    A row is written in the same transaction as its finalized payroll entry.
+    """
+
+    __tablename__ = "payroll_contribution_ledger"
+    __table_args__ = (
+        UniqueConstraint(
+            "employee_id",
+            "scheme",
+            "contribution_month",
+            "sequence",
+            name="uq_payroll_contribution_employee_scheme_month_sequence",
+        ),
+        UniqueConstraint(
+            "payroll_entry_id",
+            "scheme",
+            "sequence",
+            name="uq_payroll_contribution_entry_scheme_sequence",
+        ),
+        CheckConstraint(
+            "scheme IN ('sss', 'philhealth', 'pagibig')",
+            name="ck_payroll_contribution_scheme",
+        ),
+        CheckConstraint(
+            "(sequence = 0 AND adjustment_reason IS NULL AND reverses_id IS NULL) OR "
+            "(sequence > 0 AND adjustment_reason IS NOT NULL AND reverses_id IS NOT NULL)",
+            name="ck_payroll_contribution_adjustment_reason",
+        ),
+        Index(
+            "ix_payroll_contribution_employee_month",
+            "employee_id",
+            "contribution_month",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    employee_id: uuid.UUID = Field(
+        foreign_key="employee_records.id", ondelete="RESTRICT", index=True
+    )
+    payroll_entry_id: uuid.UUID = Field(
+        foreign_key="payroll_entry.id", ondelete="RESTRICT", index=True
+    )
+    scheme: str = Field(max_length=16)
+    contribution_month: date
+    sequence: int = Field(default=0, ge=0)
+    monthly_basis: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
+    employee_amount: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
+    employer_amount: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
+    calculation_snapshot: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    source_references: list[str] = Field(default_factory=list, sa_type=JSON)
+    adjustment_reason: str | None = Field(default=None, max_length=1024)
+    reverses_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="payroll_contribution_ledger.id",
+        ondelete="RESTRICT",
+    )
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
 
 
 class PayrollDeliveryOutbox(SQLModel, table=True):

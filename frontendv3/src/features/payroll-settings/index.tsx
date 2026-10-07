@@ -33,7 +33,10 @@ export default function PayrollSettingsPage() {
   "premium_rules": null,
   "allowance_tax_treatment": null,
   "rounding_mode": null,
-  "contribution_collection": null,
+  "contribution_collection": {
+    "frequency": "once_monthly",
+    "collection_period": "last_period"
+  },
   "statutory_sources_reviewed": []
 }`)
   const [policyEffectiveDate, setPolicyEffectiveDate] = useState('')

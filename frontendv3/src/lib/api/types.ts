@@ -1127,6 +1127,11 @@ export interface PayrollEntryPublic {
   thirteenth_month: string
   non_taxable_income: string
   taxable_income: string
+  review_state: 'blocked' | 'ready' | 'reviewed' | 'excluded'
+  reviewed_by: string | null
+  reviewed_at: string | null
+  input_fingerprint: string | null
+  blockers: Array<{ code: string; message: string; work_date?: string }>
   created_at: string | null
 }
 

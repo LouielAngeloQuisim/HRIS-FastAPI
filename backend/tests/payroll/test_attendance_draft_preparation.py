@@ -121,7 +121,10 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
             "premium_rules": {},
             "allowance_tax_treatment": {},
             "rounding_mode": "half_up",
-            "contribution_collection": {},
+            "contribution_collection": {
+                "frequency": "once_monthly",
+                "collection_period": "last_period",
+            },
             "statutory_sources_reviewed": ["https://www.sss.gov.ph/pay-contribution/"],
         },
         confirmed=True,

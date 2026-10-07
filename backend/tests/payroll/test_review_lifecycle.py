@@ -47,3 +47,12 @@ def test_legacy_run_cannot_be_finalized(
     db.refresh(run)
     assert run.status == PayrollRunStatus.DRAFT
     assert run.frozen_snapshot is None
+
+
+def test_authorized_payroll_user_can_read_draft_for_review(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    run = _legacy_run(db)
+    response = client.get(f"{API}/runs/{run.id}", headers=superuser_token_headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["workflow_status"] == "draft"

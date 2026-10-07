@@ -153,11 +153,18 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
   ).toBeVisible()
   await page.getByRole('button', { name: 'Start employee review' }).click()
   await expect(page.getByRole('status')).toContainText('exclude a blocked employee with a reason')
-  const entryCard = page.getByTestId(`payroll-entry-${draft.entries.find((candidate: { employee_id: string }) => candidate.employee_id === employee.id).id}`)
+  const target = draft.entries.find((candidate: { employee_id: string }) => candidate.employee_id === employee.id)
+  expect(target, 'The prepared run must include this test employee').toBeTruthy()
   const exclusionReason = 'Missing verified tax-year opening balance; exclude from this run'
-  await entryCard.getByRole('textbox', { name: 'Exclusion reason' }).fill(exclusionReason)
-  await entryCard.getByRole('button', { name: 'Exclude with reason' }).click()
-  await expect(entryCard.getByText('Review state: excluded')).toBeVisible()
+  for (const candidate of draft.entries) {
+    const entryCard = page.getByTestId(`payroll-entry-${candidate.id}`)
+    const reason = candidate.employee_id === employee.id
+      ? exclusionReason
+      : 'No effective assignment to this QA pay group; explicitly exclude from this run'
+    await entryCard.getByRole('textbox', { name: 'Exclusion reason' }).fill(reason)
+    await entryCard.getByRole('button', { name: 'Exclude with reason' }).click()
+    await expect(entryCard.getByText('Review state: excluded')).toBeVisible()
+  }
 
   const saved = await page.request.get(`${apiUrl}/payroll/runs/${draft.id}`, { headers: await bearer(page) })
   expect(saved.status()).toBe(200)
@@ -165,7 +172,6 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
   expect(savedRun.workflow_status).toBe('ready_for_finalization')
   const entry = savedRun.entries.find((candidate: { employee_id: string }) => candidate.employee_id === employee.id)
   expect(entry.review_reason).toBe(exclusionReason)
-  expect(entry, 'The prepared run must include this test employee').toBeTruthy()
   expect(entry.review_state).toBe('excluded')
   expect(entry.blockers.map((blocker: { code: string }) => blocker.code)).toContain('bir_ytd_unavailable')
   expect(

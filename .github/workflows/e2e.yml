@@ -36,6 +36,10 @@ jobs:
       FIRST_SUPERUSER: admin@example.com
       FIRST_SUPERUSER_PASSWORD: e2e-admin-placeholder
       EMAILS_FROM_EMAIL: info@example.com
+      # This workflow uses a disposable PostgreSQL service and placeholder users.
+      # Enable finalization for acceptance coverage; keep email delivery disabled.
+      PAYROLL_FINALIZATION_ENABLED: 'true'
+      PAYSLIP_DELIVERY_ENABLED: 'false'
       POSTGRES_SERVER: 127.0.0.1
       POSTGRES_PORT: 5432
       POSTGRES_USER: e2e

@@ -1,8 +1,12 @@
 """Payslip worker renders frozen snapshots and treats uncertain SMTP safely."""
 
+import socketserver
+import threading
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from email import policy
+from email.parser import BytesParser
 from unittest.mock import patch
 
 import pytest
@@ -128,6 +132,73 @@ def test_delivery_attaches_pdf_and_marks_success(
     assert message.attachments
     attachment = next(iter(message.attachments))
     assert attachment.mime_type == "application/pdf"
+
+
+class _SMTPCollector(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self) -> None:
+        self.messages: list[bytes] = []
+        collector = self
+
+        class Handler(socketserver.StreamRequestHandler):
+            def handle(self) -> None:
+                self.wfile.write(b"220 local test sink\r\n")
+                while line := self.rfile.readline():
+                    command = line.decode("ascii", errors="replace").strip().split(" ", 1)[0].upper()
+                    if command in {"EHLO", "HELO"}:
+                        self.wfile.write(b"250-local test sink\r\n250 SIZE 10485760\r\n")
+                    elif command == "DATA":
+                        self.wfile.write(b"354 send message data\r\n")
+                        chunks: list[bytes] = []
+                        while data_line := self.rfile.readline():
+                            if data_line == b".\r\n":
+                                break
+                            chunks.append(data_line[1:] if data_line.startswith(b"..") else data_line)
+                        collector.messages.append(b"".join(chunks))
+                        self.wfile.write(b"250 accepted by local test sink\r\n")
+                    elif command == "QUIT":
+                        self.wfile.write(b"221 closing connection\r\n")
+                        return
+                    else:
+                        self.wfile.write(b"250 ok\r\n")
+
+        super().__init__(("127.0.0.1", 0), Handler)
+
+
+def test_delivery_sends_frozen_pdf_to_local_smtp_sink(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_job: PayrollDeliveryOutbox,
+) -> None:
+    monkeypatch.setattr(settings, "EMAILS_FROM_EMAIL", "noreply@example.test")
+    monkeypatch.setattr(settings, "SMTP_TLS", False)
+    monkeypatch.setattr(settings, "SMTP_SSL", False)
+    monkeypatch.setattr(settings, "SMTP_USER", "")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "")
+
+    with _SMTPCollector() as sink:
+        monkeypatch.setattr(settings, "SMTP_HOST", "127.0.0.1")
+        monkeypatch.setattr(settings, "SMTP_PORT", sink.server_address[1])
+        worker_thread = threading.Thread(target=sink.serve_forever, daemon=True)
+        worker_thread.start()
+        try:
+            _send_job(delivery_job.id)
+        finally:
+            sink.shutdown()
+            worker_thread.join(timeout=2)
+
+    db.refresh(delivery_job)
+    assert delivery_job.status == "sent", delivery_job.last_error_code
+    assert len(sink.messages) == 1
+    message = BytesParser(policy=policy.default).parsebytes(sink.messages[0])
+    assert message["To"] == "qa@example.test"
+    assert "2026-09-01 to 2026-09-30" in str(message["Subject"])
+    attachment = next(part for part in message.iter_attachments())
+    assert attachment.get_filename() == "payslip.pdf"
+    assert attachment.get_content_type() == "application/pdf"
+    assert attachment.get_payload(decode=True).startswith(b"%PDF-")
 
 
 def test_ambiguous_smtp_failure_is_not_retried(

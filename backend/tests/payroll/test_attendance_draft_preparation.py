@@ -13,30 +13,43 @@ from app.attendance.models import (
     EmployeeShiftAssignment,
     Shift,
 )
+from app.audit.models import AuditLog
+from app.common.security import get_password_hash
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords
 from app.payroll.models import (
     EmployeePayGroupAssignment,
     EmployeeSalary,
     EmployeeTaxYearDeclaration,
-    SSSBracket,
+    PagIBIGBracket,
+    PayrollContributionLedger,
+    PayrollDeliveryOutbox,
     PayrollPayGroup,
     PayrollPolicyVersion,
+    PayrollRunStatus,
     PayType,
+    PhilHealthBracket,
+    SSSBracket,
 )
 from app.payroll.payroll_tables import PayrollEntry, PayrollRun
 from app.payroll.routes import _payroll_entry_inputs_are_current
+from app.user.models import User
+from tests.utils.user import user_authentication_headers
 
 API = f"{settings.API_V1_STR}/payroll"
 
 
 def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
-    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     employee = EmployeeRecords(
         employee_code=f"DRAFT-{uuid.uuid4().hex[:8]}",
         first_name="QA",
         last_name="Payroll",
+        email=f"qa-payroll-{uuid.uuid4().hex[:8]}@example.test",
         birthdate=date(1990, 1, 1),
         date_hired=date(2020, 1, 1),
     )
@@ -178,7 +191,8 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     review = client.post(
         f"{API}/runs/{data['id']}/start-review", headers=superuser_token_headers
     )
-    assert review.status_code == 409
+    assert review.status_code == 200, review.text
+    assert review.json()["workflow_status"] == "in_review"
 
     # A reviewed tax-year opening input allows the supported ordinary
     # semi-monthly path to calculate the current-period BIR withholding.
@@ -195,6 +209,35 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     resolved_absence.is_absent = False
     resolved_absence.is_time_calculated = True
     db.add(resolved_absence)
+    original_run = db.get(PayrollRun, uuid.UUID(data["id"]))
+    assert original_run is not None and original_run.input_fingerprint
+    rebuilt = client.post(
+        f"{API}/runs/{original_run.id}/rebuild-attendance-draft",
+        json={
+            "expected_run_fingerprint": original_run.input_fingerprint,
+            "reason": "Attendance was corrected after draft preparation",
+        },
+        headers=superuser_token_headers,
+    )
+    assert rebuilt.status_code == 201, rebuilt.text
+    replacement = rebuilt.json()
+    assert replacement["id"] != data["id"]
+    db.refresh(original_run)
+    assert original_run.status == PayrollRunStatus.VOID
+    replacement_entry = next(
+        row for row in replacement["entries"] if row["employee_id"] == str(employee.id)
+    )
+    assert replacement_entry["gross_pay"] == "13000.00"
+    rebuild_audit = db.exec(
+        select(AuditLog).where(
+            AuditLog.action == "rebuild_attendance_draft",
+            AuditLog.path == f"/api/v1/payroll/runs/{original_run.id}/rebuild-attendance-draft",
+        )
+    ).first()
+    assert rebuild_audit is not None
+    assert rebuild_audit.extra is not None
+    assert rebuild_audit.extra["replacement_run_id"] == replacement["id"]
+
     for day in range(16, 32):
         work_date = date(2026, 10, day)
         if work_date.weekday() >= 5:
@@ -234,6 +277,7 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     second_entry = next(
         row for row in second.json()["entries"] if row["employee_id"] == str(employee.id)
     )
+    assert not second_entry["blockers"], second_entry["blockers"]
     assert second_entry["taxable_income"] == "10850.00", second_entry["blockers"]
     assert second_entry["deductions"]["bir_withholding"] == "64.95"
     assert second_entry["deductions"]["statutory"] == {
@@ -241,26 +285,96 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         "philhealth": "650.00",
         "pagibig": "200.00",
     }
-    sss_snapshot = second_entry["input_snapshot"]["monthly_contributions"]["schemes"]["sss"]["schedule_rows"]
-    assert sss_snapshot
-    assert sss_snapshot[0]["updated_at"]
-    assert sss_snapshot[0]["values"]["employee_ss"]
+    schedule_snapshots = second_entry["input_snapshot"]["monthly_contributions"]["schemes"]
+    for scheme in ("sss", "philhealth", "pagibig"):
+        schedule_rows = schedule_snapshots[scheme]["schedule_rows"]
+        assert schedule_rows
+        assert schedule_rows[0]["updated_at"]
+        assert schedule_rows[0]["values"]
     payroll_entry = db.get(PayrollEntry, uuid.UUID(second_entry["id"]))
     assert payroll_entry is not None
     assert _payroll_entry_inputs_are_current(db, payroll_entry)
 
     # An in-place edit must invalidate the frozen draft even when its row ID
     # and effective date remain unchanged.
-    bracket = db.get(SSSBracket, uuid.UUID(sss_snapshot[0]["id"]))
-    assert bracket is not None
-    original_employee_ss = bracket.employee_ss
-    bracket.employee_ss += Decimal("1.00")
-    db.add(bracket)
+    for scheme, model, field, increment in (
+        ("sss", SSSBracket, "employee_ss", Decimal("1.00")),
+        ("philhealth", PhilHealthBracket, "employee_share", Decimal("0.01")),
+        ("pagibig", PagIBIGBracket, "employee_rate", Decimal("0.001")),
+    ):
+        schedule_row = schedule_snapshots[scheme]["schedule_rows"][0]
+        bracket = db.get(model, uuid.UUID(schedule_row["id"]))
+        assert bracket is not None
+        original_value = getattr(bracket, field)
+        setattr(bracket, field, original_value + increment)
+        db.add(bracket)
+        db.commit()
+        assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+        setattr(bracket, field, original_value)
+        db.add(bracket)
+        db.commit()
+        assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
+    run_id = second.json()["id"]
+    start_review = client.post(
+        f"{API}/runs/{run_id}/start-review", headers=superuser_token_headers
+    )
+    assert start_review.status_code == 200, start_review.text
+    for candidate in second.json()["entries"]:
+        action = "excluded" if candidate["blockers"] else "reviewed"
+        review = client.post(
+            f"{API}/runs/{run_id}/entries/{candidate['id']}/review",
+            json={
+                "action": action,
+                "reason": "Unrelated QA fixture has no payroll setup" if action == "excluded" else None,
+                "expected_input_fingerprint": candidate["input_fingerprint"],
+            },
+            headers=superuser_token_headers,
+        )
+        assert review.status_code == 200, review.text
+    assert review.json()["workflow_status"] == "ready_for_finalization"
+
+    password = "qa-finalizer-password"
+    finalizer = User(
+        email=f"payroll-finalizer-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password=get_password_hash(password),
+        is_superuser=True,
+    )
+    db.add(finalizer)
     db.commit()
-    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
-    bracket.employee_ss = original_employee_ss
-    db.add(bracket)
-    db.commit()
+    finalizer_headers = user_authentication_headers(
+        client=client, email=finalizer.email, password=password
+    )
+    monkeypatch.setattr(settings, "PAYROLL_FINALIZATION_ENABLED", True)
+    finalized = client.post(f"{API}/runs/{run_id}/finalize", headers=finalizer_headers)
+    assert finalized.status_code == 200, finalized.text
+    assert finalized.json()["workflow_status"] == "finalized"
+    finalized_run = db.get(PayrollRun, uuid.UUID(run_id))
+    assert finalized_run is not None
+    assert finalized_run.frozen_snapshot is not None
+    assert finalized_run.finalized_by == finalizer.id
+    assert finalized_run.created_by != finalized_run.finalized_by
+    ledgers = db.exec(
+        select(PayrollContributionLedger).where(
+            PayrollContributionLedger.payroll_entry_id == payroll_entry.id
+        )
+    ).all()
+    assert {row.scheme for row in ledgers} == {"sss", "philhealth", "pagibig"}
+    outbox = db.exec(
+        select(PayrollDeliveryOutbox).where(
+            PayrollDeliveryOutbox.payroll_entry_id == payroll_entry.id
+        )
+    ).one()
+    assert outbox.status == "scheduled"
+    assert outbox.recipient_snapshot == employee.email
+
+    payslip = client.get(
+        f"{API}/runs/{run_id}/entries/{payroll_entry.id}/payslip.pdf",
+        headers=superuser_token_headers,
+    )
+    assert payslip.status_code == 200, payslip.text
+    assert payslip.headers["content-type"] == "application/pdf"
+    assert payslip.content.startswith(b"%PDF-")
 
 
 def test_december_draft_uses_annualized_tax_and_opening_balance(

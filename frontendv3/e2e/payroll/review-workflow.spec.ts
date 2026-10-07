@@ -17,7 +17,7 @@ async function createResource(page: Page, path: string, data: Record<string, unk
   return response.json()
 }
 
-test('blocked attendance payroll draft is visible in the review screen but cannot be reviewed', async ({ page, loginAsAdmin }) => {
+test('blocked attendance payroll draft can be explicitly excluded with a reason', async ({ page, loginAsAdmin }) => {
   await loginAsAdmin()
   const unique = Date.now().toString(36)
   const employee = await createParent(page, 'employees', {
@@ -152,16 +152,21 @@ test('blocked attendance payroll draft is visible in the review screen but canno
       .first(),
   ).toBeVisible()
   await page.getByRole('button', { name: 'Start employee review' }).click()
-  await expect(page.getByText('Resolve all payroll blockers before opening review.')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Mark reviewed' })).toHaveCount(0)
+  await expect(page.getByRole('status')).toContainText('exclude a blocked employee with a reason')
+  const entryCard = page.getByTestId(`payroll-entry-${draft.entries.find((candidate: { employee_id: string }) => candidate.employee_id === employee.id).id}`)
+  const exclusionReason = 'Missing verified tax-year opening balance; exclude from this run'
+  await entryCard.getByRole('textbox', { name: 'Exclusion reason' }).fill(exclusionReason)
+  await entryCard.getByRole('button', { name: 'Exclude with reason' }).click()
+  await expect(entryCard.getByText('Review state: excluded')).toBeVisible()
 
   const saved = await page.request.get(`${apiUrl}/payroll/runs/${draft.id}`, { headers: await bearer(page) })
   expect(saved.status()).toBe(200)
   const savedRun = await saved.json()
-  expect(savedRun.workflow_status).toBe('draft')
+  expect(savedRun.workflow_status).toBe('ready_for_finalization')
   const entry = savedRun.entries.find((candidate: { employee_id: string }) => candidate.employee_id === employee.id)
+  expect(entry.review_reason).toBe(exclusionReason)
   expect(entry, 'The prepared run must include this test employee').toBeTruthy()
-  expect(entry.review_state).toBe('blocked')
+  expect(entry.review_state).toBe('excluded')
   expect(entry.blockers.map((blocker: { code: string }) => blocker.code)).toContain('bir_ytd_unavailable')
   expect(
     entry.input_snapshot.monthly_contributions,

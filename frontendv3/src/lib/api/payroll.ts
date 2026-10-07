@@ -223,6 +223,28 @@ export function useStartPayrollReview(runId: string) {
   )
 }
 
+export function useRebuildAttendancePayrollDraft(runId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: {
+      expected_run_fingerprint: string
+      reason: string
+    }) =>
+      api
+        .post<PayrollRunPublic>(
+          `/payroll/runs/${runId}/rebuild-attendance-draft`,
+          payload
+        )
+        .then((r) => r.data),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['payroll-runs', runId] }),
+        qc.invalidateQueries({ queryKey: ['payroll-runs'] }),
+      ])
+    },
+  })
+}
+
 export function useReviewPayrollEntry(runId: string) {
   return usePayrollReviewMutation(
     (payload: {

@@ -400,6 +400,7 @@ class PayrollRunPublic(SQLModel):
     payment_date: date | None = None
     finalized_by: uuid.UUID | None = None
     finalized_at: datetime | None = None
+    input_fingerprint: str | None = None
     total_gross_pay: Decimal = Field(default=Decimal("0.00"))
     total_deductions: Decimal = Field(default=Decimal("0.00"))
     total_net_pay: Decimal = Field(default=Decimal("0.00"))
@@ -434,6 +435,7 @@ class PayrollEntryPublic(SQLModel):
     review_state: str = "ready"
     reviewed_by: uuid.UUID | None = None
     reviewed_at: datetime | None = None
+    review_reason: str | None = None
     calculation_version: str | None = None
     input_fingerprint: str | None = None
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -452,6 +454,11 @@ class PayrollAttendancePrepareRequest(SQLModel):
     pay_group_id: uuid.UUID
     date_from: date
     date_to: date
+
+
+class PayrollDraftRebuildRequest(SQLModel):
+    expected_run_fingerprint: str = Field(min_length=64, max_length=64)
+    reason: str = Field(min_length=5, max_length=1024)
 
 
 class PayrollReviewActionResult(SQLModel):

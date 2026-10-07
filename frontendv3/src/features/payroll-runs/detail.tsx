@@ -8,6 +8,7 @@ import {
   useFinalizePayrollRun,
   useReviewPayrollEntry,
   useStartPayrollReview,
+  useRebuildAttendancePayrollDraft,
   usePayrollDeliveryStatus,
   useCorrectPayrollDeliveryAddress,
   useResendPayrollDelivery,
@@ -36,6 +37,7 @@ export function PayrollRunDetail() {
   const approveMutation = useApprovePayrollRun()
   const voidMutation = useVoidPayrollRun()
   const startReviewMutation = useStartPayrollReview(runId)
+  const rebuildDraftMutation = useRebuildAttendancePayrollDraft(runId)
   const reviewEntryMutation = useReviewPayrollEntry(runId)
   const finalizeMutation = useFinalizePayrollRun(runId)
   const deliveryQuery = usePayrollDeliveryStatus(
@@ -91,6 +93,38 @@ export function PayrollRunDetail() {
       refetch()
     } catch {
       toast.error('Resolve all payroll blockers before opening review.')
+    }
+  }
+
+  const handleRebuildDraft = async () => {
+    if (!runId || !data?.input_fingerprint) {
+      toast.error(
+        'This draft has no current fingerprint and cannot be rebuilt.'
+      )
+      return
+    }
+    const reason = window
+      .prompt('Why are you rebuilding this blocked or outdated draft?')
+      ?.trim()
+    if (!reason) return
+    if (reason.length < 5) {
+      toast.error('Enter a reason with at least 5 characters.')
+      return
+    }
+    try {
+      const replacement = await rebuildDraftMutation.mutateAsync({
+        expected_run_fingerprint: data.input_fingerprint,
+        reason,
+      })
+      toast.success('A replacement draft was prepared from current inputs.')
+      await navigate({
+        to: '/payroll-runs/$runId',
+        params: { runId: replacement.id },
+      })
+    } catch {
+      toast.error(
+        'Draft rebuild failed. Reload, resolve the blockers, and retry.'
+      )
     }
   }
 
@@ -283,16 +317,37 @@ export function PayrollRunDetail() {
                     Workflow: {data.workflow_status.replace(/_/g, ' ')}
                   </p>
                 </div>
-                {canEdit && data.workflow_status === 'draft' && (
-                  <Button
-                    onClick={handleStartReview}
-                    disabled={startReviewMutation.isPending}
-                  >
-                    {startReviewMutation.isPending
-                      ? 'Checking entries…'
-                      : 'Start employee review'}
-                  </Button>
-                )}
+                {canEdit &&
+                  (data.workflow_status === 'draft' ||
+                    data.workflow_status === 'in_review') && (
+                    <div className='flex flex-wrap gap-2'>
+                      {data.workflow_status === 'draft' && (
+                        <Button
+                          onClick={handleStartReview}
+                          disabled={startReviewMutation.isPending}
+                        >
+                          {startReviewMutation.isPending
+                            ? 'Checking entries…'
+                            : 'Start employee review'}
+                        </Button>
+                      )}
+                      {data.status === 'draft' &&
+                        data.input_fingerprint &&
+                        data.entries.every((entry) =>
+                          ['blocked', 'ready'].includes(entry.review_state)
+                        ) && (
+                          <Button
+                            variant='outline'
+                            onClick={handleRebuildDraft}
+                            disabled={rebuildDraftMutation.isPending}
+                          >
+                            {rebuildDraftMutation.isPending
+                              ? 'Rebuilding…'
+                              : 'Rebuild blocked draft'}
+                          </Button>
+                        )}
+                    </div>
+                  )}
                 {canFinalize &&
                   data.workflow_status === 'ready_for_finalization' && (
                     <Button
@@ -310,10 +365,12 @@ export function PayrollRunDetail() {
                     </Button>
                   )}
               </div>
-              {data.workflow_status === 'draft' && (
+              {(data.workflow_status === 'draft' ||
+                data.workflow_status === 'in_review') && (
                 <p role='status' className='text-sm text-amber-700'>
-                  Drafts with unresolved attendance, salary, shift, policy or
-                  statutory blockers cannot enter review.
+                  Resolve blockers and rebuild before review, or explicitly
+                  exclude a blocked employee with a reason. Any review or
+                  exclusion decision locks the draft against rebuilding.
                 </p>
               )}
               {data.workflow_status === 'ready_for_finalization' &&
@@ -354,6 +411,11 @@ export function PayrollRunDetail() {
                         <p className='text-xs text-muted-foreground'>
                           Review state: {entry.review_state}
                         </p>
+                        {entry.review_reason && (
+                          <p className='text-xs text-muted-foreground'>
+                            Review reason: {entry.review_reason}
+                          </p>
+                        )}
                       </div>
                       <p className='text-sm'>
                         Net {formatCurrency(entry.net_pay)}
@@ -389,17 +451,19 @@ export function PayrollRunDetail() {
                     </details>
                     {canEdit &&
                       data.workflow_status === 'in_review' &&
-                      entry.review_state === 'ready' &&
-                      !entry.blockers.length && (
+                      ['ready', 'blocked'].includes(entry.review_state) && (
                         <div className='flex flex-wrap items-end gap-2'>
-                          <Button
-                            onClick={() =>
-                              handleReviewEntry(entry.id, 'reviewed')
-                            }
-                            disabled={reviewEntryMutation.isPending}
-                          >
-                            Mark reviewed
-                          </Button>
+                          {entry.review_state === 'ready' &&
+                            !entry.blockers.length && (
+                              <Button
+                                onClick={() =>
+                                  handleReviewEntry(entry.id, 'reviewed')
+                                }
+                                disabled={reviewEntryMutation.isPending}
+                              >
+                                Mark reviewed
+                              </Button>
+                            )}
                           <label className='grid min-w-56 flex-1 gap-1 text-xs'>
                             Exclusion reason
                             <input

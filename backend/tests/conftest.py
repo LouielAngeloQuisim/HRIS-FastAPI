@@ -129,6 +129,7 @@ def normal_user_token_headers(client: TestClient, db: Session) -> dict[str, str]
 
 # Phase 1 tables, ordered so FK-referencing tables are deleted first.
 PHASE1_TABLES = [
+    "payroll_delivery_outbox",
     "payroll_contribution_ledger",
     "emp_task",
     "employee_projects",
@@ -148,7 +149,11 @@ PHASE1_TABLES = [
     "subdivision",
     "department",
     "division",
+    "dtr_overtime_decision",
+    "dtr_attendance_interval",
+    "dtr_import_batch",
     "daily_time_record",
+    "employee_shift_assignment",
     "shift",
     "dtr_adjustment",
     # Phase b3 — Leave & Holidays (FK order: leaf tables first)
@@ -166,6 +171,10 @@ PHASE1_TABLES = [
     "loan",
     "payroll_entry",
     "payroll_run",
+    "employee_salary_bulk_batch",
+    "employee_pay_group_assignment",
+    "payroll_policy_version",
+    "payroll_pay_group",
     "employee_salary",
     "employee_tax_year_declaration",
     "bir_bracket",

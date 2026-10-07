@@ -1116,6 +1116,7 @@ export interface PayrollRunPublic {
   payment_date?: string | null
   finalized_by?: string | null
   finalized_at?: string | null
+  input_fingerprint?: string | null
   created_by: string | null
   is_deleted: boolean
   created_at: string | null
@@ -1146,6 +1147,7 @@ export interface PayrollEntryPublic {
   review_state: 'blocked' | 'ready' | 'reviewed' | 'excluded'
   reviewed_by: string | null
   reviewed_at: string | null
+  review_reason: string | null
   calculation_version: string | null
   input_fingerprint: string | null
   input_snapshot: Record<string, unknown>

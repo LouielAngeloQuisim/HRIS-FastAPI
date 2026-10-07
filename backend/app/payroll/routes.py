@@ -23,6 +23,7 @@ from sqlmodel import Session, col, select
 
 from app.attendance.adjustment_models import DtrAdjustment
 from app.attendance.models import DailyTimeRecord, EmployeeShiftAssignment, Shift
+from app.audit.models import AuditLog
 from app.common.dependencies import CurrentUser, SessionDep
 from app.common.schemas import Message
 from app.config.settings import settings
@@ -103,6 +104,7 @@ from app.payroll.schemas import (
     PayrollDeliveryAddressUpdate,
     PayrollDeliveryResendRequest,
     PayrollDeliveryStatusPublic,
+    PayrollDraftRebuildRequest,
     PayrollEntryRead,
     PayrollEntryReviewRequest,
     PayrollGenerateRequest,
@@ -1158,21 +1160,12 @@ def start_payroll_review(
                 status_code=409,
                 detail=f"Entry {entry.id} has no versioned calculation snapshot",
             )
-        if entry.blockers:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": "Resolve payroll blockers before review",
-                    "entry_id": str(entry.id),
-                    "blockers": entry.blockers,
-                },
-            )
         if not _payroll_entry_inputs_are_current(session, entry):
             raise HTTPException(
                 status_code=409,
                 detail=f"Entry {entry.id} inputs changed; rebuild the draft before review",
             )
-        entry.review_state = "ready"
+        entry.review_state = "blocked" if entry.blockers else "ready"
         entry.reviewed_by = None
         entry.reviewed_at = None
         session.add(entry)
@@ -1241,11 +1234,11 @@ def review_payroll_entry(
             status_code=409,
             detail="Payroll inputs changed; rebuild the draft before reviewing this entry",
         )
-    if entry.blockers:
+    if entry.blockers and obj_in.action != "excluded":
         raise HTTPException(
             status_code=409,
             detail={
-                "message": "Resolve payroll blockers before review",
+                "message": "Resolve payroll blockers before review or exclude with a reason",
                 "blockers": entry.blockers,
             },
         )
@@ -1334,7 +1327,7 @@ def finalize_payroll_run(
             raise HTTPException(
                 status_code=409, detail=f"Entry {entry.id} has negative net pay"
             )
-        if entry.blockers:
+        if entry.review_state == "reviewed" and entry.blockers:
             raise HTTPException(
                 status_code=409,
                 detail=f"Entry {entry.id} still has unresolved blockers",
@@ -1347,12 +1340,12 @@ def finalize_payroll_run(
             "leave_revisions",
             "holiday_revisions",
         }
-        if not required_snapshot_keys.issubset(entry.input_snapshot):
+        if entry.review_state == "reviewed" and not required_snapshot_keys.issubset(entry.input_snapshot):
             raise HTTPException(
                 status_code=409,
                 detail=f"Entry {entry.id} is missing attendance or salary revision evidence",
             )
-        if not entry.input_snapshot["salary_versions"]:
+        if entry.review_state == "reviewed" and not entry.input_snapshot["salary_versions"]:
             raise HTTPException(
                 status_code=409,
                 detail=f"Entry {entry.id} has no effective salary version",
@@ -3493,6 +3486,103 @@ def prepare_attendance_payroll_draft(
             "entries": [PayrollEntryRead.model_validate(entry) for entry in entries]
         },
     )
+
+
+@router.post(
+    "/runs/{run_id}/rebuild-attendance-draft",
+    response_model=PayrollRunRead,
+    status_code=201,
+    dependencies=[Depends(require_permission("payroll", "edit"))],
+)
+def rebuild_attendance_payroll_draft(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    run_id: uuid.UUID,
+    obj_in: PayrollDraftRebuildRequest,
+    response: Response,
+) -> PayrollRunRead:
+    """Supersede an unreviewed draft and prepare a fresh snapshot atomically."""
+    run = session.exec(
+        select(PayrollRun).where(PayrollRun.id == run_id).with_for_update()
+    ).first()
+    if run is None or run.is_deleted:
+        raise HTTPException(status_code=404, detail="Payroll run not found")
+    if (
+        run.status != PayrollRunStatus.DRAFT
+        or run.workflow_status not in {"draft", "in_review"}
+        or run.is_readonly
+        or run.pay_group_id is None
+        or not run.input_fingerprint
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Only a prepared draft with no employee dispositions can be rebuilt",
+        )
+    if run.input_fingerprint != obj_in.expected_run_fingerprint:
+        raise HTTPException(
+            status_code=409,
+            detail="The payroll draft changed; reload it before rebuilding",
+        )
+    entries = session.exec(
+        select(PayrollEntry)
+        .where(
+            PayrollEntry.payroll_run_id == run_id,
+            col(PayrollEntry.is_deleted).is_(False),
+        )
+        .with_for_update()
+    ).all()
+    if not entries or any(
+        entry.review_state not in {"blocked", "ready"} for entry in entries
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="A draft with reviewed or excluded employees cannot be rebuilt",
+        )
+    if not any(
+        entry.blockers or not _payroll_entry_inputs_are_current(session, entry)
+        for entry in entries
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="This draft has no blockers or changed inputs to rebuild",
+        )
+
+    now = datetime.now(timezone.utc)
+    run.status = PayrollRunStatus.VOID
+    run.deleted_at = now
+    run.updated_at = now
+    session.add(run)
+    audit = AuditLog(
+        method="POST",
+        path=f"/api/v1/payroll/runs/{run_id}/rebuild-attendance-draft",
+        status_code=201,
+        user_id=current_user.id,
+        module="payroll",
+        action="rebuild_attendance_draft",
+        extra={
+            "superseded_run_id": str(run_id),
+            "pay_group_id": str(run.pay_group_id),
+            "date_from": run.date_from.isoformat(),
+            "date_to": run.date_to.isoformat(),
+            "reason": obj_in.reason.strip(),
+        },
+    )
+    session.add(audit)
+    prepared = prepare_attendance_payroll_draft(
+        session=session,
+        current_user=current_user,
+        obj_in=PayrollAttendancePrepareRequest(
+            pay_group_id=run.pay_group_id,
+            date_from=run.date_from,
+            date_to=run.date_to,
+        ),
+        response=response,
+    )
+    audit.extra = {**(audit.extra or {}), "replacement_run_id": str(prepared.id)}
+    session.add(audit)
+    session.commit()
+    return prepared
 
 
 @router.get(

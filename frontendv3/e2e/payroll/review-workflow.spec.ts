@@ -13,7 +13,7 @@ async function createResource(page: Page, path: string, data: Record<string, unk
     headers: await bearer(page),
     data,
   })
-  expect(response.status(), `Create payroll fixture ${path}`).toBe(201)
+  expect([200, 201], `Create payroll fixture ${path}: ${response.status()}`).toContain(response.status())
   return response.json()
 }
 
@@ -59,6 +59,27 @@ test('blocked attendance payroll draft is visible in the review screen but canno
       ],
     },
   })
+  // The policy confirmation gate requires complete effective schedules. These
+  // deliberately synthetic rows only exercise workflow wiring; they are not
+  // statutory rates and cannot unblock the payroll calculation itself.
+  await createResource(page, 'sss-brackets/', {
+    msc_min: '0.01', msc_max: '35000.00', employer_ss: '0', employer_ec: '0',
+    employer_mpf: '0', employee_ss: '0', employee_mpf: '0', effective_date: '2026-10-01',
+  })
+  await createResource(page, 'philhealth-brackets/', {
+    salary_min: '10000.00', salary_max: '100000.00', rate: '5',
+    employer_share: '2.5', employee_share: '2.5', effective_date: '2026-10-01',
+  })
+  await createResource(page, 'pagibig-brackets/', {
+    salary_min: '0.01', salary_max: '1000000.00', employee_rate: '2',
+    employer_rate: '2', effective_date: '2026-10-01',
+  })
+  for (const period of ['daily', 'weekly', 'semi_monthly', 'monthly']) {
+    await createResource(page, 'bir-brackets/', {
+      period, bracket_min: '0', bracket_max: null, base_tax: '0',
+      excess_rate: '0', effective_date: '2026-10-01',
+    })
+  }
   const confirmedPolicy = await page.request.post(`${apiUrl}/payroll/policies/${policy.id}/confirm`, {
     headers: await bearer(page),
   })

@@ -306,6 +306,108 @@ def _stage_monthly_contribution_ledger(
             )
 
 
+def _latest_effective_rows(
+    session: Session, model: Any, as_of: date, *, period: str | None = None
+) -> list[Any]:
+    stmt = select(model).where(
+        col(model.effective_date) <= as_of,
+        col(model.is_deleted).is_(False),
+        col(model.is_active).is_(True),
+    )
+    if period is not None:
+        stmt = stmt.where(model.period == period)
+    rows = session.exec(stmt.order_by(col(model.effective_date).desc())).all()
+    if not rows:
+        return []
+    latest_date = rows[0].effective_date
+    return [row for row in rows if row.effective_date == latest_date]
+
+
+def _range_schedule_errors(
+    rows: Sequence[Any],
+    *,
+    minimum_field: str,
+    maximum_field: str,
+    label: str,
+    open_ended_top: bool,
+) -> list[str]:
+    if not rows:
+        return [f"{label} has no active effective schedule"]
+    ordered = sorted(rows, key=lambda row: Decimal(str(getattr(row, minimum_field))))
+    errors: list[str] = []
+    previous_maximum: Decimal | None = None
+    for row in ordered:
+        minimum = Decimal(str(getattr(row, minimum_field)))
+        maximum_value = getattr(row, maximum_field)
+        maximum = Decimal(str(maximum_value)) if maximum_value is not None else None
+        if not minimum.is_finite() or (maximum is not None and not maximum.is_finite()):
+            errors.append(f"{label} contains a non-finite range")
+            continue
+        if maximum is not None and maximum < minimum:
+            errors.append(f"{label} contains a range whose maximum is below its minimum")
+        if previous_maximum is None:
+            if minimum > Decimal("0.01"):
+                errors.append(f"{label} does not cover its lower income range")
+        elif minimum <= previous_maximum:
+            errors.append(f"{label} contains overlapping income ranges")
+        elif minimum != previous_maximum + Decimal("0.01"):
+            errors.append(f"{label} contains a gap between income ranges")
+        if maximum is None and row is not ordered[-1]:
+            errors.append(f"{label} has an open-ended range before its final band")
+        previous_maximum = maximum
+    if open_ended_top and getattr(ordered[-1], maximum_field) is not None:
+        errors.append(f"{label} has no open-ended top band")
+    if not open_ended_top and getattr(ordered[-1], maximum_field) is None:
+        errors.append(f"{label} unexpectedly has an open-ended top band")
+    return errors
+
+
+def _statutory_schedule_errors(session: Session, as_of: date) -> list[str]:
+    """Require complete, non-overlapping effective tables before policy sign-off."""
+    errors: list[str] = []
+    sss_rows = _latest_effective_rows(session, SSSBracket, as_of)
+    errors.extend(
+        _range_schedule_errors(
+            sss_rows,
+            minimum_field="msc_min",
+            maximum_field="msc_max",
+            label="SSS schedule",
+            open_ended_top=False,
+        )
+    )
+    philhealth_rows = _latest_effective_rows(session, PhilHealthBracket, as_of)
+    if len(philhealth_rows) != 1:
+        errors.append("PhilHealth requires exactly one active floor/ceiling schedule row")
+    elif (
+        philhealth_rows[0].salary_min <= 0
+        or philhealth_rows[0].salary_max < philhealth_rows[0].salary_min
+        or philhealth_rows[0].rate <= 0
+    ):
+        errors.append("PhilHealth floor, ceiling and rate must be valid positive values")
+    pagibig_rows = _latest_effective_rows(session, PagIBIGBracket, as_of)
+    errors.extend(
+        _range_schedule_errors(
+            pagibig_rows,
+            minimum_field="salary_min",
+            maximum_field="salary_max",
+            label="Pag-IBIG schedule",
+            open_ended_top=False,
+        )
+    )
+    for period in ("daily", "weekly", "semi_monthly", "monthly"):
+        bir_rows = _latest_effective_rows(session, BIRBracket, as_of, period=period)
+        errors.extend(
+            _range_schedule_errors(
+                bir_rows,
+                minimum_field="bracket_min",
+                maximum_field="bracket_max",
+                label=f"BIR {period} tax table",
+                open_ended_top=True,
+            )
+        )
+    return errors
+
+
 def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> bool:
     snapshot = entry.input_snapshot
     try:
@@ -2843,6 +2945,15 @@ def confirm_payroll_policy(
         raise HTTPException(
             status_code=422,
             detail="Include reviewed official sources for BIR, SSS, PhilHealth and Pag-IBIG",
+        )
+    schedule_errors = _statutory_schedule_errors(session, row.effective_from)
+    if schedule_errors:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Statutory schedules must be complete for the policy effective date.",
+                "schedule_errors": schedule_errors,
+            },
         )
     row.confirmed = True
     row.confirmed_by = current_user.id

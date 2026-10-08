@@ -1026,6 +1026,34 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     db.commit()
     assert _payroll_entry_inputs_are_current(db, payroll_entry)
 
+    pay_group_revision = payroll_entry.input_snapshot["pay_group"]
+    payroll_group = db.get(PayrollPayGroup, uuid.UUID(pay_group_revision["id"]))
+    assert payroll_group is not None
+    original_payment_offset = payroll_group.payment_offset_days
+    payroll_group.payment_offset_days = original_payment_offset + 1
+    db.add(payroll_group)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_group.payment_offset_days = original_payment_offset
+    db.add(payroll_group)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
+    tax_reference = payroll_entry.input_snapshot["tax_year_declaration"]
+    tax_declaration = db.get(
+        EmployeeTaxYearDeclaration, uuid.UUID(tax_reference["id"])
+    )
+    assert tax_declaration is not None
+    original_taxable_ytd = tax_declaration.taxable_compensation_ytd
+    tax_declaration.taxable_compensation_ytd += Decimal("1.00")
+    db.add(tax_declaration)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    tax_declaration.taxable_compensation_ytd = original_taxable_ytd
+    db.add(tax_declaration)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
     # Name, code and email are frozen inputs to the reviewed payslip/outbox
     # recipient, so an identity change requires renewed review.
     original_email = payroll_employee.email

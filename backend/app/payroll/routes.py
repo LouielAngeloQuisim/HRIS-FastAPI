@@ -1072,6 +1072,28 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
         if current_employee_reference != employee_reference:
             return False
 
+        pay_group_id = uuid.UUID(str(snapshot["pay_group_id"]))
+        pay_group = session.get(PayrollPayGroup, pay_group_id)
+        pay_group_reference = snapshot.get("pay_group")
+        if pay_group is None or not isinstance(pay_group_reference, dict):
+            return False
+        current_pay_group_reference = {
+            "id": str(pay_group.id),
+            "code": pay_group.code,
+            "name": pay_group.name,
+            "cadence": str(getattr(pay_group.cadence, "value", pay_group.cadence)),
+            "first_period_end_day": pay_group.first_period_end_day,
+            "second_period_end_day": pay_group.second_period_end_day,
+            "payment_offset_days": pay_group.payment_offset_days,
+            "weekend_rule": pay_group.weekend_rule,
+            "is_active": pay_group.is_active,
+            "updated_at": pay_group.updated_at.isoformat()
+            if pay_group.updated_at
+            else None,
+        }
+        if current_pay_group_reference != pay_group_reference:
+            return False
+
         tax_declaration = session.exec(
             select(EmployeeTaxYearDeclaration).where(
                 EmployeeTaxYearDeclaration.employee_id == employee_id,
@@ -1082,12 +1104,32 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
         if (tax_declaration is None) != (tax_reference is None):
             return False
         if tax_declaration is not None and tax_reference is not None:
-            if (
-                str(tax_declaration.id) != tax_reference.get("id")
-                or (tax_declaration.updated_at.isoformat() if tax_declaration.updated_at else None)
-                != tax_reference.get("updated_at")
-                or tax_declaration.is_verified != tax_reference.get("verified")
-            ):
+            current_tax_reference = {
+                "id": str(tax_declaration.id),
+                "updated_at": tax_declaration.updated_at.isoformat()
+                if tax_declaration.updated_at
+                else None,
+                "tax_classification": tax_declaration.tax_classification,
+                "taxable_compensation_ytd": str(
+                    tax_declaration.taxable_compensation_ytd
+                ),
+                "tax_withheld_ytd": str(tax_declaration.tax_withheld_ytd),
+                "opening_pay_period_count": tax_declaration.opening_pay_period_count,
+                "opening_pay_period_type": tax_declaration.opening_pay_period_type,
+                "previous_employer_included": tax_declaration.previous_employer_included,
+                "source_reference": tax_declaration.source_reference,
+                "opening_benefits_exempt_ytd": str(
+                    tax_declaration.opening_benefits_exempt_ytd
+                ),
+                "opening_benefits_reconciled": tax_declaration.opening_benefits_reconciled,
+                "opening_de_minimis_annual_ytd": tax_declaration.opening_de_minimis_annual_ytd,
+                "opening_de_minimis_monthly_ytd": tax_declaration.opening_de_minimis_monthly_ytd,
+                "opening_as_of": tax_declaration.opening_as_of.isoformat()
+                if tax_declaration.opening_as_of
+                else None,
+                "verified": tax_declaration.is_verified,
+            }
+            if current_tax_reference != tax_reference:
                 return False
 
         benefit_reference = snapshot.get("bir_tax_benefit_ledger")
@@ -4468,6 +4510,20 @@ def prepare_attendance_payroll_draft(
             ),
             "pay_group_id": str(group.id),
             "pay_group_cadence": group.cadence.value,
+            "pay_group": {
+                "id": str(group.id),
+                "code": group.code,
+                "name": group.name,
+                "cadence": group.cadence.value,
+                "first_period_end_day": group.first_period_end_day,
+                "second_period_end_day": group.second_period_end_day,
+                "payment_offset_days": group.payment_offset_days,
+                "weekend_rule": group.weekend_rule,
+                "is_active": group.is_active,
+                "updated_at": group.updated_at.isoformat()
+                if group.updated_at
+                else None,
+            },
             "period": {
                 "from": obj_in.date_from.isoformat(),
                 "to": obj_in.date_to.isoformat(),
@@ -4492,6 +4548,9 @@ def prepare_attendance_payroll_draft(
                 "opening_benefits_reconciled": tax_declaration.opening_benefits_reconciled,
                 "opening_de_minimis_annual_ytd": tax_declaration.opening_de_minimis_annual_ytd,
                 "opening_de_minimis_monthly_ytd": tax_declaration.opening_de_minimis_monthly_ytd,
+                "opening_as_of": tax_declaration.opening_as_of.isoformat()
+                if tax_declaration.opening_as_of
+                else None,
                 "verified": tax_declaration.is_verified,
             }
             snapshot["bir_tax_benefit_ledger"] = _bir_tax_benefit_rows(

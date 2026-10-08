@@ -36,7 +36,12 @@ const formSchema = z.object({
   requested_hours: z.number().positive('Requested hours must be positive').optional(),
   reason: z.string().optional(),
   document_ref: z.string().optional(),
-}).refine(data => data.date_start <= data.date_end, { path: ['date_end'], message: 'End date must be on or after start date' })
+})
+  .refine(data => data.date_start <= data.date_end, { path: ['date_end'], message: 'End date must be on or after start date' })
+  .refine(data => data.requested_hours === undefined || data.date_start === data.date_end, {
+    path: ['requested_hours'],
+    message: 'Hourly leave requests must cover a single date. Submit separate requests for separate dates.',
+  })
 
 type FormData = z.infer<typeof formSchema>
 

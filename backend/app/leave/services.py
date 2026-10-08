@@ -102,6 +102,12 @@ def submit_request(
     if data.date_end < data.date_start:
         raise HTTPException(status_code=422, detail="date_end must be greater than or equal to date_start")
 
+    if data.requested_hours is not None and data.date_start != data.date_end:
+        raise HTTPException(
+            status_code=422,
+            detail="Hourly leave requests must cover a single date; submit separate requests for separate dates.",
+        )
+
     workday_hours = Decimal("8.0")
     holidays: set[date] = set()
     schedule: set[date] | None = None

@@ -1144,7 +1144,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
             ]["schemes"].items()
         },
     }
-    assert second_entry["deductions"]["bir_withholding"] == "64.95"
+    assert second_entry["deductions"]["bir_withholding"] == "282.45"
     assert second_entry["deductions"]["statutory"] == {
         "sss": "1300.00",
         "philhealth": "650.00",

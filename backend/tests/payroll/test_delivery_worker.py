@@ -203,6 +203,33 @@ class _SMTPAcceptThenDisconnect(socketserver.ThreadingTCPServer):
         super().__init__(("127.0.0.1", 0), Handler)
 
 
+class _SMTPRejectRecipient(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self) -> None:
+        self.recipient_attempts = 0
+        sink = self
+
+        class Handler(socketserver.StreamRequestHandler):
+            def handle(self) -> None:
+                self.wfile.write(b"220 local test sink\r\n")
+                while line := self.rfile.readline():
+                    command = line.decode("ascii", errors="replace").strip().split(" ", 1)[0].upper()
+                    if command in {"EHLO", "HELO"}:
+                        self.wfile.write(b"250-local test sink\r\n250 SIZE 10485760\r\n")
+                    elif command == "RCPT":
+                        sink.recipient_attempts += 1
+                        self.wfile.write(b"550 recipient rejected\r\n")
+                    elif command == "QUIT":
+                        self.wfile.write(b"221 closing connection\r\n")
+                        return
+                    else:
+                        self.wfile.write(b"250 ok\r\n")
+
+        super().__init__(("127.0.0.1", 0), Handler)
+
+
 def test_worker_claims_scheduled_job_and_sends_frozen_pdf_to_local_smtp_sink(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -278,6 +305,43 @@ def test_smtp_accept_then_disconnect_marks_uncertain_without_automatic_resend(
     assert len(sink.messages) == 1
     assert delivery_job.status == "uncertain"
     assert delivery_job.last_error_code == "SMTPServerDisconnected"
+    assert delivery_job.attempts == 1
+
+
+def test_smtp_recipient_rejection_is_blocked_for_correction_not_uncertain(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_job: PayrollDeliveryOutbox,
+) -> None:
+    monkeypatch.setattr(settings, "PAYSLIP_DELIVERY_ENABLED", True)
+    monkeypatch.setattr(settings, "EMAILS_FROM_EMAIL", "noreply@example.test")
+    monkeypatch.setattr(settings, "SMTP_TLS", False)
+    monkeypatch.setattr(settings, "SMTP_SSL", False)
+    monkeypatch.setattr(settings, "SMTP_USER", "")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "")
+
+    with _SMTPRejectRecipient() as sink:
+        monkeypatch.setattr(settings, "SMTP_HOST", "127.0.0.1")
+        monkeypatch.setattr(settings, "SMTP_PORT", sink.server_address[1])
+        server_thread = threading.Thread(target=sink.serve_forever, daemon=True)
+        server_thread.start()
+        delivery_job.status = "scheduled"
+        delivery_job.attempts = 0
+        delivery_job.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        delivery_job.claimed_until = None
+        db.add(delivery_job)
+        db.commit()
+        try:
+            run_worker(once=True)
+            run_worker(once=True)
+        finally:
+            sink.shutdown()
+            server_thread.join(timeout=2)
+
+    db.refresh(delivery_job)
+    assert sink.recipient_attempts == 1
+    assert delivery_job.status == "blocked_email"
+    assert delivery_job.last_error_code == "smtp_recipient_rejected"
     assert delivery_job.attempts == 1
 
 

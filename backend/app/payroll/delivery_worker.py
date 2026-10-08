@@ -268,6 +268,24 @@ def _send_job(job_id: uuid.UUID) -> None:
             username=settings.SMTP_USER,
             password=settings.SMTP_PASSWORD,
         )
+    except smtplib.SMTPRecipientsRefused:
+        # SMTP rejected the recipient before DATA, so delivery definitely did
+        # not occur. Mark it blocked for address correction instead of asking
+        # an operator to resolve a false ambiguous-send warning.
+        with Session(engine) as session:
+            job = session.exec(
+                select(PayrollDeliveryOutbox)
+                .where(PayrollDeliveryOutbox.id == job_id)
+                .with_for_update()
+            ).first()
+            if job is not None and job.status == "processing":
+                job.status = "blocked_email"
+                job.last_error_code = "smtp_recipient_rejected"
+                job.claimed_until = None
+                session.add(job)
+                session.commit()
+        logger.warning("Payslip recipient was rejected for job %s", job_id)
+        return
     except (ConnectionRefusedError, socket.gaierror) as exc:
         # These errors happen before SMTP can accept a message. Retry with
         # exponential backoff, bounded to five attempts.

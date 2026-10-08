@@ -2,9 +2,10 @@
 
 from datetime import date
 from decimal import Decimal
+from uuid import UUID
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session, delete
+from sqlmodel import Session, delete, select
 
 from app.config.settings import settings
 from app.payroll.models import (
@@ -23,6 +24,7 @@ def _policy(frequency: str, collection_period: str) -> dict[str, object]:
         "timezone": "Asia/Manila",
         "monthly_divisor": "22",
         "daily_partial_work": "pro_rated",
+        "monthly_partial_work": "deduct_after_grace",
         "paid_leave": False,
         "paid_holidays": False,
         "break_minutes": 60,
@@ -42,6 +44,36 @@ def _policy(frequency: str, collection_period: str) -> dict[str, object]:
             "https://www.pagibigfund.gov.ph/",
         ],
     }
+
+
+def test_policy_confirmation_requires_supported_monthly_partial_work_rule(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    created_ids: list[UUID] = []
+    for index, rule in enumerate((None, "deduct_by_shift"), start=1):
+        payload = _policy("once_monthly", "last_period")
+        payload["monthly_partial_work"] = rule
+        created = client.post(
+            f"{API}/policies",
+            json={"effective_from": f"2100-0{index}-01", "policy": payload},
+            headers=superuser_token_headers,
+        )
+        assert created.status_code == 201, created.text
+        created_ids.append(UUID(created.json()["id"]))
+        confirmed = client.post(
+            f"{API}/policies/{created.json()['id']}/confirm",
+            headers=superuser_token_headers,
+        )
+        assert confirmed.status_code == 422
+        detail = str(confirmed.json()["detail"])
+        assert "monthly_partial_work" in detail
+    for policy_id in created_ids:
+        policy = db.get(PayrollPolicyVersion, policy_id)
+        assert policy is not None
+        db.delete(policy)
+    db.commit()
 
 
 def test_policy_confirmation_requires_once_monthly_final_period_collection(
@@ -177,3 +209,18 @@ def test_policy_confirmation_requires_once_monthly_final_period_collection(
     for schedule_row in schedule_rows:
         db.delete(schedule_row)
     db.commit()
+    assert db.exec(
+        select(SSSBracket).where(
+            SSSBracket.effective_date == date(2025, 1, 1),
+            SSSBracket.is_active.is_(True),
+            SSSBracket.is_deleted.is_(False),
+        )
+    ).first() is not None
+    assert db.exec(
+        select(BIRBracket).where(
+            BIRBracket.effective_date == date(2023, 1, 1),
+            BIRBracket.period == "semi_monthly",
+            BIRBracket.is_active.is_(True),
+            BIRBracket.is_deleted.is_(False),
+        )
+    ).first() is not None

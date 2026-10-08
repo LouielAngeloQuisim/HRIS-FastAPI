@@ -2523,7 +2523,7 @@ def attendance_calculation_preview(
         formulas: list[str] = []
         refs: list[str] = []
         calculation_groups: dict[
-            tuple[Decimal, str, Decimal, str], list[AttendancePayDay]
+            tuple[Decimal, str, Decimal, str, str | None, int], list[AttendancePayDay]
         ] = {}
         results = []
         employee = employees.get(employee_entry.employee_id)
@@ -2665,8 +2665,37 @@ def attendance_calculation_preview(
                     else 0
                 )
                 rounding = str(policy.policy["rounding_mode"])
+                monthly_partial_rule = policy.policy.get("monthly_partial_work")
+                if monthly_partial_rule is not None:
+                    monthly_partial_rule = str(monthly_partial_rule)
+                grace_minutes = int(policy.policy["grace_minutes"])
+                raw_late_minutes = 0
+                if dtr is not None and dtr.login_date is not None:
+                    local_login = dtr.login_date.astimezone(
+                        ZoneInfo(str(policy.policy["timezone"]))
+                    )
+                    if local_login.date() != cursor:
+                        raise CalculationBlocker(
+                            f"Attendance login is outside its assigned shift work date on {cursor}"
+                        )
+                    start = time_of_day.fromisoformat(shift.start_time)
+                    raw_late_minutes = max(
+                        0,
+                        local_login.hour * 60
+                        + local_login.minute
+                        - start.hour * 60
+                        - start.minute,
+                    )
                 calculation_groups.setdefault(
-                    (monthly_divisor, partial_rule, multiplier, rounding), []
+                    (
+                        monthly_divisor,
+                        partial_rule,
+                        multiplier,
+                        rounding,
+                        monthly_partial_rule,
+                        grace_minutes,
+                    ),
+                    [],
                 ).append(
                     AttendancePayDay(
                         work_date=cursor,
@@ -2686,6 +2715,8 @@ def attendance_calculation_preview(
                         worked_minutes=worked_minutes,
                         overtime_eligible_minutes=eligible_ot,
                         overtime_approved_minutes=approved_ot,
+                        raw_late_minutes=raw_late_minutes,
+                        grace_minutes=grace_minutes,
                         paid_absence=(paid_leave or paid_holiday) and dtr is None,
                         absence=bool(
                             (dtr and dtr.is_absent)
@@ -2724,9 +2755,14 @@ def attendance_calculation_preview(
             )
             cursor += timedelta(days=1)
 
-        for (monthly_divisor, partial_rule, multiplier, rounding), days in (
-            calculation_groups.items()
-        ):
+        for (
+            monthly_divisor,
+            partial_rule,
+            multiplier,
+            rounding,
+            monthly_partial_rule,
+            _grace_minutes,
+        ), days in calculation_groups.items():
             if blockers:
                 break
             try:
@@ -2736,6 +2772,7 @@ def attendance_calculation_preview(
                         monthly_divisor=monthly_divisor,
                         daily_partial_work=partial_rule,  # type: ignore[arg-type]
                         overtime_multiplier=multiplier,
+                        monthly_partial_work=monthly_partial_rule,  # type: ignore[arg-type]
                         rounding=rounding,
                     )
                 )
@@ -2752,6 +2789,9 @@ def attendance_calculation_preview(
         attendance_deduction = sum(
             (result.attendance_deduction for result in results), Decimal("0.00")
         )
+        short_time_deduction = sum(
+            (result.short_time_deduction for result in results), Decimal("0.00")
+        )
         previews.append(
             PayrollAttendanceCalculationEntry(
                 employee_id=employee_entry.employee_id,
@@ -2760,6 +2800,7 @@ def attendance_calculation_preview(
                 regular_earnings=regular if not blockers else None,
                 approved_overtime=overtime if not blockers else None,
                 attendance_deduction=attendance_deduction if not blockers else None,
+                short_time_deduction=short_time_deduction if not blockers else None,
                 gross_before_statutory=regular + overtime if not blockers else None,
                 blockers=blockers,
                 formula=formulas,
@@ -2950,6 +2991,12 @@ def prepare_attendance_payroll_draft(
                         and entry.attendance_deduction is not None
                         else None
                     ),
+                    short_time_deduction=(
+                        previous.short_time_deduction + entry.short_time_deduction
+                        if previous.short_time_deduction is not None
+                        and entry.short_time_deduction is not None
+                        else None
+                    ),
                     gross_before_statutory=(
                         previous.gross_before_statutory + entry.gross_before_statutory
                         if previous.gross_before_statutory is not None
@@ -3063,8 +3110,10 @@ def prepare_attendance_payroll_draft(
                         )
                     sss_basis = (
                         full_month.regular_earnings
+                        - full_month.attendance_deduction
                         + full_month.approved_overtime
                         if full_month.regular_earnings is not None
+                        and full_month.attendance_deduction is not None
                         and full_month.approved_overtime is not None
                         else None
                     )
@@ -3115,11 +3164,11 @@ def prepare_attendance_payroll_draft(
                         source_urls=policy_sources,
                     )
                     monthly_contributions["basis_method"] = {
-                        "sss": "actual full-month regular earnings plus approved overtime; indexed by the effective SSS schedule",
+                        "sss": "full-month regular earnings less unpaid absence and monthly short-time deductions, plus approved overtime; indexed by the effective SSS schedule",
                         "philhealth": (
                             "contractual fixed-basic monthly equivalent; monthly salary is weighted by calendar days, while daily/hourly rates use the confirmed monthly divisor and effective scheduled shift minutes; overtime and absence deductions excluded"
                         ),
-                        "pagibig": "full-month regular earnings plus approved overtime; allowances remain blocked until their fund-salary treatment is configured",
+                        "pagibig": "full-month regular earnings less unpaid absence and monthly short-time deductions, plus approved overtime; allowances remain blocked until their fund-salary treatment is configured",
                     }
                 except StatutoryScheduleUnavailable as exc:
                     blockers.append(
@@ -3128,6 +3177,22 @@ def prepare_attendance_payroll_draft(
                             message=str(exc),
                         )
                     )
+        elif (
+            employee_record := session.get(EmployeeRecords, roster_entry.employee_id)
+        ) is not None and str(
+            getattr(employee_record.employee_status, "value", employee_record.employee_status)
+        ) in {"Resigned", "Terminated"} and employee_record.date_separated is not None and (
+            obj_in.date_from <= employee_record.date_separated <= obj_in.date_to
+        ):
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="termination_monthly_contribution_timing_unavailable",
+                    message=(
+                        "This employee's final-pay period is before the calendar month's final payroll period. "
+                        "Once-monthly statutory contributions require an approved termination-specific basis and collection rule."
+                    ),
+                )
+            )
         tax_declaration = session.exec(
             select(EmployeeTaxYearDeclaration).where(
                 EmployeeTaxYearDeclaration.employee_id == roster_entry.employee_id,
@@ -3334,6 +3399,11 @@ def prepare_attendance_payroll_draft(
             if preview and preview.attendance_deduction is not None
             else Decimal("0.00")
         )
+        short_time_deduction = (
+            preview.short_time_deduction
+            if preview and preview.short_time_deduction is not None
+            else Decimal("0.00")
+        )
         gross = regular + overtime
         employee_statutory = {
             scheme: Decimal(str(values["employee"]))
@@ -3345,6 +3415,10 @@ def prepare_attendance_payroll_draft(
         } if monthly_contributions is not None else {}
         deductions: dict[str, Any] = {
             "attendance": str(attendance_deduction),
+            "attendance_breakdown": {
+                "unpaid_absence": str(attendance_deduction - short_time_deduction),
+                "monthly_short_time_after_grace": str(short_time_deduction),
+            },
             "statutory": {key: str(value) for key, value in employee_statutory.items()},
             "employer_contributions": {key: str(value) for key, value in employer_statutory.items()},
         }
@@ -3388,9 +3462,46 @@ def prepare_attendance_payroll_draft(
                         12,
                         calendar.monthrange(obj_in.date_to.year, 12)[1],
                     )
-                    if is_year_end:
+                    employee_row = session.get(EmployeeRecords, roster_entry.employee_id)
+                    employee_status = (
+                        str(getattr(employee_row.employee_status, "value", employee_row.employee_status))
+                        if employee_row is not None
+                        else ""
+                    )
+                    is_termination_final_pay = (
+                        employee_row is not None
+                        and employee_status in {"Resigned", "Terminated"}
+                        and employee_row.date_separated is not None
+                        and obj_in.date_from <= employee_row.date_separated <= obj_in.date_to
+                    )
+                    annualization_trigger = (
+                        "termination_final_pay"
+                        if is_termination_final_pay
+                        else "year_end"
+                        if is_year_end
+                        else None
+                    )
+                    if annualization_trigger is not None:
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="bir_annual_benefits_unavailable",
+                                message=(
+                                    "Annualized BIR withholding cannot finalize until year-to-date 13th-month pay and other benefits "
+                                    "are reconciled against the shared ₱90,000 exemption ceiling."
+                                ),
+                            )
+                        )
+                        if annualization_trigger == "termination_final_pay":
+                            blockers.append(
+                                PayrollPreflightBlocker(
+                                    code="bir_2316_termination_delivery_unavailable",
+                                    message=(
+                                        "BIR Form 2316 must be prepared and delivered with final compensation on termination; "
+                                        "this workflow does not yet generate or track the required certificate."
+                                    ),
+                                )
+                            )
                         opening_as_of = tax_declaration.opening_as_of
-                        employee_row = session.get(EmployeeRecords, roster_entry.employee_id)
                         if (
                             opening_as_of is None
                             or opening_as_of.year != obj_in.date_to.year
@@ -3464,6 +3575,7 @@ def prepare_attendance_payroll_draft(
                             }
                             snapshot["bir_calculation"] = {
                                 "method": "annualized_rr_11_2018_2023_onward",
+                                "annualization_trigger": annualization_trigger,
                                 "taxable_compensation": str(bir_taxable_pay),
                                 "annual_taxable_compensation": str(annual_taxable),
                                 "annual_tax_due": str(annual_tax_due),
@@ -4398,6 +4510,7 @@ def confirm_payroll_policy(
         "timezone",
         "monthly_divisor",
         "daily_partial_work",
+        "monthly_partial_work",
         "paid_leave",
         "paid_holidays",
         "break_minutes",
@@ -4473,6 +4586,16 @@ def confirm_payroll_policy(
         raise HTTPException(
             status_code=422,
             detail="daily_partial_work must be full_day, pro_rated, or hours_based",
+        )
+    if row.policy["monthly_partial_work"] not in {
+        "deduct_after_grace",
+        "no_deduction",
+    }:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "monthly_partial_work must be deduct_after_grace or no_deduction"
+            ),
         )
     if row.policy["rounding_mode"] not in {"half_up", "half_even", "down"}:
         raise HTTPException(

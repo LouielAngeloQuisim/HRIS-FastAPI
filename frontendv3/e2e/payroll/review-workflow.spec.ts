@@ -43,6 +43,7 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
       timezone: 'Asia/Manila',
       monthly_divisor: '22',
       daily_partial_work: 'pro_rated',
+      monthly_partial_work: 'deduct_after_grace',
       paid_leave: false,
       paid_holidays: false,
       break_minutes: 60,

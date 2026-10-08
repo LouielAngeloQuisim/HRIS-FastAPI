@@ -22,6 +22,8 @@ class AttendancePayDay:
     worked_minutes: int
     overtime_eligible_minutes: int = 0
     overtime_approved_minutes: int | None = None
+    raw_late_minutes: int = 0
+    grace_minutes: int = 0
     paid_absence: bool = False
     absence: bool = False
 
@@ -31,6 +33,7 @@ class EarningsResult:
     regular: Decimal
     overtime: Decimal
     attendance_deduction: Decimal
+    short_time_deduction: Decimal
     payable_days: int
     worked_minutes: int
 
@@ -48,6 +51,7 @@ def calculate_attendance_earnings(
     monthly_divisor: Decimal,
     daily_partial_work: Literal["full_day", "pro_rated", "hours_based"],
     overtime_multiplier: Decimal,
+    monthly_partial_work: Literal["deduct_after_grace", "no_deduction"] | None = None,
     rounding: str = "half_up",
 ) -> EarningsResult:
     """Calculate regular and approved-overtime earnings from reviewed daily rows.
@@ -62,6 +66,8 @@ def calculate_attendance_earnings(
         raise CalculationBlocker("A positive confirmed monthly divisor is required")
     if overtime_multiplier < 0:
         raise CalculationBlocker("Overtime multiplier cannot be negative")
+    if monthly_partial_work not in {None, "deduct_after_grace", "no_deduction"}:
+        raise CalculationBlocker("Unsupported monthly partial-work rule")
     if rounding not in {"half_up", "half_even", "down"}:
         raise CalculationBlocker("Unsupported payroll rounding mode")
     rounding_mode = {
@@ -73,6 +79,7 @@ def calculate_attendance_earnings(
     regular = Decimal("0")
     overtime = Decimal("0")
     deduction = Decimal("0")
+    short_time_deduction = Decimal("0")
     payable_days = 0
     total_worked = 0
     seen_dates: set[date] = set()
@@ -92,6 +99,8 @@ def calculate_attendance_earnings(
             raise CalculationBlocker(f"Attendance disposition is missing for {day.work_date}")
         if day.overtime_eligible_minutes < 0 or day.overtime_eligible_minutes > day.worked_minutes:
             raise CalculationBlocker(f"Invalid eligible overtime minutes on {day.work_date}")
+        if day.raw_late_minutes < 0 or day.grace_minutes < 0:
+            raise CalculationBlocker(f"Invalid lateness/grace minutes on {day.work_date}")
         if day.overtime_eligible_minutes and day.overtime_approved_minutes is None:
             raise CalculationBlocker(f"Overtime decision is pending on {day.work_date}")
         approved = day.overtime_approved_minutes or 0
@@ -99,7 +108,14 @@ def calculate_attendance_earnings(
             raise CalculationBlocker(f"Approved overtime exceeds eligible minutes on {day.work_date}")
 
         if day.pay_type == "hourly":
-            payable_minutes = day.scheduled_minutes if day.paid_absence else day.worked_minutes
+            # The overtime line is paid separately below. Cap regular hourly
+            # earnings at the scheduled shift so approved overtime is not also
+            # paid a second time at the base rate.
+            payable_minutes = (
+                day.scheduled_minutes
+                if day.paid_absence
+                else min(day.worked_minutes, day.scheduled_minutes)
+            )
             regular += day.basic_rate * Decimal(payable_minutes) / Decimal(60)
             if day.paid_absence:
                 payable_days += 1
@@ -130,6 +146,22 @@ def calculate_attendance_earnings(
                 deduction += daily_rate
             else:
                 payable_days += 1
+                shortfall = max(0, day.scheduled_minutes - day.worked_minutes)
+                if shortfall:
+                    if monthly_partial_work is None:
+                        raise CalculationBlocker(
+                            f"Monthly partial-work policy is missing on {day.work_date}"
+                        )
+                    if monthly_partial_work == "deduct_after_grace":
+                        lateness_grace = min(day.raw_late_minutes, day.grace_minutes)
+                        deductible_minutes = max(0, shortfall - lateness_grace)
+                        short_time_amount = (
+                            daily_rate
+                            * Decimal(deductible_minutes)
+                            / Decimal(day.scheduled_minutes)
+                        )
+                        deduction += short_time_amount
+                        short_time_deduction += short_time_amount
         else:
             raise CalculationBlocker(f"Unsupported salary basis on {day.work_date}")
 
@@ -143,6 +175,7 @@ def calculate_attendance_earnings(
         regular=quantize(regular),
         overtime=quantize(overtime),
         attendance_deduction=quantize(deduction),
+        short_time_deduction=quantize(short_time_deduction),
         payable_days=payable_days,
         worked_minutes=total_worked,
     )

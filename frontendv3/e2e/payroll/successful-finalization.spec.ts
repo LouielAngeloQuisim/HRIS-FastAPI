@@ -51,6 +51,7 @@ test('fictional employee payroll is reviewed, separately finalized and frozen fo
       timezone: 'Asia/Manila',
       monthly_divisor: '22',
       daily_partial_work: 'pro_rated',
+      monthly_partial_work: 'deduct_after_grace',
       paid_leave: false,
       paid_holidays: false,
       break_minutes: 60,
@@ -73,23 +74,43 @@ test('fictional employee payroll is reviewed, separately finalized and frozen fo
   })
   expect(confirmed.status(), await confirmed.text()).toBe(200)
 
-  const salary = await page.request.post(`${apiUrl}/payroll/employees/${employee.id}/salary`, {
-    headers: await bearer(page),
-    data: {
-      employee_id: employee.id,
-      basic_rate: '26000.00',
-      currency: 'PHP',
-      effective_date: '2026-11-01',
-      pay_type: 'monthly',
-      overtime_rate: '1.25',
-      absent_penalty_rate: '1.00',
-      non_taxable_allowance: '0.00',
-      de_minimis_monthly: {},
-      thirteenth_month_exempt_portion: '90000.00',
-      is_active: true,
-    },
-  })
-  expect(salary.status(), await salary.text()).toBe(200)
+  // Recover this employee from the missing-salary roster through the bulk UI.
+  await page.goto('/payroll/salary')
+  await page.getByLabel('Only employees without an effective salary').check()
+  await expect(page.getByLabel(`Select ${employee.employee_code}`)).toBeVisible()
+  await page.getByLabel(`Select ${employee.employee_code}`).check()
+  await page.getByLabel(`${employee.employee_code} basic rate`).fill('26000.00')
+  await page.getByLabel(`${employee.employee_code} salary basis`).selectOption('monthly')
+  await page.getByLabel(`${employee.employee_code} overtime rate`).fill('1.25')
+  await page.getByLabel(`${employee.employee_code} allowance`).fill('0.00')
+  await page.getByLabel('Bulk effective date').fill('2026-11-01')
+  const salaryPreflight = page.waitForResponse(response =>
+    response.url().includes('/payroll/salaries/bulk/preflight') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Validate batch' }).click()
+  const salaryPreflightResponse = await salaryPreflight
+  expect(salaryPreflightResponse.status(), await salaryPreflightResponse.text()).toBe(200)
+  expect((await salaryPreflightResponse.json()).valid).toBe(true)
+  const salaryCommit = page.waitForResponse(response =>
+    response.url().includes('/payroll/salaries/bulk/commit') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Save selected salaries' }).click()
+  const salaryResponse = await salaryCommit
+  expect(salaryResponse.status(), await salaryResponse.text()).toBe(200)
+  const salaryReadback = await page.request.get(
+    `${apiUrl}/payroll/employees/${employee.id}/salary`,
+    { headers: await bearer(page) },
+  )
+  expect(salaryReadback.status(), await salaryReadback.text()).toBe(200)
+  expect(await salaryReadback.json()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        basic_rate: '26000.00',
+        effective_date: '2026-11-01',
+        pay_type: 'monthly',
+      }),
+    ]),
+  )
   const groupAssignment = await page.request.post(`${apiUrl}/payroll/pay-group-assignments`, {
     headers: await bearer(page),
     data: { employee_id: employee.id, pay_group_id: group.id, effective_from: '2026-11-01' },
@@ -151,12 +172,32 @@ test('fictional employee payroll is reviewed, separately finalized and frozen fo
   )
   expect(declaration.status(), await declaration.text()).toBe(200)
 
-  const prepared = await page.request.post(`${apiUrl}/payroll/runs/prepare-attendance-draft`, {
-    headers: await bearer(page),
-    data: { pay_group_id: group.id, date_from: '2026-11-16', date_to: '2026-11-30' },
-  })
-  expect(prepared.status(), await prepared.text()).toBe(201)
-  const draft = await prepared.json()
+  // Exercise the HR payroll readiness, earnings preview, and draft preparation
+  // screens. The API readbacks below verify persisted values and finalization.
+  await page.goto('/payroll')
+  await page.getByTestId('payroll-pay-group-select').click()
+  await page.getByRole('option', { name: new RegExp(`QA semi-monthly ${unique}`) }).click()
+  await page.getByTestId('payroll-period-from').fill('2026-11-16')
+  await page.getByTestId('payroll-period-to').fill('2026-11-30')
+  const readiness = page.waitForResponse(response =>
+    response.url().includes('/payroll/runs/preflight') && response.request().method() === 'GET',
+  )
+  await page.getByTestId('payroll-preflight-button').click()
+  expect((await readiness).status()).toBe(200)
+  await expect(page.getByText('Ready for calculation review')).toBeVisible()
+  const earningsPreview = page.waitForResponse(response =>
+    response.url().includes('/payroll/runs/attendance-calculation-preview') && response.request().method() === 'GET',
+  )
+  await page.getByTestId('payroll-attendance-preview-button').click()
+  expect((await earningsPreview).status()).toBe(200)
+  await expect(page.getByRole('region', { name: 'Attendance earnings preview' })).toContainText(employee.employee_code)
+  const preparing = page.waitForResponse(response =>
+    response.url().includes('/payroll/runs/prepare-attendance-draft') && response.request().method() === 'POST',
+  )
+  await page.getByTestId('payroll-prepare-draft-button').click()
+  const prepareResponse = await preparing
+  expect(prepareResponse.status(), await prepareResponse.text()).toBe(201)
+  const draft = await prepareResponse.json()
   const preparedEntry = draft.entries.find((entry: { employee_id: string }) => entry.employee_id === employee.id)
   expect(preparedEntry, 'The fictional employee must be included').toBeTruthy()
   expect(preparedEntry.blockers, JSON.stringify(preparedEntry.blockers)).toEqual([])

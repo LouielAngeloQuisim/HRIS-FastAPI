@@ -314,6 +314,7 @@ class PayrollAttendanceCalculationEntry(SQLModel):
     regular_earnings: Decimal | None = None
     approved_overtime: Decimal | None = None
     attendance_deduction: Decimal | None = None
+    short_time_deduction: Decimal | None = None
     gross_before_statutory: Decimal | None = None
     blockers: list[PayrollPreflightBlocker] = Field(default_factory=list)
     formula: list[str] = Field(default_factory=list)

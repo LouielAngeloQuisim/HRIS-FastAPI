@@ -1,5 +1,6 @@
 """The attendance payroll preparation route persists blocked, auditable drafts."""
 
+import calendar
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -96,11 +97,16 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         )
     )
     absent_date = date(2026, 10, 5)
+    late_date = date(2026, 10, 6)
     for day in range(1, 16):
         work_date = date(2026, 10, day)
         if work_date.weekday() >= 5:
             continue
         is_absent = work_date == absent_date
+        is_late = work_date == late_date
+        login_at = datetime(2026, 10, day, tzinfo=timezone.utc) + timedelta(
+            minutes=15 if is_late else 0
+        )
         db.add(
             DailyTimeRecord(
                 employee_id=employee.id,
@@ -108,16 +114,15 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
                 login_date=(
                     None
                     if is_absent
-                    else datetime(2026, 10, day, tzinfo=timezone.utc)
+                    else login_at
                 ),
                 logout_date=(
                     None
                     if is_absent
-                    else datetime(2026, 10, day, tzinfo=timezone.utc)
-                    + timedelta(hours=9)
+                    else login_at + timedelta(hours=9)
                 ),
                 work_date=work_date,
-                rendered_minutes=None if is_absent else 480,
+                rendered_minutes=None if is_absent else 465 if is_late else 480,
                 overtime_minutes=0,
                 is_absent=is_absent,
                 is_time_calculated=not is_absent,
@@ -131,10 +136,11 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
             "timezone": "Asia/Manila",
             "monthly_divisor": "22",
             "daily_partial_work": "pro_rated",
+            "monthly_partial_work": "deduct_after_grace",
             "paid_leave": False,
             "paid_holidays": False,
             "break_minutes": 60,
-            "grace_minutes": 0,
+            "grace_minutes": 10,
             "overtime_rule": {"multiplier": "1.25"},
             "premium_rules": {},
             "allowance_tax_treatment": {},
@@ -170,9 +176,13 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     entry = next(row for row in data["entries"] if row["employee_id"] == str(employee.id))
     assert entry["review_state"] == "blocked"
     assert entry["gross_pay"] == "13000.00", entry["blockers"]
-    assert entry["total_deductions"] == "1181.82"
-    assert entry["net_pay"] == "11818.18"
+    assert entry["total_deductions"] == "1194.13"
+    assert entry["net_pay"] == "11805.87"
     assert entry["earnings"]["provisional"] is True
+    assert entry["deductions"]["attendance_breakdown"] == {
+        "unpaid_absence": "1181.82",
+        "monthly_short_time_after_grace": "12.31",
+    }
     assert any(
         blocker["code"] == "bir_ytd_unavailable"
         for blocker in entry["blockers"]
@@ -392,8 +402,26 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     assert payslip.content.startswith(b"%PDF-")
 
 
-def test_december_draft_uses_annualized_tax_and_opening_balance(
-    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+@pytest.mark.parametrize(
+    ("period_start", "period_end", "opening_as_of", "separation_date", "employee_status", "trigger", "expected_taxable", "expected_tax_due", "expected_withholding"),
+    [
+        (date(2026, 12, 16), date(2026, 12, 31), date(2026, 12, 15), None, EmployeeStatus.ACTIVE, "year_end", Decimal("314181.82"), Decimal("9627.27"), Decimal("5627.27")),
+        (date(2026, 6, 1), date(2026, 6, 15), date(2026, 5, 31), date(2026, 6, 15), EmployeeStatus.RESIGNED, "termination_final_pay", Decimal("313000.00"), Decimal("9450.00"), Decimal("5450.00")),
+    ],
+)
+def test_final_pay_period_uses_annualized_tax_and_opening_balance(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+    period_start: date,
+    period_end: date,
+    opening_as_of: date,
+    separation_date: date | None,
+    employee_status: EmployeeStatus,
+    trigger: str,
+    expected_taxable: Decimal,
+    expected_tax_due: Decimal,
+    expected_withholding: Decimal,
 ) -> None:
     employee = EmployeeRecords(
         employee_code=f"YEAR-END-{uuid.uuid4().hex[:8]}",
@@ -401,6 +429,8 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
         last_name="Year End",
         birthdate=date(1990, 1, 1),
         date_hired=date(2020, 1, 1),
+        date_separated=separation_date,
+        employee_status=employee_status,
     )
     group = PayrollPayGroup(
         code=f"YE-{uuid.uuid4().hex[:8]}",
@@ -442,7 +472,7 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
                 employee_id=employee.id,
                 tax_year=2026,
                 tax_classification="ordinary",
-                opening_as_of=date(2026, 12, 15),
+                opening_as_of=opening_as_of,
                 taxable_compensation_ytd="300000.00",
                 tax_withheld_ytd="4000.00",
                 previous_employer_included=True,
@@ -451,12 +481,13 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
             ),
             PayrollPolicyVersion(
                 version=910_000 + int(uuid.uuid4().hex[:6], 16),
-                effective_from=date(2026, 1, 1),
-                effective_to=date(2026, 12, 31),
+                effective_from=period_start,
+                effective_to=period_end,
                 policy={
                     "timezone": "Asia/Manila",
                     "monthly_divisor": "22",
                     "daily_partial_work": "pro_rated",
+                    "monthly_partial_work": "deduct_after_grace",
                     "paid_leave": False,
                     "paid_holidays": False,
                     "break_minutes": 60,
@@ -479,18 +510,20 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
             ),
         ]
     )
-    # Full-month attendance is needed to establish the once-monthly statutory
-    # contribution basis, even though this is the final half-month run.
-    for day in range(1, 32):
-        work_date = date(2026, 12, day)
+    # Year-end covers the full month; termination covers the employee's final
+    # configured semi-monthly period and stops on the recorded separation date.
+    for day in range(1, calendar.monthrange(period_end.year, period_end.month)[1] + 1):
+        work_date = date(period_end.year, period_end.month, day)
         if work_date.weekday() >= 5:
+            continue
+        if separation_date is not None and work_date > separation_date:
             continue
         db.add(
             DailyTimeRecord(
                 employee_id=employee.id,
                 shift_id=shift.id,
-                login_date=datetime(2026, 12, day, tzinfo=timezone.utc),
-                logout_date=datetime(2026, 12, day, tzinfo=timezone.utc)
+                login_date=datetime(period_end.year, period_end.month, day, tzinfo=timezone.utc),
+                logout_date=datetime(period_end.year, period_end.month, day, tzinfo=timezone.utc)
                 + timedelta(hours=9),
                 work_date=work_date,
                 rendered_minutes=480,
@@ -505,8 +538,8 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
         f"{API}/runs/prepare-attendance-draft",
         json={
             "pay_group_id": str(group.id),
-            "date_from": "2026-12-16",
-            "date_to": "2026-12-31",
+            "date_from": period_start.isoformat(),
+            "date_to": period_end.isoformat(),
         },
         headers=superuser_token_headers,
     )
@@ -527,6 +560,20 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
     assert entry["input_snapshot"]["bir_calculation"]["method"] == (
         "annualized_rr_11_2018_2023_onward"
     )
+    assert entry["input_snapshot"]["bir_calculation"]["annualization_trigger"] == trigger
+    blocker_codes = {blocker["code"] for blocker in entry["blockers"]}
+    assert "bir_annual_benefits_unavailable" in blocker_codes
+    assert entry["input_snapshot"].get("monthly_contributions") is None
+    if trigger == "termination_final_pay":
+        assert "termination_monthly_contribution_timing_unavailable" in blocker_codes
+        assert "bir_2316_termination_delivery_unavailable" in blocker_codes
+    else:
+        # The year-end test intentionally has no 2026 contribution schedules.
+        # It exercises annual BIR math from the available provisional taxable
+        # basis while proving missing statutory inputs still block finalization.
+        assert "statutory_schedule_unavailable" in blocker_codes
+        assert "termination_monthly_contribution_timing_unavailable" not in blocker_codes
+        assert "bir_2316_termination_delivery_unavailable" not in blocker_codes
     annual_taxable = Decimal(
         entry["input_snapshot"]["bir_calculation"]["annual_taxable_compensation"]
     )
@@ -537,10 +584,10 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
         entry["input_snapshot"]["bir_calculation"]["prior_tax_withheld"]
     )
     withholding_adjustment = Decimal(entry["deductions"]["bir_withholding"])
-    assert annual_taxable == Decimal("311981.82")
-    assert annual_tax_due == Decimal("9297.27")
+    assert annual_taxable == expected_taxable, entry
+    assert annual_tax_due == expected_tax_due
     assert prior_withheld == Decimal("4000.00")
-    assert withholding_adjustment == Decimal("5297.27")
+    assert withholding_adjustment == expected_withholding
 
 
 @pytest.mark.parametrize(
@@ -597,6 +644,7 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             "timezone": "Asia/Manila",
             "monthly_divisor": "22",
             "daily_partial_work": "pro_rated",
+            "monthly_partial_work": "deduct_after_grace",
             "paid_leave": False,
             "paid_holidays": False,
             "break_minutes": 60,
@@ -805,6 +853,7 @@ def test_daily_and_hourly_pay_bases_are_calculated_for_nonfinal_periods(
                     "timezone": "Asia/Manila",
                     "monthly_divisor": "22",
                     "daily_partial_work": "pro_rated",
+                    "monthly_partial_work": "deduct_after_grace",
                     "paid_leave": False,
                     "paid_holidays": False,
                     "break_minutes": 60,
@@ -879,6 +928,7 @@ def test_daily_and_hourly_pay_bases_are_calculated_for_nonfinal_periods(
 @pytest.mark.parametrize(
     ("year", "pay_type", "basic_rate"),
     [
+        (2029, PayType.MONTHLY, "22000.00"),
         (2027, PayType.DAILY, "1000.00"),
         (2028, PayType.HOURLY, "125.00"),
     ],
@@ -959,6 +1009,7 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
                     "timezone": "Asia/Manila",
                     "monthly_divisor": "22",
                     "daily_partial_work": "pro_rated",
+                    "monthly_partial_work": "deduct_after_grace",
                     "paid_leave": False,
                     "paid_holidays": False,
                     "break_minutes": 60,
@@ -981,21 +1032,38 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
             ),
         ]
     )
+    first_late_workday = next(
+        date(year, 10, candidate)
+        for candidate in range(16, 32)
+        if date(year, 10, candidate).weekday() < 5
+    )
     for day in range(1, 32):
         work_date = date(year, 10, day)
         if work_date.weekday() >= 5:
             continue
+        is_absent = work_date == date(year, 10, 5)
+        is_late = work_date == first_late_workday
+        login_at = datetime(year, 10, day, tzinfo=timezone.utc) + timedelta(
+            minutes=15 if is_late else 0
+        )
         db.add(
             DailyTimeRecord(
                 employee_id=employee.id,
                 shift_id=shift.id,
-                login_date=datetime(year, 10, day, tzinfo=timezone.utc),
-                logout_date=datetime(year, 10, day, tzinfo=timezone.utc)
-                + timedelta(hours=9),
+                login_date=None if is_absent else login_at,
+                # Keep the scheduled 17:00 Manila clock-out fixed. A late
+                # login therefore reduces payable shift minutes instead of
+                # shifting the whole nine-hour interval later.
+                logout_date=(
+                    None
+                    if is_absent
+                    else datetime(year, 10, day, tzinfo=timezone.utc)
+                    + timedelta(hours=9)
+                ),
                 work_date=work_date,
-                rendered_minutes=480,
+                rendered_minutes=0 if is_absent else 465 if is_late else 480,
                 overtime_minutes=0,
-                is_absent=False,
+                is_absent=is_absent,
                 is_time_calculated=True,
             )
         )
@@ -1019,17 +1087,35 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
     period_days = sum(
         1 for day in range(16, 32) if date(year, 10, day).weekday() < 5
     )
-    hours_per_shift = (
-        Decimal(8) if pay_type == PayType.HOURLY else Decimal(1)
-    )
-    daily_basis_before_change = base_rate * hours_per_shift
-    daily_basis_after_change = updated_rate * hours_per_shift
+    divisor = Decimal("22")
+    hours_per_shift = Decimal(8) if pay_type == PayType.HOURLY else Decimal(1)
+    if pay_type == PayType.MONTHLY:
+        daily_basis_before_change = base_rate / divisor
+        daily_basis_after_change = updated_rate / divisor
+    else:
+        daily_basis_before_change = base_rate * hours_per_shift
+        daily_basis_after_change = updated_rate * hours_per_shift
     days_before_change = sum(
-        1 for day in range(1, 16) if date(year, 10, day).weekday() < 5
+        1
+        for day in range(1, 16)
+        if date(year, 10, day).weekday() < 5 and day != 5
     )
     days_after_change = period_days
+    partial_day_reduction = daily_basis_after_change * Decimal(15) / Decimal(480)
     expected_period_gross = daily_basis_after_change * Decimal(days_after_change)
-    assert Decimal(entry["gross_pay"]) == expected_period_gross, entry["blockers"]
+    if pay_type != PayType.MONTHLY:
+        expected_period_gross -= partial_day_reduction
+    assert Decimal(entry["gross_pay"]) == expected_period_gross, entry
+    if pay_type == PayType.MONTHLY:
+        assert Decimal(entry["deductions"]["attendance"]) == partial_day_reduction
+        assert (
+            Decimal(
+                entry["deductions"]["attendance_breakdown"][
+                    "monthly_short_time_after_grace"
+                ]
+            )
+            == partial_day_reduction
+        )
     assert not any(
         blocker["code"].startswith("monthly_contribution_")
         or blocker["code"] == "statutory_schedule_unavailable"
@@ -1039,16 +1125,19 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
     expected_actual = (
         daily_basis_before_change * Decimal(days_before_change)
         + daily_basis_after_change * Decimal(days_after_change)
+        - partial_day_reduction
     ).quantize(Decimal("0.01"))
+    monthly_equivalent_before_change = (
+        base_rate if pay_type == PayType.MONTHLY else base_rate * hours_per_shift * divisor
+    )
+    monthly_equivalent_after_change = (
+        updated_rate
+        if pay_type == PayType.MONTHLY
+        else updated_rate * hours_per_shift * divisor
+    )
     expected_philhealth_basis = (
-        daily_basis_before_change
-        * Decimal("22")
-        * Decimal("15")
-        / Decimal("31")
-        + daily_basis_after_change
-        * Decimal("22")
-        * Decimal("16")
-        / Decimal("31")
+        monthly_equivalent_before_change * Decimal("15") / Decimal("31")
+        + monthly_equivalent_after_change * Decimal("16") / Decimal("31")
     ).quantize(Decimal("0.01"))
     assert bases["sss"]["basis"] == str(expected_actual)
     assert bases["philhealth"]["basis"] == str(expected_philhealth_basis)

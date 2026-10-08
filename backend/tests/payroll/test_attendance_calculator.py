@@ -25,7 +25,13 @@ def _day(**updates: object) -> AttendancePayDay:
 
 def test_hourly_earnings_use_minutes_and_approved_overtime_only() -> None:
     result = calculate_attendance_earnings(
-        [_day(overtime_eligible_minutes=60, overtime_approved_minutes=30)],
+        [
+            _day(
+                worked_minutes=540,
+                overtime_eligible_minutes=60,
+                overtime_approved_minutes=30,
+            )
+        ],
         monthly_divisor=Decimal("22"),
         daily_partial_work="pro_rated",
         overtime_multiplier=Decimal("1.25"),
@@ -33,7 +39,28 @@ def test_hourly_earnings_use_minutes_and_approved_overtime_only() -> None:
 
     assert result.regular == Decimal("960.00")
     assert result.overtime == Decimal("112.50")
-    assert result.worked_minutes == 480
+    assert result.worked_minutes == 540
+
+
+def test_hourly_overtime_minutes_are_not_paid_again_at_the_base_rate() -> None:
+    result = calculate_attendance_earnings(
+        [
+            _day(
+                basic_rate=Decimal("120"),
+                overtime_rate=Decimal("120"),
+                worked_minutes=540,
+                overtime_eligible_minutes=60,
+                overtime_approved_minutes=60,
+            )
+        ],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("960.00")
+    assert result.overtime == Decimal("150.00")
+    assert result.regular + result.overtime == Decimal("1110.00")
 
 
 def test_pending_overtime_blocks_amount_calculation() -> None:
@@ -96,3 +123,67 @@ def test_monthly_salary_period_base_deducts_unpaid_absence_once() -> None:
     assert result.regular == Decimal("13000.00")
     assert result.attendance_deduction == Decimal("1181.82")
     assert result.regular - result.attendance_deduction == Decimal("11818.18")
+
+
+def test_monthly_partial_work_deducts_lateness_after_grace() -> None:
+    result = calculate_attendance_earnings(
+        [
+            _day(
+                pay_type="monthly",
+                basic_rate=Decimal("26000"),
+                worked_minutes=465,
+                raw_late_minutes=15,
+                grace_minutes=10,
+            )
+        ],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        monthly_partial_work="deduct_after_grace",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("1181.82")
+    assert result.attendance_deduction == Decimal("12.31")
+    assert result.short_time_deduction == Decimal("12.31")
+
+
+def test_monthly_partial_work_deducts_early_departure_and_can_follow_no_deduction_rule() -> None:
+    day = _day(
+        pay_type="monthly",
+        basic_rate=Decimal("26000"),
+        worked_minutes=465,
+        raw_late_minutes=0,
+        grace_minutes=10,
+    )
+    common = {
+        "monthly_divisor": Decimal("22"),
+        "daily_partial_work": "pro_rated",
+        "overtime_multiplier": Decimal("1.25"),
+    }
+    deduct = calculate_attendance_earnings(
+        [day], monthly_partial_work="deduct_after_grace", **common
+    )
+    protect = calculate_attendance_earnings(
+        [day], monthly_partial_work="no_deduction", **common
+    )
+
+    assert deduct.attendance_deduction == Decimal("36.93")
+    assert deduct.short_time_deduction == Decimal("36.93")
+    assert protect.attendance_deduction == Decimal("0.00")
+    assert protect.short_time_deduction == Decimal("0.00")
+
+
+def test_monthly_partial_work_without_confirmed_rule_blocks_calculation() -> None:
+    with pytest.raises(CalculationBlocker, match="Monthly partial-work policy is missing"):
+        calculate_attendance_earnings(
+            [
+                _day(
+                    pay_type="monthly",
+                    basic_rate=Decimal("26000"),
+                    worked_minutes=465,
+                )
+            ],
+            monthly_divisor=Decimal("22"),
+            daily_partial_work="pro_rated",
+            overtime_multiplier=Decimal("1.25"),
+        )

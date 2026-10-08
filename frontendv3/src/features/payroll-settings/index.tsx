@@ -25,6 +25,7 @@ export default function PayrollSettingsPage() {
   "timezone": "Asia/Manila",
   "monthly_divisor": null,
   "daily_partial_work": null,
+  "monthly_partial_work": null,
   "paid_leave": null,
   "paid_holidays": null,
   "break_minutes": null,
@@ -125,6 +126,7 @@ export default function PayrollSettingsPage() {
         {canAdd && <form onSubmit={submitPolicy} className="space-y-3">
           <label className="grid gap-1 text-sm">Effective from<input required type="date" value={policyEffectiveDate} onChange={e => setPolicyEffectiveDate(e.target.value)} className="h-9 w-fit rounded border bg-background px-3" /></label>
           <label className="grid gap-1 text-sm">Policy data (JSON)<textarea required rows={16} value={policyJson} onChange={e => setPolicyJson(e.target.value)} className="w-full rounded border bg-background p-3 font-mono text-xs" /></label>
+          <p className="text-xs text-muted-foreground">Set <code>monthly_partial_work</code> to <code>deduct_after_grace</code> to deduct monthly-rated short time after the shift grace period, or <code>no_deduction</code> to preserve the monthly rate. Full unpaid absences are still deducted under either rule.</p>
           <Button type="submit" disabled={setup.createPolicy.isPending}>Save policy draft</Button>
           <p className="text-xs text-muted-foreground">Confirmation records that the listed statutory source URLs were reviewed. Payroll finalization remains disabled until the attendance-driven calculation and independent review workflow is complete.</p>
         </form>}

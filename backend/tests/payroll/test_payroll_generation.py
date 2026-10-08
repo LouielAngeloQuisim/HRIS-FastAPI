@@ -7,7 +7,7 @@ daily cutoff, preview/generate consistency, payslip endpoints.
 
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from threading import Barrier
 
@@ -23,6 +23,7 @@ from app.payroll.models import (
     PagIBIGBracket,
     PayrollEntry,
     PayrollRun,
+    PayrollRunStatus,
     PhilHealthBracket,
     SSSBracket,
 )
@@ -421,6 +422,60 @@ class TestPayslipEndpoints:
         )
         assert payslip_resp.status_code == 200, payslip_resp.text
         assert payslip_resp.json() is None
+
+    def test_employee_payslip_uses_latest_period_not_later_created_old_run(
+        self,
+        client: TestClient,
+        db: Session,
+        employee_with_salary: EmployeeRecords,
+        superuser_token_headers: dict[str, str],
+    ) -> None:
+        runs = [
+            PayrollRun(
+                cutoff_type="semi_monthly",
+                date_from=date(2026, 10, 1),
+                date_to=date(2026, 10, 15),
+                status=PayrollRunStatus.APPROVED,
+                adjustment_type="regular",
+                workflow_status="finalized",
+                created_at=datetime(2026, 10, 30, tzinfo=timezone.utc),
+            ),
+            PayrollRun(
+                cutoff_type="semi_monthly",
+                date_from=date(2026, 10, 16),
+                date_to=date(2026, 10, 31),
+                status=PayrollRunStatus.APPROVED,
+                adjustment_type="regular",
+                workflow_status="finalized",
+                created_at=datetime(2026, 10, 20, tzinfo=timezone.utc),
+            ),
+        ]
+        db.add_all(runs)
+        db.flush()
+        for index, run in enumerate(runs, start=1):
+            db.add(
+                PayrollEntry(
+                    payroll_run_id=run.id,
+                    employee_id=employee_with_salary.id,
+                    basic_rate=Decimal("30000.00"),
+                    rate_date_from=run.date_from,
+                    rate_date_to=run.date_to,
+                    gross_pay=Decimal(str(index * 10000)),
+                    total_deductions=Decimal("1000.00"),
+                    net_pay=Decimal(str(index * 10000 - 1000)),
+                    taxable_income=Decimal(str(index * 9000)),
+                )
+            )
+        db.commit()
+
+        response = client.get(
+            f"{API}/employees/{employee_with_salary.id}/payslip",
+            headers=superuser_token_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["date_to"] == "2026-10-31"
+        assert Decimal(str(response.json()["net_pay"])) == Decimal("19000.00")
 
 
 class TestThirteenthMonth:

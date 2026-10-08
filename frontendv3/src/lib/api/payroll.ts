@@ -17,6 +17,7 @@ import type {
   EmployeeSalaryPublic,
   EmployeeSalaryCreate,
   EmployeeSalaryUpdate,
+  EmployeeLatestPayroll,
 } from './types'
 
 const API = ''
@@ -745,6 +746,25 @@ export function useEmployeeSalaries(employeeId: string | undefined) {
     queryFn: () => fetchEmployeeSalaries(employeeId as string),
     enabled: Boolean(employeeId),
     placeholderData: keepPreviousData,
+  })
+}
+
+export function useEmployeeLatestPayroll(employeeId: string | undefined) {
+  return useQuery({
+    queryKey: ['employee-latest-payroll', employeeId ?? 'none'],
+    queryFn: async () => {
+      try {
+        return (
+          await api.get<EmployeeLatestPayroll | null>(
+            `/payroll/employees/${employeeId}/payslip`
+          )
+        ).data
+      } catch (error) {
+        if (isAxiosError(error) && error.response?.status === 404) return null
+        throw error
+      }
+    },
+    enabled: Boolean(employeeId),
   })
 }
 

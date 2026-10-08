@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { EmployeeProfile } from './index'
-import { type EmployeeRecordsPublic } from '@/lib/api/types'
+import { type EmployeeLatestPayroll, type EmployeeRecordsPublic } from '@/lib/api/types'
 
 const mockEmployee: EmployeeRecordsPublic = {
   id: 'emp-1',
@@ -52,6 +52,7 @@ vi.mock('@/lib/api/employees', () => ({
 vi.mock('@/lib/api/payroll', () => ({
   useEmployeeSalaries: () => ({ data: [], isPending: false, isError: false }),
   useEmployeePayGroupAssignments: () => ({ data: [], isPending: false, isError: false }),
+  useEmployeeLatestPayroll: vi.fn(() => ({ data: null, isPending: false, isError: false })),
   useEmployeeTaxYearDeclaration: () => ({ data: null, isPending: false, isError: false }),
   useSaveEmployeeTaxYearDeclaration: () => ({ mutate: saveTaxInputs, isPending: false, isError: false, isSuccess: false }),
 }))
@@ -116,5 +117,37 @@ describe('EmployeeProfile', () => {
       tax_withheld_ytd: '4500.00',
       is_verified: true,
     }))
+  })
+
+  it('shows the latest finalized employee deductions separately from employer contributions', async () => {
+    const { useEmployee } = await import('@/lib/api/employees')
+    const { useEmployeeLatestPayroll } = await import('@/lib/api/payroll')
+    vi.mocked(useEmployee).mockReturnValue({ data: mockEmployee, isPending: false, isError: false } as ReturnType<typeof useEmployee>)
+    vi.mocked(useEmployeeLatestPayroll).mockReturnValue({
+      data: {
+        run_id: 'run-1', employee_id: 'emp-1', employee_name: 'Jane Doe',
+        cutoff_type: 'semi_monthly', date_from: '2026-10-16', date_to: '2026-10-31',
+        basic_rate: '26000.00', rate_date_from: '2026-10-01', rate_date_to: '2026-10-31',
+        earnings: { regular: '13000.00' },
+        deductions: {
+          attendance: '0.00', bir_withholding: '850.00',
+          statutory: { sss: '1300.00', philhealth: '325.00', pagibig: '100.00' },
+          employer_contributions: { sss: '2200.00', philhealth: '325.00', pagibig: '200.00' },
+        },
+        gross_pay: '13000.00', total_deductions: '2575.00', net_pay: '10425.00',
+        overtime_pay: '0.00', thirteenth_month: '0.00', non_taxable_income: '0.00',
+        taxable_income: '13000.00', status: 'approved',
+      } satisfies EmployeeLatestPayroll,
+      isPending: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useEmployeeLatestPayroll>)
+
+    const screen = await render(<EmployeeProfile />)
+
+    await expect.element(screen.getByRole('region', { name: 'Latest finalized payroll' })).toBeInTheDocument()
+    await expect.element(screen.getByText('Period 2026-10-16 to 2026-10-31')).toBeInTheDocument()
+    await expect.element(screen.getByText(/Employer contributions \(not deducted from net pay\)/i)).toBeInTheDocument()
+    await expect.element(screen.getByText('₱1,300.00')).toBeInTheDocument()
+    await expect.element(screen.getByText('₱2,200.00')).toBeInTheDocument()
   })
 })

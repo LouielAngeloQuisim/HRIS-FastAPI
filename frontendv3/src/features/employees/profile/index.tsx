@@ -10,7 +10,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEmployee } from '@/lib/api/employees'
 import { useCan } from '@/context/permissions-provider'
-import { useEmployeePayGroupAssignments, useEmployeeSalaries } from '@/lib/api/payroll'
+import { useEmployeeLatestPayroll, useEmployeePayGroupAssignments, useEmployeeSalaries } from '@/lib/api/payroll'
 import { fullName, type Employee } from '../data/schema'
 import { TaxYearDeclaration } from './tax-year-declaration'
 
@@ -115,6 +115,7 @@ function Overview({ employee }: { employee: Employee }) {
 function Compensation({ employeeId }: { employeeId: string }) {
   const salaries = useEmployeeSalaries(employeeId)
   const assignments = useEmployeePayGroupAssignments(employeeId)
+  const latestPayroll = useEmployeeLatestPayroll(employeeId)
   const canViewPayroll = useCan('payroll', 'view')
   if (!canViewPayroll) return null
   const salaryRows = salaries.data?.data ?? []
@@ -122,7 +123,7 @@ function Compensation({ employeeId }: { employeeId: string }) {
   return <Card>
     <CardHeader><CardTitle className='text-base'>Compensation and payroll setup</CardTitle></CardHeader>
     <CardContent className='space-y-3'>
-      {salaries.isPending || assignments.isPending ? <p className='text-sm text-muted-foreground'>Loading compensation…</p> : salaries.isError || assignments.isError ? <p role='alert' className='text-sm text-destructive'>Compensation details could not be loaded.</p> : latest ? <>
+      {salaries.isPending || assignments.isPending || latestPayroll.isPending ? <p className='text-sm text-muted-foreground'>Loading compensation…</p> : salaries.isError || assignments.isError || latestPayroll.isError ? <p role='alert' className='text-sm text-destructive'>Compensation details could not be loaded.</p> : latest ? <>
         <dl className='grid grid-cols-2 gap-4'>
           <Field label='Salary basis' value={latest.pay_type} />
           <Field label='Basic rate' value={`${latest.currency} ${latest.basic_rate}`} />
@@ -131,9 +132,60 @@ function Compensation({ employeeId }: { employeeId: string }) {
         </dl>
         <div><h3 className='text-sm font-medium'>Pay group history</h3>{assignments.data?.length ? assignments.data.map(row => <p key={row.id} className='text-sm text-muted-foreground'>{row.effective_from}{row.effective_to ? ` through ${row.effective_to}` : ' onward'} · group {row.pay_group_id}</p>) : <p className='text-sm text-muted-foreground'>No pay group is assigned.</p>}</div>
         <p className='text-xs text-muted-foreground'>Contribution amounts and tax are calculated for each payroll period from applicable rules and employee history; this profile does not treat them as fixed salary deductions.</p>
-      </> : <p className='text-sm text-muted-foreground'>No salary is configured for this employee.</p>}
+        {latestPayroll.data ? <LatestPayrollBreakdown payroll={latestPayroll.data} /> : <p className='text-sm text-muted-foreground'>No finalized payroll statement is available yet.</p>}
+      </> : <><p className='text-sm text-muted-foreground'>No salary is configured for this employee.</p>{latestPayroll.data ? <LatestPayrollBreakdown payroll={latestPayroll.data} /> : null}</>}
     </CardContent>
   </Card>
+}
+
+function money(value: unknown) {
+  const amount = Number(value)
+  return Number.isFinite(amount)
+    ? new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount)
+    : '—'
+}
+
+function formatLineLabel(value: string) {
+  const labels: Record<string, string> = {
+    sss: 'SSS',
+    philhealth: 'PhilHealth',
+    pagibig: 'Pag-IBIG',
+    bir: 'BIR',
+  }
+  return value.replace(/_/g, ' ').split(' ').map((word) =>
+    labels[word.toLowerCase()] ?? word.charAt(0).toUpperCase() + word.slice(1),
+  ).join(' ')
+}
+
+function numericLines(value: unknown): Array<[string, unknown]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  return Object.entries(value as Record<string, unknown>).filter(([, amount]) => {
+    if (typeof amount !== 'string' && typeof amount !== 'number') return false
+    return Number.isFinite(Number(amount))
+  })
+}
+
+function LatestPayrollBreakdown({ payroll }: { payroll: NonNullable<ReturnType<typeof useEmployeeLatestPayroll>['data']> }) {
+  const deductions = payroll.deductions ?? {}
+  const statutory = numericLines(deductions.statutory)
+  const employeeDeductions = [
+    ...numericLines(deductions).filter(([key]) => key !== 'statutory' && key !== 'employer_contributions' && !key.endsWith('_employee')),
+    ...(statutory.length ? statutory.map(([key, amount]) => [formatLineLabel(key), amount] as [string, unknown]) : numericLines(deductions).filter(([key]) => key.endsWith('_employee'))),
+  ]
+  const employerContributions = numericLines(deductions.employer_contributions)
+  return <section className='space-y-2 rounded-md border p-3' aria-label='Latest finalized payroll'>
+    <h3 className='text-sm font-medium'>Latest finalized payroll</h3>
+    <p className='text-xs text-muted-foreground'>Period {payroll.date_from ?? '—'} to {payroll.date_to ?? '—'}</p>
+    <dl className='grid grid-cols-2 gap-3 text-sm'>
+      <Field label='Gross pay' value={money(payroll.gross_pay)} />
+      <Field label='Net pay' value={money(payroll.net_pay)} />
+    </dl>
+    <div>
+      <h4 className='text-xs font-medium'>Employee deductions</h4>
+      {employeeDeductions.length ? <dl className='space-y-1'>{employeeDeductions.map(([label, amount]) => <div key={label} className='flex justify-between gap-3 text-xs'><dt>{formatLineLabel(label)}</dt><dd>{money(amount)}</dd></div>)}</dl> : <p className='text-xs text-muted-foreground'>No deductions recorded.</p>}
+    </div>
+    {employerContributions.length ? <div><h4 className='text-xs font-medium'>Employer contributions (not deducted from net pay)</h4><dl className='space-y-1'>{employerContributions.map(([label, amount]) => <div key={label} className='flex justify-between gap-3 text-xs'><dt>{formatLineLabel(label)}</dt><dd>{money(amount)}</dd></div>)}</dl></div> : null}
+  </section>
 }
 
 export function EmployeeProfile() {

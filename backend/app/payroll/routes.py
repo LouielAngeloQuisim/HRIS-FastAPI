@@ -5445,7 +5445,12 @@ async def get_employee_payslip_for_latest_run(
     if not matching_runs:
         return None
 
-    latest_run = max(matching_runs, key=lambda r: r.created_at or datetime.min)
+    # Period order is authoritative: an older run can be created later during
+    # a correction/rebuild and must not replace the employee's latest statement.
+    latest_run = max(
+        matching_runs,
+        key=lambda run: (run.date_to, run.created_at or datetime.min),
+    )
     _, entries = select_payroll_run_with_entries(
         session, latest_run.id, include_deleted=False
     )

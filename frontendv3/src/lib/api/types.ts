@@ -1155,6 +1155,28 @@ export interface PayrollEntryPublic {
   created_at: string | null
 }
 
+export interface EmployeeLatestPayroll {
+  run_id: string
+  employee_id: string | null
+  employee_name: string | null
+  cutoff_type: string | null
+  date_from: string | null
+  date_to: string | null
+  basic_rate: string
+  rate_date_from: string | null
+  rate_date_to: string | null
+  earnings: Record<string, unknown> | null
+  deductions: Record<string, unknown> | null
+  gross_pay: string
+  total_deductions: string
+  net_pay: string
+  overtime_pay: string
+  thirteenth_month: string
+  non_taxable_income: string
+  taxable_income: string
+  status: string | null
+}
+
 export interface PayrollRunDetail extends PayrollRunPublic {
   entries: PayrollEntryPublic[]
 }

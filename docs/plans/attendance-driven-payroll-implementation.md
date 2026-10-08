@@ -4,9 +4,9 @@ Status: in progress; not release-ready. Verification was run on 2026-10-08 again
 
 ## Current continuation (2026-10-08)
 
-- PR #87 is draft/open, unmerged and undeployed at `b9b6c143df6c05c5c7d4cebc2a1ce69759ba7ff8`. No production records or real mail were used.
+- PR #87 remains draft/open, unmerged and undeployed. Its latest application/E2E code was tested before the evidence-only documentation updates below. No production records or real mail were used.
 - `scripts/verify.sh` passed on application commit `d4cb959`: **987 backend tests**, **450 Vitest tests across 124 files**, Ruff, mypy, Alembic drift, TypeScript and build. ESLint reported **0 errors / 8 warnings** (report-only); MAP was in sync. Payroll E2E passed **10/10**; the Batch 1 employee/salary/tax/leave E2E file passed **6/6** after correcting its prior-benefit reconciliation setup.
-- Hosted checks passed on the current PR head `b9b6c143`: backend, frontend, E2E (**70/70**), CI configuration, CodeQL, and Actions/JavaScript/Python analysis. The first full E2E attempt on the preceding head exposed the missing test confirmation; the corrected full run passed.
+- Hosted checks passed on tested application/E2E head `b9b6c143`: backend, frontend, E2E (**70/70**), CI configuration, CodeQL, and Actions/JavaScript/Python analysis. Subsequent changes are limited to this evidence document. The first full E2E attempt on the preceding head exposed the missing test confirmation; the corrected full run passed.
 - This batch added same-day prior-benefit balance handling and corrected the browser test to confirm reconciliation when prior-employer history is included. Finalization and mail flags remain off.
 - Remaining release blockers are deliberate and documented below: HR/payroll-owner review and parallel sample comparison; owner confirmation of the applicable statutory schedules and company rules; Form 2316 generation; termination-month contribution timing; unsupported meal/night de minimis and unused-leave cases; mixed-holiday and other compensation cases; and delivery-worker health/recovery acceptance. Affected entries remain blocked, and global finalization/delivery flags remain off.
 
@@ -70,7 +70,7 @@ Verified minimum-wage-earner declarations now use the BIR exemption for statutor
 
 ## Final verification gate
 
-Latest hosted verification: PR head `b9b6c143df6c05c5c7d4cebc2a1ce69759ba7ff8` (2026-10-08). Hosted checks passed on that exact head.
+Latest hosted verification of application and E2E code: PR head `b9b6c143df6c05c5c7d4cebc2a1ce69759ba7ff8` (2026-10-08). That head's hosted checks passed; later changes are limited to this evidence document and do not alter application or test code.
 
 - Latest local `bash scripts/verify.sh` (2026-10-08): **RESULT: PASS (exit 0)** using disposable PostgreSQL; **987 backend tests** (871 warnings) and **450 Vitest tests across 124 files** passed, Ruff/mypy/Alembic/TypeScript/build passed, MAP was in sync, and ESLint reported 0 errors / 8 report-only warnings. The verifier removed its disposable database container on completion.
 - Latest local `bash scripts/run-e2e-qa.sh payroll` (2026-10-08): **10/10 passed** in 57.4 seconds, one worker, zero retries, including the separate-reviewer finalization flow with payslip email delivery disabled. The runner completed cleanup; no containers remained running afterward.

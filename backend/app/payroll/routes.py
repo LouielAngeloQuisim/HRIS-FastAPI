@@ -5971,7 +5971,9 @@ def prepare_attendance_payroll_draft(
                             or declaration.tax_withheld_ytd > 0
                         )
                         cumulative_method_previously_applied = (
-                            _bir_cumulative_average_was_used(
+                            not has_opening_tax_history
+                            and benefits_taxable_excess == 0
+                            and _bir_cumulative_average_was_used(
                                 session,
                                 roster_entry.employee_id,
                                 obj_in.date_to.year,

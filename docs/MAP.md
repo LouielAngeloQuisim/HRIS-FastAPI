@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-08
-Source commit: a34002a8c3716697bb1223c1d1209374b7ce8f29
+Source commit: 7ab201d6d746a443a3740027afb7f4ace2cb39b3
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
@@ -491,7 +491,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 50 revisions, single head `1a2b3c4d5e6f`
+## Migration chain (oldest -> newest): 51 revisions, single head `2b3c4d5e6f70`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -546,6 +546,7 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 48. `ef8091a2b3c4` - Store reconciled de minimis category opening balances.
 49. `f1a2b3c4d5e6` - Add reviewed, tax-year-scoped identity for Form 2316.
 50. `1a2b3c4d5e6f` - Allow only one correction to reverse each contribution ledger row.
+51. `2b3c4d5e6f70` - Require contribution corrections to stay within their source scope.
 
 ### Migration anomalies (static findings, report-only)
 

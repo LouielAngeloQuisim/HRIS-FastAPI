@@ -118,6 +118,26 @@ def test_monthly_collection_rejects_duplicate_and_keeps_reasoned_correction(
         db.commit()
     db.rollback()
 
+    wrong_scope_correction = PayrollContributionLedger(
+        employee_id=employee.id,
+        payroll_entry_id=entry.id,
+        scheme="sss",
+        contribution_month=date(2026, 10, 1),
+        sequence=1,
+        monthly_basis=Decimal("26000.00"),
+        employee_amount=Decimal("10.00"),
+        employer_amount=Decimal("0.00"),
+        calculation_snapshot={"correction": "wrong scheme"},
+        source_references=["https://www.sss.gov.ph/sss-contribution-table/"],
+        adjustment_reason="Invalid attempt to reverse a different scheme",
+        reverses_id=base.id,
+        created_by=actor.id,
+    )
+    db.add(wrong_scope_correction)
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
     duplicate_entry = _entry(db, employee.id, actor.id, day=16)
     duplicate = PayrollContributionLedger(
         employee_id=employee.id,

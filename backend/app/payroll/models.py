@@ -20,6 +20,7 @@ from sqlalchemy import (
     JSON,
     CheckConstraint,
     DateTime,
+    ForeignKeyConstraint,
     Index,
     Numeric,
     String,
@@ -691,6 +692,24 @@ class PayrollContributionLedger(SQLModel, table=True):
         UniqueConstraint(
             "reverses_id",
             name="uq_payroll_contribution_single_reversal",
+        ),
+        UniqueConstraint(
+            "id",
+            "employee_id",
+            "scheme",
+            "contribution_month",
+            name="uq_payroll_contribution_reversal_scope",
+        ),
+        ForeignKeyConstraint(
+            ["reverses_id", "employee_id", "scheme", "contribution_month"],
+            [
+                "payroll_contribution_ledger.id",
+                "payroll_contribution_ledger.employee_id",
+                "payroll_contribution_ledger.scheme",
+                "payroll_contribution_ledger.contribution_month",
+            ],
+            name="fk_payroll_contribution_reversal_scope",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
             "scheme IN ('sss', 'philhealth', 'pagibig')",

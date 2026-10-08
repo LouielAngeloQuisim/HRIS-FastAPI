@@ -2,12 +2,16 @@ import { api } from '@/lib/api/client'
 import type { ShiftsPublic } from '@/lib/api/types'
 import { useState } from 'react'
 import { useCan } from '@/context/permissions-provider'
-import { useShifts } from '@/lib/api/shifts'
+import {
+  useCloseEmployeeShiftAssignment,
+  useCreateEmployeeShiftAssignment,
+  useEmployeeShiftAssignments,
+  useShifts,
+} from '@/lib/api/shifts'
 import { Button } from '@/components/ui/button'
 import { ResourceForm } from './components/resource-form'
 import { ResourceDeleteDialog } from './components/resource-delete-dialog'
 import { useEmployees } from '@/lib/api/employees'
-import { useCloseEmployeeShiftAssignment, useCreateEmployeeShiftAssignment, useEmployeeShiftAssignments } from '@/lib/api/shifts'
 import { toast } from 'sonner'
 
 export default function ShiftsPage() {

@@ -41,6 +41,8 @@ def test_tax_year_declaration_upsert_and_get(
         "opening_as_of": "2026-06-30",
         "taxable_compensation_ytd": "120000.00",
         "tax_withheld_ytd": "5000.00",
+        "opening_pay_period_count": 12,
+        "opening_pay_period_type": "monthly",
         "previous_employer_included": True,
         "source_reference": "BIR Form 2316 reviewed",
         "is_verified": True,
@@ -55,6 +57,8 @@ def test_tax_year_declaration_upsert_and_get(
     assert body["opening_as_of"] == "2026-06-30"
     assert body["taxable_compensation_ytd"] == "120000.00"
     assert body["tax_withheld_ytd"] == "5000.00"
+    assert body["opening_pay_period_count"] == 12
+    assert body["opening_pay_period_type"] == "monthly"
     assert body["previous_employer_included"] is True
     assert body["is_verified"] is True
     assert body["verified_by"]
@@ -98,3 +102,29 @@ def test_tax_year_declaration_rejects_invalid_year_and_negative_amounts(
         json={"opening_as_of": "2027-01-01", "taxable_compensation_ytd": "-0.01"},
         headers=superuser_token_headers,
     ).status_code == 422
+
+
+def test_previous_employer_declaration_requires_period_count_and_source_note(
+    client: TestClient,
+    employee_record: EmployeeRecords,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    url = f"{API}/employees/{employee_record.id}/tax-year-declarations/2026"
+    base = {
+        "opening_as_of": "2026-06-30",
+        "taxable_compensation_ytd": "180000.00",
+        "tax_withheld_ytd": "11000.40",
+        "previous_employer_included": True,
+    }
+    assert client.put(url, json=base, headers=superuser_token_headers).status_code == 422
+    response = client.put(
+        url,
+        json={
+            **base,
+            "source_reference": "Form 2316 reviewed",
+            "opening_pay_period_count": 6,
+            "opening_pay_period_type": "semi_monthly",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 200, response.text

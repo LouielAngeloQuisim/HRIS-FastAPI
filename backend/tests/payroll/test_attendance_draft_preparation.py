@@ -528,6 +528,145 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
     assert withholding_adjustment == Decimal("5297.27")
 
 
+def test_previous_employer_uses_verified_cumulative_average_inputs(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    employee = EmployeeRecords(
+        employee_code=f"CUMULATIVE-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Cumulative Tax",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2026, 10, 1),
+    )
+    group = PayrollPayGroup(
+        code=f"CA-{uuid.uuid4().hex[:8]}",
+        name="QA cumulative semi-monthly",
+        cadence="semi_monthly",
+        first_period_end_day=15,
+        second_period_end_day=31,
+        weekend_rule="next_business_day",
+    )
+    shift = Shift(
+        code=f"CA-{uuid.uuid4().hex[:8]}",
+        name="QA cumulative weekday shift",
+        start_time="08:00",
+        end_time="17:00",
+        lunch_break_duration=60,
+        total_hours_minus_lunch=480,
+    )
+    db.add_all([employee, group, shift])
+    db.flush()
+    db.add_all(
+        [
+            EmployeeSalary(
+                employee_id=employee.id,
+                basic_rate="35000.00",
+                effective_date=date(2026, 10, 1),
+                pay_type=PayType.MONTHLY,
+            ),
+            EmployeePayGroupAssignment(
+                employee_id=employee.id,
+                pay_group_id=group.id,
+                effective_from=date(2026, 10, 1),
+            ),
+            EmployeeShiftAssignment(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                effective_from=date(2026, 10, 1),
+            ),
+            EmployeeTaxYearDeclaration(
+                employee_id=employee.id,
+                tax_year=2026,
+                tax_classification="ordinary",
+                opening_as_of=date(2026, 9, 30),
+                taxable_compensation_ytd="180000.00",
+                tax_withheld_ytd="11000.40",
+                opening_pay_period_count=6,
+                opening_pay_period_type="semi_monthly",
+                previous_employer_included=True,
+                source_reference="QA reviewed Form 2316",
+                is_verified=True,
+            ),
+            PayrollPolicyVersion(
+                version=930_000 + int(uuid.uuid4().hex[:6], 16),
+                effective_from=date(2026, 10, 1),
+                effective_to=date(2026, 10, 15),
+                policy={
+                    "timezone": "Asia/Manila",
+                    "monthly_divisor": "22",
+                    "daily_partial_work": "pro_rated",
+                    "paid_leave": False,
+                    "paid_holidays": False,
+                    "break_minutes": 60,
+                    "grace_minutes": 0,
+                    "overtime_rule": {"multiplier": "1.25"},
+                    "premium_rules": {},
+                    "allowance_tax_treatment": {},
+                    "rounding_mode": "half_up",
+                    "contribution_collection": {
+                        "frequency": "once_monthly",
+                        "collection_period": "last_period",
+                    },
+                    "statutory_sources_reviewed": [
+                        "https://www.sss.gov.ph/pay-contribution/",
+                        "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
+                        "https://www.pagibigfund.gov.ph/",
+                    ],
+                },
+                confirmed=True,
+            ),
+        ]
+    )
+    for day in range(1, 16):
+        work_date = date(2026, 10, day)
+        if work_date.weekday() < 5:
+            db.add(
+                DailyTimeRecord(
+                    employee_id=employee.id,
+                    shift_id=shift.id,
+                    login_date=datetime(2026, 10, day, tzinfo=timezone.utc),
+                    logout_date=datetime(2026, 10, day, tzinfo=timezone.utc)
+                    + timedelta(hours=9),
+                    work_date=work_date,
+                    rendered_minutes=480,
+                    overtime_minutes=0,
+                    is_absent=False,
+                    is_time_calculated=True,
+                )
+            )
+    db.commit()
+
+    response = client.post(
+        f"{API}/runs/prepare-attendance-draft",
+        json={
+            "pay_group_id": str(group.id),
+            "date_from": "2026-10-01",
+            "date_to": "2026-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 201, response.text
+    entry = next(
+        row for row in response.json()["entries"] if row["employee_id"] == str(employee.id)
+    )
+    assert "bir_cumulative_history_unavailable" not in {
+        blocker["code"] for blocker in entry["blockers"]
+    }
+    assert "bir_cumulative_opening_unavailable" not in {
+        blocker["code"] for blocker in entry["blockers"]
+    }
+    trace = entry["input_snapshot"]["bir_calculation"]
+    assert trace["method"] == "cumulative_average_rr_11_2018"
+    assert trace["cumulative_taxable_compensation"] == "197500.00"
+    assert trace["cumulative_period_count"] == 7
+    assert trace["average_period_compensation"] == "28214.29"
+    assert trace["prior_tax_withheld"] == "11000.40"
+    assert Decimal(trace["withholding"]) == Decimal(entry["deductions"]["bir_withholding"])
+    history = entry["input_snapshot"]["bir_year_to_date_history"]
+    assert history["opening_pay_period_count"] == 6
+    assert history["complete"] is True
+
+
 @pytest.mark.parametrize(
     ("pay_type", "basic_rate"),
     [(PayType.DAILY, "1000.00"), (PayType.HOURLY, "125.00")],

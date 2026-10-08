@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 from datetime import time as time_of_day
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -29,7 +29,10 @@ from app.common.schemas import Message
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords
 from app.leave.models import HolidayConfig, HolidayInstance, LeaveRequest
-from app.payroll.annualized_tax import calculate_annualized_compensation_tax
+from app.payroll.annualized_tax import (
+    calculate_annualized_compensation_tax,
+    cumulative_average_withholding,
+)
 from app.payroll.attendance_calculator import (
     AttendancePayDay,
     CalculationBlocker,
@@ -696,12 +699,24 @@ def _bir_finalized_history(
         )
         .order_by(col(PayrollRun.date_from), col(PayrollRun.date_to), col(PayrollEntry.id))
     ).all()
+    group_ids = {run.pay_group_id for _, run in rows if run.pay_group_id is not None}
+    period_types = {
+        group.id: group.cadence.value
+        for group in session.exec(
+            select(PayrollPayGroup).where(col(PayrollPayGroup.id).in_(group_ids))
+        ).all()
+    } if group_ids else {}
     history: list[dict[str, str]] = []
     taxable_total = Decimal("0.00")
     withheld_total = Decimal("0.00")
     complete = True
     coverage_cursor = coverage_start
     for entry, run in rows:
+        period_type = (
+            period_types.get(run.pay_group_id, "unknown")
+            if run.pay_group_id is not None
+            else "unknown"
+        )
         coverage_from = max(run.date_from, coverage_start)
         coverage_to = min(run.date_to, before - timedelta(days=1))
         if coverage_from <= coverage_to:
@@ -719,6 +734,7 @@ def _bir_finalized_history(
                     "excluded": "true",
                     "taxable_compensation": "0.00",
                     "tax_withheld": "0.00",
+                    "pay_period_type": period_type,
                 }
             )
             continue
@@ -733,6 +749,7 @@ def _bir_finalized_history(
                     "date_from": run.date_from.isoformat(),
                     "date_to": run.date_to.isoformat(),
                     "unavailable": "true",
+                    "pay_period_type": period_type,
                 }
             )
             continue
@@ -773,6 +790,7 @@ def _bir_finalized_history(
                 "date_to": run.date_to.isoformat(),
                 "taxable_compensation": str(taxable),
                 "tax_withheld": str(withheld),
+                "pay_period_type": period_type,
             }
         )
     if coverage_cursor < before:
@@ -3216,6 +3234,8 @@ def prepare_attendance_payroll_draft(
                 "tax_classification": tax_declaration.tax_classification,
                 "taxable_compensation_ytd": str(tax_declaration.taxable_compensation_ytd),
                 "tax_withheld_ytd": str(tax_declaration.tax_withheld_ytd),
+                "opening_pay_period_count": tax_declaration.opening_pay_period_count,
+                "opening_pay_period_type": tax_declaration.opening_pay_period_type,
                 "previous_employer_included": tax_declaration.previous_employer_included,
                 "verified": tax_declaration.is_verified,
             }
@@ -3380,20 +3400,143 @@ def prepare_attendance_payroll_draft(
                                 "year_end_adjustment_pending": False,
                             }
                     else:
-                        bir_withholding = calculate_bir_tax(
-                            session,
-                            taxable_pay,
-                            group.cadence.value,
-                            obj_in.date_to.isoformat(),
-                        )
-                        snapshot["bir_calculation"] = {
-                            "method": "periodic_annex_e",
-                            "period_type": group.cadence.value,
-                            "taxable_compensation": str(taxable_pay),
-                            "withholding": str(bir_withholding),
-                            "schedule_effective_date": obj_in.date_to.isoformat(),
-                            "year_end_adjustment_pending": False,
-                        }
+                        declaration = tax_declaration
+                        if declaration is not None and (
+                            declaration.previous_employer_included
+                            or declaration.taxable_compensation_ytd > 0
+                            or declaration.tax_withheld_ytd > 0
+                        ):
+                            if (
+                                declaration.opening_as_of is None
+                                or declaration.opening_as_of.year != obj_in.date_to.year
+                                or declaration.opening_as_of >= obj_in.date_from
+                                or declaration.opening_pay_period_count <= 0
+                                or declaration.opening_pay_period_type != group.cadence.value
+                            ):
+                                blockers.append(
+                                    PayrollPreflightBlocker(
+                                        code=(
+                                            "bir_cumulative_cadence_mismatch"
+                                            if declaration.opening_pay_period_type is not None
+                                            and declaration.opening_pay_period_type != group.cadence.value
+                                            else "bir_cumulative_opening_unavailable"
+                                        ),
+                                        message=(
+                                            "The prior employer used a different payroll cadence; reconcile the tax-year calculation with a payroll owner before withholding."
+                                            if declaration.opening_pay_period_type is not None
+                                            and declaration.opening_pay_period_type != group.cadence.value
+                                            else "A verified opening tax-year declaration needs its covered date, payroll-period count and cadence before cumulative-average withholding can be calculated."
+                                        ),
+                                    )
+                                )
+                            else:
+                                employee_row = session.get(EmployeeRecords, roster_entry.employee_id)
+                                coverage_start = max(
+                                    declaration.opening_as_of + timedelta(days=1),
+                                    date(obj_in.date_to.year, 1, 1),
+                                    employee_row.date_hired
+                                    if employee_row and employee_row.date_hired
+                                    else date(obj_in.date_to.year, 1, 1),
+                                )
+                                history_rows, history_taxable, history_withheld, history_complete = _bir_finalized_history(
+                                    session,
+                                    roster_entry.employee_id,
+                                    obj_in.date_to.year,
+                                    declaration.opening_as_of,
+                                    obj_in.date_from,
+                                    coverage_start,
+                                )
+                                if not history_complete:
+                                    blockers.append(
+                                        PayrollPreflightBlocker(
+                                            code="bir_cumulative_history_unavailable",
+                                            message="Prior finalized payroll periods are incomplete; cumulative-average withholding cannot be reconciled.",
+                                        )
+                                    )
+                                elif any(
+                                    item.get("pay_period_type") != group.cadence.value
+                                    for item in history_rows
+                                ):
+                                    blockers.append(
+                                        PayrollPreflightBlocker(
+                                            code="bir_cumulative_cadence_changed",
+                                            message="The pay-period cadence changed during this tax year; payroll-owner review is required before cumulative-average withholding.",
+                                        )
+                                    )
+                                else:
+                                    prior_period_count = sum(
+                                        item.get("excluded") != "true" for item in history_rows
+                                    )
+                                    cumulative_period_count = (
+                                        declaration.opening_pay_period_count
+                                        + prior_period_count
+                                        + 1
+                                    )
+                                    cumulative_taxable = (
+                                        declaration.taxable_compensation_ytd
+                                        + history_taxable
+                                        + taxable_pay
+                                    )
+                                    prior_withheld = declaration.tax_withheld_ytd + history_withheld
+                                    average_compensation = (
+                                        cumulative_taxable / Decimal(cumulative_period_count)
+                                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                                    tax_per_period = calculate_bir_tax(
+                                        session,
+                                        average_compensation,
+                                        group.cadence.value,
+                                        obj_in.date_to.isoformat(),
+                                    )
+                                    (
+                                        average_compensation,
+                                        cumulative_tax,
+                                        bir_withholding,
+                                    ) = cumulative_average_withholding(
+                                        cumulative_taxable_compensation=cumulative_taxable,
+                                        period_count=cumulative_period_count,
+                                        tax_per_period=tax_per_period,
+                                        prior_withheld=prior_withheld,
+                                    )
+                                    snapshot["bir_year_to_date_history"] = {
+                                        "opening_taxable_compensation": str(declaration.taxable_compensation_ytd),
+                                        "opening_tax_withheld": str(declaration.tax_withheld_ytd),
+                                        "opening_as_of": declaration.opening_as_of.isoformat(),
+                                        "opening_pay_period_count": declaration.opening_pay_period_count,
+                                        "finalized_entries": history_rows,
+                                        "finalized_taxable_compensation": str(history_taxable),
+                                        "finalized_tax_withheld": str(history_withheld),
+                                        "cumulative_period_count": cumulative_period_count,
+                                        "complete": history_complete,
+                                    }
+                                    snapshot["bir_calculation"] = {
+                                        "method": "cumulative_average_rr_11_2018",
+                                        "period_type": group.cadence.value,
+                                        "taxable_compensation": str(taxable_pay),
+                                        "cumulative_taxable_compensation": str(cumulative_taxable),
+                                        "cumulative_period_count": cumulative_period_count,
+                                        "average_period_compensation": str(average_compensation),
+                                        "tax_per_period": str(tax_per_period),
+                                        "cumulative_tax_due": str(cumulative_tax),
+                                        "prior_tax_withheld": str(prior_withheld),
+                                        "withholding": str(bir_withholding),
+                                        "schedule_effective_date": obj_in.date_to.isoformat(),
+                                        "schedule_reference": "https://bir-cdn.bir.gov.ph/local/pdf/RR%20No.%2011-2018.pdf",
+                                    }
+                        else:
+                            bir_withholding = calculate_bir_tax(
+                                session,
+                                taxable_pay,
+                                group.cadence.value,
+                                obj_in.date_to.isoformat(),
+                            )
+                            snapshot["bir_calculation"] = {
+                                "method": "periodic_annex_e",
+                                "period_type": group.cadence.value,
+                                "taxable_compensation": str(taxable_pay),
+                                "withholding": str(bir_withholding),
+                                "schedule_effective_date": obj_in.date_to.isoformat(),
+                                "year_end_adjustment_pending": False,
+                            }
                 except StatutoryScheduleUnavailable as exc:
                     blockers.append(
                         PayrollPreflightBlocker(code="bir_schedule_unavailable", message=str(exc))
@@ -4557,6 +4700,27 @@ def upsert_employee_tax_year_declaration(
         raise HTTPException(
             status_code=422,
             detail="opening_as_of must be a date in the declared tax year that is not in the future",
+        )
+    opening_history_included = (
+        obj_in.previous_employer_included
+        or obj_in.taxable_compensation_ytd > 0
+        or obj_in.tax_withheld_ytd > 0
+    )
+    if opening_history_included and (
+        obj_in.opening_pay_period_count < 1
+        or obj_in.opening_pay_period_type is None
+        or not (obj_in.source_reference or "").strip()
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Opening tax-year figures require a source note, the covered payroll-period count and cadence.",
+        )
+    if not opening_history_included and (
+        obj_in.opening_pay_period_count != 0 or obj_in.opening_pay_period_type is not None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Previous-employer period inputs must be empty when previous-employer figures are not included.",
         )
     employee = session.exec(
         select(EmployeeRecords)

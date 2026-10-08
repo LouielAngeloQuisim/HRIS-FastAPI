@@ -299,6 +299,14 @@ class EmployeeTaxYearDeclaration(SQLModel, table=True):
         CheckConstraint("tax_year >= 2000 AND tax_year <= 2200", name="ck_employee_tax_year_range"),
         CheckConstraint("tax_classification IN ('ordinary', 'minimum_wage_earner')", name="ck_employee_tax_classification"),
         CheckConstraint("taxable_compensation_ytd >= 0 AND tax_withheld_ytd >= 0", name="ck_employee_tax_ytd_nonnegative"),
+        CheckConstraint(
+            "opening_pay_period_count >= 0 AND opening_pay_period_count <= 366",
+            name="ck_employee_tax_opening_period_count",
+        ),
+        CheckConstraint(
+            "opening_pay_period_type IS NULL OR opening_pay_period_type IN ('daily', 'weekly', 'semi_monthly', 'monthly')",
+            name="ck_employee_tax_opening_period_type",
+        ),
         Index("ix_employee_tax_year_declaration_year", "tax_year"),
     )
 
@@ -309,6 +317,8 @@ class EmployeeTaxYearDeclaration(SQLModel, table=True):
     opening_as_of: date | None = None
     taxable_compensation_ytd: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(14, 2))  # type: ignore
     tax_withheld_ytd: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(14, 2))  # type: ignore
+    opening_pay_period_count: int = Field(default=0, ge=0)
+    opening_pay_period_type: str | None = Field(default=None, max_length=16)
     previous_employer_included: bool = Field(default=False)
     is_verified: bool = Field(default=False)
     source_reference: str | None = Field(default=None, max_length=512)

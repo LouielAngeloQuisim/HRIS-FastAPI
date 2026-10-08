@@ -246,6 +246,8 @@ class EmployeeTaxYearDeclarationUpdate(SQLModel):
     opening_as_of: date
     taxable_compensation_ytd: Decimal = Field(default=Decimal("0.00"), ge=0, max_digits=14, decimal_places=2)
     tax_withheld_ytd: Decimal = Field(default=Decimal("0.00"), ge=0, max_digits=14, decimal_places=2)
+    opening_pay_period_count: int = Field(default=0, ge=0, le=366)
+    opening_pay_period_type: Literal["daily", "weekly", "semi_monthly", "monthly"] | None = None
     previous_employer_included: bool = False
     source_reference: str | None = Field(default=None, max_length=512)
     is_verified: bool = False

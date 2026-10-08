@@ -10,6 +10,36 @@ from decimal import ROUND_HALF_UP, Decimal
 
 CENT = Decimal("0.01")
 
+
+def cumulative_average_withholding(
+    *,
+    cumulative_taxable_compensation: Decimal,
+    period_count: int,
+    tax_per_period: Decimal,
+    prior_withheld: Decimal,
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Return average pay, cumulative tax due, and current withholding.
+
+    Implements the arithmetic steps in RR 11-2018, Section 2.79(B)(5)(a).
+    Historical totals and the applicable period table are supplied by the
+    caller; this helper deliberately does not infer either input.
+    """
+    values = (cumulative_taxable_compensation, tax_per_period, prior_withheld)
+    if any(not value.is_finite() or value < 0 for value in values):
+        raise ValueError("Cumulative tax inputs must be finite and non-negative")
+    if period_count < 1:
+        raise ValueError("At least one payroll period is required")
+    average = (cumulative_taxable_compensation / Decimal(period_count)).quantize(
+        CENT, rounding=ROUND_HALF_UP
+    )
+    cumulative_tax_due = (tax_per_period * period_count).quantize(
+        CENT, rounding=ROUND_HALF_UP
+    )
+    current_withholding = max(Decimal("0.00"), cumulative_tax_due - prior_withheld)
+    return average, cumulative_tax_due, current_withholding.quantize(
+        CENT, rounding=ROUND_HALF_UP
+    )
+
 # (lower bound, base tax, marginal rate), as prescribed for 2023 onward.
 ANNUAL_BRACKETS: tuple[tuple[Decimal, Decimal, Decimal], ...] = (
     (Decimal("0"), Decimal("0"), Decimal("0")),

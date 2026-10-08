@@ -1,8 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
+import {
+  type EmployeeLatestPayroll,
+  type EmployeeRecordsPublic,
+} from '@/lib/api/types'
 import { EmployeeProfile } from './index'
-import { type EmployeeLatestPayroll, type EmployeeRecordsPublic } from '@/lib/api/types'
 
 const mockEmployee: EmployeeRecordsPublic = {
   id: 'emp-1',
@@ -44,7 +47,11 @@ const mockEmployee: EmployeeRecordsPublic = {
 
 const { saveTaxInputs, salaryQuery } = vi.hoisted(() => ({
   saveTaxInputs: vi.fn(),
-  salaryQuery: vi.fn(() => ({ data: { data: [], count: 0 }, isPending: false, isError: false })),
+  salaryQuery: vi.fn(() => ({
+    data: { data: [], count: 0 },
+    isPending: false,
+    isError: false,
+  })),
 }))
 
 vi.mock('@/lib/api/employees', () => ({
@@ -54,18 +61,44 @@ vi.mock('@/lib/api/employees', () => ({
 
 vi.mock('@/lib/api/payroll', () => ({
   useEmployeeSalaries: () => salaryQuery(),
-  useEmployeePayGroupAssignments: () => ({ data: [], isPending: false, isError: false }),
-  useEmployeeLatestPayroll: vi.fn(() => ({ data: null, isPending: false, isError: false })),
-  useEmployeeTaxYearDeclaration: () => ({ data: null, isPending: false, isError: false }),
-  useSaveEmployeeTaxYearDeclaration: () => ({ mutate: saveTaxInputs, isPending: false, isError: false, isSuccess: false }),
+  useEmployeePayGroupAssignments: () => ({
+    data: [],
+    isPending: false,
+    isError: false,
+  }),
+  useEmployeeLatestPayroll: vi.fn(() => ({
+    data: null,
+    isPending: false,
+    isError: false,
+  })),
+  useEmployeeTaxYearDeclaration: () => ({
+    data: null,
+    isPending: false,
+    isError: false,
+  }),
+  useSaveEmployeeTaxYearDeclaration: () => ({
+    mutate: saveTaxInputs,
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+  }),
 }))
 
 vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
 
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ employeeId: 'emp-1' }),
-  Link: ({ children, to, ...rest }: { children?: React.ReactNode; to: string }) => (
-    <a href={to} {...rest}>{children}</a>
+  Link: ({
+    children,
+    to,
+    ...rest
+  }: {
+    children?: React.ReactNode
+    to: string
+  }) => (
+    <a href={to} {...rest}>
+      {children}
+    </a>
   ),
   useNavigate: () => vi.fn(),
   Outlet: () => null,
@@ -80,7 +113,11 @@ vi.mock('@tanstack/react-router', () => ({
 describe('EmployeeProfile', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    salaryQuery.mockReturnValue({ data: { data: [], count: 0 }, isPending: false, isError: false })
+    salaryQuery.mockReturnValue({
+      data: { data: [], count: 0 },
+      isPending: false,
+      isError: false,
+    })
   })
 
   it('renders employee name, code and fields', async () => {
@@ -90,7 +127,9 @@ describe('EmployeeProfile', () => {
       isPending: false,
       isError: false,
     }
-    vi.mocked(useEmployee).mockReturnValue(mockResult as ReturnType<typeof useEmployee>)
+    vi.mocked(useEmployee).mockReturnValue(
+      mockResult as ReturnType<typeof useEmployee>
+    )
 
     const screen = await render(<EmployeeProfile />)
 
@@ -104,43 +143,97 @@ describe('EmployeeProfile', () => {
 
   it('lets an authorized payroll approver enter and verify annual tax opening figures', async () => {
     const { useEmployee } = await import('@/lib/api/employees')
-    vi.mocked(useEmployee).mockReturnValue({ data: mockEmployee, isPending: false, isError: false } as ReturnType<typeof useEmployee>)
+    vi.mocked(useEmployee).mockReturnValue({
+      data: mockEmployee,
+      isPending: false,
+      isError: false,
+    } as ReturnType<typeof useEmployee>)
     const screen = await render(<EmployeeProfile />)
 
-    await expect.element(screen.getByText(/BIR tax-year inputs/i)).toBeInTheDocument()
-    await userEvent.fill(screen.getByLabelText(/Opening balances are complete through/i), '2026-09-30')
-    await userEvent.fill(screen.getByLabelText(/Taxable compensation already paid this year/i), '125000.00')
-    await userEvent.fill(screen.getByLabelText(/Withholding tax already withheld this year/i), '4500.00')
+    await expect
+      .element(screen.getByText(/BIR tax-year inputs/i))
+      .toBeInTheDocument()
+    await userEvent.fill(
+      screen.getByLabelText(/Opening balances are complete through/i),
+      '2026-09-30'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Taxable compensation already paid this year/i),
+      '125000.00'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Withholding tax already withheld this year/i),
+      '4500.00'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Opening payroll periods covered/i),
+      '6'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Source \/ review note/i),
+      'Form 2316 reviewed'
+    )
     await userEvent.click(screen.getByLabelText(/I reviewed these figures/i))
-    await userEvent.click(screen.getByRole('button', { name: /Save tax-year inputs/i }))
+    await userEvent.click(
+      screen.getByRole('button', { name: /Save tax-year inputs/i })
+    )
 
-    expect(saveTaxInputs).toHaveBeenCalledWith(expect.objectContaining({
-      tax_classification: 'ordinary',
-      opening_as_of: '2026-09-30',
-      taxable_compensation_ytd: '125000.00',
-      tax_withheld_ytd: '4500.00',
-      is_verified: true,
-    }))
+    expect(saveTaxInputs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tax_classification: 'ordinary',
+        opening_as_of: '2026-09-30',
+        taxable_compensation_ytd: '125000.00',
+        tax_withheld_ytd: '4500.00',
+        opening_pay_period_count: 6,
+        opening_pay_period_type: 'monthly',
+        previous_employer_included: false,
+        is_verified: true,
+      })
+    )
   })
 
   it('shows the latest finalized employee deductions separately from employer contributions', async () => {
     const { useEmployee } = await import('@/lib/api/employees')
     const { useEmployeeLatestPayroll } = await import('@/lib/api/payroll')
-    vi.mocked(useEmployee).mockReturnValue({ data: mockEmployee, isPending: false, isError: false } as ReturnType<typeof useEmployee>)
+    vi.mocked(useEmployee).mockReturnValue({
+      data: mockEmployee,
+      isPending: false,
+      isError: false,
+    } as ReturnType<typeof useEmployee>)
     vi.mocked(useEmployeeLatestPayroll).mockReturnValue({
       data: {
-        run_id: 'run-1', employee_id: 'emp-1', employee_name: 'Jane Doe',
-        cutoff_type: 'semi_monthly', date_from: '2026-10-16', date_to: '2026-10-31',
-        basic_rate: '26000.00', rate_date_from: '2026-10-01', rate_date_to: '2026-10-31',
+        run_id: 'run-1',
+        employee_id: 'emp-1',
+        employee_name: 'Jane Doe',
+        cutoff_type: 'semi_monthly',
+        date_from: '2026-10-16',
+        date_to: '2026-10-31',
+        basic_rate: '26000.00',
+        rate_date_from: '2026-10-01',
+        rate_date_to: '2026-10-31',
         earnings: { regular: '13000.00' },
         deductions: {
-          attendance: '0.00', bir_withholding: '850.00',
-          statutory: { sss: '1300.00', philhealth: '325.00', pagibig: '100.00' },
-          employer_contributions: { sss: '2200.00', philhealth: '325.00', pagibig: '200.00' },
+          attendance: '0.00',
+          bir_withholding: '850.00',
+          statutory: {
+            sss: '1300.00',
+            philhealth: '325.00',
+            pagibig: '100.00',
+          },
+          employer_contributions: {
+            sss: '2200.00',
+            philhealth: '325.00',
+            pagibig: '200.00',
+          },
         },
-        gross_pay: '13000.00', total_deductions: '2575.00', net_pay: '10425.00',
-        overtime_pay: '0.00', thirteenth_month: '0.00', non_taxable_income: '0.00',
-        taxable_income: '13000.00', status: 'approved',
+        gross_pay: '13000.00',
+        total_deductions: '2575.00',
+        net_pay: '10425.00',
+        overtime_pay: '0.00',
+        thirteenth_month: '0.00',
+        non_taxable_income: '0.00',
+        taxable_income: '13000.00',
+        status: 'approved',
       } satisfies EmployeeLatestPayroll,
       isPending: false,
       isError: false,
@@ -148,30 +241,77 @@ describe('EmployeeProfile', () => {
 
     const screen = await render(<EmployeeProfile />)
 
-    await expect.element(screen.getByRole('region', { name: 'Latest finalized payroll' })).toBeInTheDocument()
-    await expect.element(screen.getByText('Period 2026-10-16 to 2026-10-31')).toBeInTheDocument()
-    await expect.element(screen.getByText(/Employer contributions \(not deducted from net pay\)/i)).toBeInTheDocument()
+    await expect
+      .element(screen.getByRole('region', { name: 'Latest finalized payroll' }))
+      .toBeInTheDocument()
+    await expect
+      .element(screen.getByText('Period 2026-10-16 to 2026-10-31'))
+      .toBeInTheDocument()
+    await expect
+      .element(
+        screen.getByText(
+          /Employer contributions \(not deducted from net pay\)/i
+        )
+      )
+      .toBeInTheDocument()
     await expect.element(screen.getByText('₱1,300.00')).toBeInTheDocument()
     await expect.element(screen.getByText('₱2,200.00')).toBeInTheDocument()
   })
 
   it('shows effective-dated salary history and chooses the active rate for the summary', async () => {
     const { useEmployee } = await import('@/lib/api/employees')
-    vi.mocked(useEmployee).mockReturnValue({ data: mockEmployee, isPending: false, isError: false } as ReturnType<typeof useEmployee>)
+    vi.mocked(useEmployee).mockReturnValue({
+      data: mockEmployee,
+      isPending: false,
+      isError: false,
+    } as ReturnType<typeof useEmployee>)
     salaryQuery.mockReturnValue({
-      data: { count: 2, data: [
-        { id: 'salary-new', employee_id: 'emp-1', effective_date: '2026-07-01', basic_rate: '30000.00', currency: 'PHP', pay_type: 'monthly', is_active: true, is_deleted: false, created_at: null, updated_at: null },
-        { id: 'salary-old', employee_id: 'emp-1', effective_date: '2025-01-01', basic_rate: '26000.00', currency: 'PHP', pay_type: 'monthly', is_active: false, is_deleted: false, created_at: null, updated_at: null },
-      ] },
+      data: {
+        count: 2,
+        data: [
+          {
+            id: 'salary-new',
+            employee_id: 'emp-1',
+            effective_date: '2026-07-01',
+            basic_rate: '30000.00',
+            currency: 'PHP',
+            pay_type: 'monthly',
+            is_active: true,
+            is_deleted: false,
+            created_at: null,
+            updated_at: null,
+          },
+          {
+            id: 'salary-old',
+            employee_id: 'emp-1',
+            effective_date: '2025-01-01',
+            basic_rate: '26000.00',
+            currency: 'PHP',
+            pay_type: 'monthly',
+            is_active: false,
+            is_deleted: false,
+            created_at: null,
+            updated_at: null,
+          },
+        ],
+      },
       isPending: false,
       isError: false,
     } as ReturnType<typeof salaryQuery>)
 
     const screen = await render(<EmployeeProfile />)
 
-    await expect.element(screen.getByRole('list').getByText('PHP 30000.00')).toBeInTheDocument()
-    await expect.element(screen.getByText(/2026-07-01 · monthly · active/)).toBeInTheDocument()
-    await expect.element(screen.getByText(/2025-01-01 · monthly · inactive/)).toBeInTheDocument()
-    await expect.element(screen.getByRole('list').getByText('PHP 26000.00')).toBeInTheDocument()
+    await expect
+      .element(screen.getByRole('list').getByText('PHP 30000.00'))
+      .toBeInTheDocument()
+    await expect
+      .element(screen.getByText(/2026-07-01 · monthly · active/))
+      .toBeInTheDocument()
+    await expect
+      .element(screen.getByText(/2025-01-01 · monthly · inactive/))
+      .toBeInTheDocument()
+    await expect
+      .element(screen.getByRole('list').getByText('PHP 26000.00'))
+      .toBeInTheDocument()
   })
 })

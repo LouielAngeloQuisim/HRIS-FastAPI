@@ -30,6 +30,13 @@ export interface EmployeeTaxYearDeclaration {
   opening_as_of: string | null
   taxable_compensation_ytd: string
   tax_withheld_ytd: string
+  opening_pay_period_count: number
+  opening_pay_period_type:
+    | 'daily'
+    | 'weekly'
+    | 'semi_monthly'
+    | 'monthly'
+    | null
   previous_employer_included: boolean
   source_reference: string | null
   is_verified: boolean
@@ -43,6 +50,8 @@ export type EmployeeTaxYearDeclarationInput = Pick<
   | 'opening_as_of'
   | 'taxable_compensation_ytd'
   | 'tax_withheld_ytd'
+  | 'opening_pay_period_count'
+  | 'opening_pay_period_type'
   | 'previous_employer_included'
   | 'source_reference'
 > & { is_verified: boolean }

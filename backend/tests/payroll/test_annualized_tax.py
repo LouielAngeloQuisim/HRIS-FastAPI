@@ -6,7 +6,10 @@ import pytest
 from sqlmodel import Session
 
 from app.employee.models import EmployeeRecords
-from app.payroll.annualized_tax import calculate_annualized_compensation_tax
+from app.payroll.annualized_tax import (
+    calculate_annualized_compensation_tax,
+    cumulative_average_withholding,
+)
 from app.payroll.models import PayrollEntry, PayrollRunStatus
 from app.payroll.payroll_tables import PayrollRun as PayrollRunTable
 from app.payroll.routes import _bir_finalized_history
@@ -36,6 +39,28 @@ def test_annual_tax_uses_2023_onward_statutory_brackets(
 def test_annual_tax_rejects_invalid_income(taxable: Decimal) -> None:
     with pytest.raises(ValueError):
         calculate_annualized_compensation_tax(taxable)
+
+
+def test_cumulative_average_withholding_matches_bir_rr_11_2018_example() -> None:
+    average, cumulative_tax, current_withholding = cumulative_average_withholding(
+        cumulative_taxable_compensation=Decimal("215000.00"),
+        period_count=7,
+        tax_per_period=Decimal("1976.25"),
+        prior_withheld=Decimal("11000.40"),
+    )
+    assert average == Decimal("30714.29")
+    assert cumulative_tax == Decimal("13833.75")
+    assert current_withholding == Decimal("2833.35")
+
+
+def test_cumulative_average_withholding_never_creates_negative_deduction() -> None:
+    _, _, current_withholding = cumulative_average_withholding(
+        cumulative_taxable_compensation=Decimal("100000.00"),
+        period_count=10,
+        tax_per_period=Decimal("0.00"),
+        prior_withheld=Decimal("25.00"),
+    )
+    assert current_withholding == Decimal("0.00")
 
 
 def test_finalized_tax_history_requires_gapless_periods_and_snapshots(db: Session) -> None:
@@ -92,6 +117,7 @@ def test_finalized_tax_history_requires_gapless_periods_and_snapshots(db: Sessio
             "date_to": "2026-10-15",
             "taxable_compensation": "10850.00",
             "tax_withheld": "64.95",
+            "pay_period_type": "unknown",
         }
     ]
 

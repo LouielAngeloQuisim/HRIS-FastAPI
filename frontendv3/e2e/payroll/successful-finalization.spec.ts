@@ -95,7 +95,7 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   await page.getByLabel(`${employee.employee_code} basic rate`).fill('26000.00')
   await page.getByLabel(`${employee.employee_code} salary basis`).selectOption('monthly')
   await page.getByLabel(`${employee.employee_code} overtime rate`).fill('1.25')
-  await page.getByLabel(`${employee.employee_code} allowance`).fill('0.00')
+  await page.getByLabel(`${employee.employee_code} fixed monthly allowance`).fill('0.00')
   await page.getByLabel('Bulk effective date').fill('2026-11-01')
   const salaryPreflight = page.waitForResponse(response =>
     response.url().includes('/payroll/salaries/bulk/preflight') && response.request().method() === 'POST',

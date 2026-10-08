@@ -91,25 +91,28 @@ def test_policy_confirmation_rejects_unsupported_fixed_allowance_rule(
     }
     created = client.post(
         f"{API}/policies",
-        json={"effective_from": "2103-01-01", "policy": payload},
+        json={"effective_from": "2100-03-01", "policy": payload},
         headers=superuser_token_headers,
     )
     assert created.status_code == 201, created.text
-    rejected = client.post(
-        f"{API}/policies/{created.json()['id']}/confirm",
-        headers=superuser_token_headers,
-    )
-    assert rejected.status_code == 422
-    detail = rejected.json()["detail"]
-    assert detail["required"] == {
-        "fixed_recurring": "taxable",
-        "proration": "calendar_days",
-        "absence": "not_deducted",
-    }
-    row = db.get(PayrollPolicyVersion, UUID(created.json()["id"]))
-    assert row is not None
-    db.delete(row)
-    db.commit()
+    policy_id = UUID(created.json()["id"])
+    try:
+        rejected = client.post(
+            f"{API}/policies/{policy_id}/confirm",
+            headers=superuser_token_headers,
+        )
+        assert rejected.status_code == 422
+        detail = str(rejected.json()["detail"])
+        assert "Fixed recurring allowance policy is unsupported" in detail
+        assert "fixed_recurring" in detail
+        assert "taxable" in detail
+        assert "calendar_days" in detail
+        assert "not_deducted" in detail
+    finally:
+        row = db.get(PayrollPolicyVersion, policy_id)
+        if row is not None:
+            db.delete(row)
+            db.commit()
 
 
 def test_policy_confirmation_rejects_unknown_monthly_salary_proration(

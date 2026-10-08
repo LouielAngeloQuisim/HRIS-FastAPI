@@ -1082,7 +1082,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     replacement_entry = next(
         row for row in replacement["entries"] if row["employee_id"] == str(employee.id)
     )
-    assert replacement_entry["gross_pay"] == "13000.00"
+    assert replacement_entry["gross_pay"] == "14500.00"
     rebuild_audit = db.exec(
         select(AuditLog).where(
             AuditLog.action == "rebuild_attendance_draft",

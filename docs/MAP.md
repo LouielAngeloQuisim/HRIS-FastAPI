@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
-Generated: 2026-10-08
-Source commit: 740e1fb5e1f0298975a9bb0b72b7b4ebf1ab462b
+Generated: 2026-10-09
+Source commit: fdc1f151376033edfe4964b94c24afbf2ab5ac20
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
@@ -494,7 +494,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 51 revisions, single head `2b3c4d5e6f70`
+## Migration chain (oldest -> newest): 52 revisions, single head `3c4d5e6f7a8b`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -550,6 +550,7 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 49. `f1a2b3c4d5e6` - Add reviewed, tax-year-scoped identity for Form 2316.
 50. `1a2b3c4d5e6f` - Allow only one correction to reverse each contribution ledger row.
 51. `2b3c4d5e6f70` - Require contribution corrections to stay within their source scope.
+52. `3c4d5e6f7a8b` - Seed the verified PhilHealth direct-contributor schedule for 2026.
 
 ### Migration anomalies (static findings, report-only)
 

@@ -769,8 +769,10 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
             effective_from=date(2025, 10, 1),
         )
     )
-    absent_date = date(2025, 10, 5)
-    late_date = date(2025, 10, 6)
+    # Oct 5 was Monday in the former 2026 fixture but is Sunday in 2025.
+    # Keep the intended absence and late punch on actual scheduled weekdays.
+    absent_date = date(2025, 10, 6)
+    late_date = date(2025, 10, 7)
     for day in range(1, 16):
         work_date = date(2025, 10, day)
         if work_date.weekday() >= 5:
@@ -2158,9 +2160,9 @@ def test_daily_and_hourly_pay_bases_are_calculated_for_nonfinal_periods(
 @pytest.mark.parametrize(
     ("year", "pay_type", "basic_rate"),
     [
-        (2025, PayType.MONTHLY, "22000.00"),
-        (2025, PayType.DAILY, "1000.00"),
-        (2025, PayType.HOURLY, "125.00"),
+        (2029, PayType.MONTHLY, "22000.00"),
+        (2027, PayType.DAILY, "1000.00"),
+        (2028, PayType.HOURLY, "125.00"),
     ],
 )
 def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
@@ -2267,6 +2269,19 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
                 confirmed=True,
             ),
         ]
+    )
+    # Future years isolate the calculation path from seeded payroll-policy
+    # versions. The synthetic row satisfies the year-specific schedule guard;
+    # it is test data, not a claim about future PhilHealth rates.
+    db.add(
+        PhilHealthBracket(
+            salary_min=Decimal("10000.00"),
+            salary_max=Decimal("100000.00"),
+            rate=Decimal("5.000"),
+            employer_share=Decimal("2.50"),
+            employee_share=Decimal("2.50"),
+            effective_date=date(year, 1, 1),
+        )
     )
     first_late_workday = next(
         date(year, 10, candidate)

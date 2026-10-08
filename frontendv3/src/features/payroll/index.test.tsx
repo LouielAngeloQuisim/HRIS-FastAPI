@@ -3,19 +3,23 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import PayrollPage from './index'
 
-const { canView, setup, preflight, calculation, prepare } = vi.hoisted(() => ({
-  canView: vi.fn((..._args: unknown[]) => true),
-  setup: vi.fn(),
-  preflight: vi.fn(),
-  calculation: vi.fn(),
-  prepare: vi.fn(),
-}))
+const { canView, setup, preflight, calculation, prepare, ledger } = vi.hoisted(
+  () => ({
+    canView: vi.fn((..._args: unknown[]) => true),
+    setup: vi.fn(),
+    preflight: vi.fn(),
+    calculation: vi.fn(),
+    prepare: vi.fn(),
+    ledger: vi.fn(),
+  })
+)
 
 vi.mock('@/context/permissions-provider', () => ({
   useCan: (...args: unknown[]) => canView(...args),
 }))
 vi.mock('@/lib/api/payroll', () => ({
   usePayrollSetup: () => setup(),
+  usePayrollContributionLedger: (...args: unknown[]) => ledger(...args),
   usePayrollRunPreflight: () => ({
     mutateAsync: (...args: unknown[]) => preflight(...args),
     isPending: false,
@@ -50,6 +54,7 @@ describe('Payroll readiness page', () => {
     vi.clearAllMocks()
     canView.mockReturnValue(true)
     setup.mockReturnValue(baseSetup())
+    ledger.mockReturnValue({ data: null, isPending: false, isError: false })
   })
 
   it('shows the expected roster readiness page and keeps payroll execution paused', async () => {
@@ -71,6 +76,63 @@ describe('Payroll readiness page', () => {
     await expect
       .element(screen.getByText(/do not have permission to view payroll/i))
       .toBeVisible()
+  })
+
+  it('shows finalized statutory collections and reasoned correction links', async () => {
+    ledger.mockReturnValue({
+      data: {
+        count: 2,
+        data: [
+          {
+            id: 'ledger-1',
+            employee_id: 'employee-1',
+            employee_code: 'QA001',
+            employee_name: 'QA Employee',
+            payroll_entry_id: 'entry-1',
+            scheme: 'pagibig',
+            contribution_month: '2026-10-01',
+            sequence: 1,
+            monthly_basis: '26000.00',
+            employee_amount: '-10.00',
+            employer_amount: '0.00',
+            source_references: ['https://www.pagibigfund.gov.ph/'],
+            adjustment_reason: 'Correct an over-collection',
+            reverses_id: 'ledger-base',
+            created_at: '2026-10-31T00:00:00Z',
+          },
+        ],
+      },
+      isPending: false,
+      isError: false,
+      isFetching: false,
+    })
+    const screen = await renderWithClient(<PayrollPage />)
+    await userEvent.fill(screen.getByTestId('payroll-ledger-month'), '2026-10')
+    await userEvent.fill(
+      screen.getByTestId('payroll-ledger-employee-code'),
+      'QA001'
+    )
+    await expect
+      .element(
+        screen.getByRole('heading', { name: 'Contribution reconciliation' })
+      )
+      .toBeVisible()
+    await expect.element(screen.getByText(/QA001 · QA Employee/)).toBeVisible()
+    await expect
+      .element(screen.getByText('Correction', { exact: true }))
+      .toBeVisible()
+    await expect
+      .element(screen.getByText('Correct an over-collection'))
+      .toBeVisible()
+    await expect.element(screen.getByText(/Reverses ledger-base/)).toBeVisible()
+    expect(ledger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        month: '2026-10',
+        scheme: '',
+        employeeCode: 'QA001',
+        skip: 0,
+      })
+    )
   })
 
   it('submits a selected configured period and displays named blockers', async () => {

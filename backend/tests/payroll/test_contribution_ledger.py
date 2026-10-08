@@ -19,8 +19,12 @@ from app.payroll.models import (
     PayrollContributionLedger,
     PayrollEntry,
     PayrollRun,
+    PayrollRunStatus,
 )
-from app.payroll.routes import _stage_monthly_contribution_ledger
+from app.payroll.routes import (
+    _stage_monthly_contribution_ledger,
+    list_payroll_contribution_ledger,
+)
 from app.user.models import User
 
 
@@ -167,6 +171,93 @@ def test_monthly_collection_rejects_duplicate_and_keeps_reasoned_correction(
         (0, Decimal("200.00")),
         (1, Decimal("-10.00")),
     }
+
+
+def test_contribution_ledger_readback_is_paginated_and_only_shows_finalized_rows(
+    db: Session,
+) -> None:
+    actor = db.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).one()
+    employee = EmployeeRecords(
+        employee_code=f"LEDGER-READ-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Readback",
+        birthdate=date(1990, 1, 1),
+    )
+    db.add(employee)
+    db.flush()
+    entry = _entry(db, employee.id, actor.id, day=16)
+    run = db.get(PayrollRun, entry.payroll_run_id)
+    assert run is not None
+    run.status = PayrollRunStatus.APPROVED
+    run.workflow_status = "finalized"
+    base = PayrollContributionLedger(
+        employee_id=employee.id,
+        payroll_entry_id=entry.id,
+        scheme="sss",
+        contribution_month=date(2026, 10, 1),
+        monthly_basis=Decimal("26000.00"),
+        employee_amount=Decimal("1300.00"),
+        employer_amount=Decimal("1950.00"),
+        source_references=["https://www.sss.gov.ph/sss-contribution-table/"],
+        created_by=actor.id,
+    )
+    correction = PayrollContributionLedger(
+        employee_id=employee.id,
+        payroll_entry_id=entry.id,
+        scheme="sss",
+        contribution_month=date(2026, 10, 1),
+        sequence=1,
+        monthly_basis=Decimal("26000.00"),
+        employee_amount=Decimal("-100.00"),
+        employer_amount=Decimal("0.00"),
+        adjustment_reason="Correct an over-collection",
+        reverses_id=base.id,
+        created_by=actor.id,
+    )
+    db.add(base)
+    db.add(correction)
+
+    draft_entry = _entry(db, employee.id, actor.id, day=1)
+    draft = PayrollContributionLedger(
+        employee_id=employee.id,
+        payroll_entry_id=draft_entry.id,
+        scheme="sss",
+        contribution_month=date(2026, 11, 1),
+        monthly_basis=Decimal("26000.00"),
+        employee_amount=Decimal("1300.00"),
+        employer_amount=Decimal("1950.00"),
+        created_by=actor.id,
+    )
+    db.add(draft)
+    db.commit()
+
+    result = list_payroll_contribution_ledger(
+        session=db,
+        employee_id=None,
+        employee_code=employee.employee_code,
+        contribution_month=date(2026, 10, 1),
+        scheme="sss",
+        skip=0,
+        limit=1,
+    )
+    assert result.count == 2
+    assert len(result.data) == 1
+    assert result.data[0].employee_code == employee.employee_code
+    assert result.data[0].sequence == 0
+
+    second_page = list_payroll_contribution_ledger(
+        session=db,
+        employee_id=None,
+        employee_code=employee.employee_code,
+        contribution_month=date(2026, 10, 1),
+        scheme="sss",
+        skip=1,
+        limit=1,
+    )
+    assert second_page.count == 2
+    assert second_page.data[0].sequence == 1
+    assert second_page.data[0].reverses_id == base.id
+    assert second_page.data[0].adjustment_reason == "Correct an over-collection"
 
 
 def test_final_period_stages_exactly_one_monthly_collection_per_scheme(

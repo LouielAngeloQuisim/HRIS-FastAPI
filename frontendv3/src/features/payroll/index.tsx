@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import {
   usePayrollAttendanceCalculationPreview,
+  usePayrollContributionLedger,
   usePayrollRunPreflight,
   usePayrollSetup,
   usePrepareAttendancePayrollDraft,
@@ -37,6 +38,16 @@ export default function PayrollPage() {
   const [calculation, setCalculation] =
     useState<PayrollAttendanceCalculationPreview | null>(null)
   const [preparedRunId, setPreparedRunId] = useState<string | null>(null)
+  const [ledgerMonth, setLedgerMonth] = useState('')
+  const [ledgerScheme, setLedgerScheme] = useState('')
+  const [ledgerEmployeeCode, setLedgerEmployeeCode] = useState('')
+  const [ledgerPage, setLedgerPage] = useState(0)
+  const ledger = usePayrollContributionLedger({
+    month: ledgerMonth,
+    scheme: ledgerScheme,
+    employeeCode: ledgerEmployeeCode,
+    skip: ledgerPage * PAGE_SIZE,
+  })
 
   const clearResults = () => {
     setPreflight(null)
@@ -126,6 +137,172 @@ export default function PayrollPage() {
           blockers for one configured earning period.
         </p>
       </header>
+
+      <section
+        className='space-y-3 rounded-lg border p-4'
+        aria-label='Monthly statutory contribution ledger'
+      >
+        <div>
+          <h2 className='text-lg font-semibold'>Contribution reconciliation</h2>
+          <p className='text-sm text-muted-foreground'>
+            Read-only finalized monthly collections and linked correction
+            records. Corrections never rewrite a finalized payslip.
+          </p>
+        </div>
+        <div className='flex flex-wrap items-end gap-3'>
+          <label className='grid gap-1 text-sm'>
+            Contribution month
+            <Input
+              data-testid='payroll-ledger-month'
+              type='month'
+              value={ledgerMonth}
+              onChange={(event) => {
+                setLedgerMonth(event.target.value)
+                setLedgerPage(0)
+              }}
+            />
+          </label>
+          <label className='grid gap-1 text-sm'>
+            Employee code
+            <Input
+              data-testid='payroll-ledger-employee-code'
+              value={ledgerEmployeeCode}
+              onChange={(event) => {
+                setLedgerEmployeeCode(event.target.value)
+                setLedgerPage(0)
+              }}
+            />
+          </label>
+          <label className='grid gap-1 text-sm'>
+            Scheme
+            <Select
+              value={ledgerScheme || 'all'}
+              onValueChange={(value) => {
+                setLedgerScheme(value === 'all' ? '' : value)
+                setLedgerPage(0)
+              }}
+            >
+              <SelectTrigger data-testid='payroll-ledger-scheme'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='all'>All schemes</SelectItem>
+                <SelectItem value='sss'>SSS</SelectItem>
+                <SelectItem value='philhealth'>PhilHealth</SelectItem>
+                <SelectItem value='pagibig'>Pag-IBIG</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+        </div>
+        {!ledgerMonth && (
+          <p className='text-sm text-muted-foreground'>
+            Choose a month to view finalized contribution records.
+          </p>
+        )}
+        {ledger.isError && (
+          <p role='alert' className='text-sm text-destructive'>
+            Contribution records could not be loaded.
+          </p>
+        )}
+        {ledgerMonth && ledger.isPending && (
+          <p role='status' className='text-sm'>
+            Loading contribution records…
+          </p>
+        )}
+        {ledgerMonth && ledger.data && (
+          <>
+            <div className='max-h-[28rem] overflow-auto rounded-md border'>
+              <table className='w-full text-sm'>
+                <thead className='sticky top-0 bg-muted'>
+                  <tr>
+                    <th className='p-2 text-left'>Employee</th>
+                    <th className='p-2 text-left'>Scheme / type</th>
+                    <th className='p-2 text-right'>Basis</th>
+                    <th className='p-2 text-right'>Employee</th>
+                    <th className='p-2 text-right'>Employer</th>
+                    <th className='p-2 text-left'>Source / correction</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ledger.data.data.map((row) => (
+                    <tr key={row.id} className='border-t align-top'>
+                      <td className='p-2'>
+                        {row.employee_code} · {row.employee_name}
+                      </td>
+                      <td className='p-2'>
+                        {row.scheme.toUpperCase()}
+                        {row.sequence > 0 && (
+                          <span className='block text-amber-700'>
+                            Correction
+                          </span>
+                        )}
+                      </td>
+                      <td className='p-2 text-right'>₱{row.monthly_basis}</td>
+                      <td className='p-2 text-right'>₱{row.employee_amount}</td>
+                      <td className='p-2 text-right'>₱{row.employer_amount}</td>
+                      <td className='space-y-1 p-2'>
+                        {row.adjustment_reason && (
+                          <p>{row.adjustment_reason}</p>
+                        )}
+                        {row.reverses_id && (
+                          <p className='text-xs text-muted-foreground'>
+                            Reverses {row.reverses_id}
+                          </p>
+                        )}
+                        {row.source_references.map((source) => (
+                          <a
+                            key={source}
+                            href={source}
+                            target='_blank'
+                            rel='noreferrer'
+                            className='block text-xs break-all underline'
+                          >
+                            Source
+                          </a>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}
+                  {!ledger.data.data.length && (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className='p-4 text-center text-muted-foreground'
+                      >
+                        No finalized contribution records match this month.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className='flex items-center justify-between text-sm'>
+              <span>{ledger.data.count} finalized records</span>
+              <div className='flex gap-2'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  disabled={ledgerPage === 0 || ledger.isFetching}
+                  onClick={() => setLedgerPage((current) => current - 1)}
+                >
+                  Previous
+                </Button>
+                <Button
+                  type='button'
+                  variant='outline'
+                  disabled={
+                    ledger.isFetching ||
+                    (ledgerPage + 1) * PAGE_SIZE >= ledger.data.count
+                  }
+                  onClick={() => setLedgerPage((current) => current + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
 
       <section
         className='space-y-4 rounded-lg border p-4'

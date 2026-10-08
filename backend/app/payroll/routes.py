@@ -125,6 +125,8 @@ from app.payroll.schemas import (
     PayrollAttendanceCalculationEntry,
     PayrollAttendanceCalculationPreview,
     PayrollAttendancePrepareRequest,
+    PayrollContributionLedgerList,
+    PayrollContributionLedgerPublic,
     PayrollDeliveryAddressUpdate,
     PayrollDeliveryResendRequest,
     PayrollDeliveryStatusPublic,
@@ -164,6 +166,111 @@ router = APIRouter(prefix="/payroll", tags=["payroll"])
 
 # RR 11-2018 §2.78.1(B)(11); taxable excess is included at annualization.
 BIR_13TH_MONTH_AND_OTHER_BENEFITS_EXEMPTION_CAP = Decimal("90000.00")
+
+
+@router.get(
+    "/contribution-ledger",
+    response_model=PayrollContributionLedgerList,
+    dependencies=[Depends(require_permission("payroll", "view"))],
+)
+def list_payroll_contribution_ledger(
+    *,
+    session: SessionDep,
+    employee_id: uuid.UUID | None = Query(default=None),
+    employee_code: str | None = Query(default=None, min_length=1, max_length=64),
+    contribution_month: date | None = Query(default=None),
+    scheme: str | None = Query(default=None),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
+) -> PayrollContributionLedgerList:
+    """Read finalized statutory collections and linked immutable corrections."""
+    if contribution_month is not None and contribution_month.day != 1:
+        raise HTTPException(
+            status_code=422, detail="contribution_month must be the first day of a month"
+        )
+    if scheme is not None and scheme not in {"sss", "philhealth", "pagibig"}:
+        raise HTTPException(status_code=422, detail="Unsupported contribution scheme")
+
+    base = (
+        select(PayrollContributionLedger.id)
+        .join(
+            PayrollEntry,
+            col(PayrollEntry.id) == col(PayrollContributionLedger.payroll_entry_id),
+        )
+        .join(PayrollRun, col(PayrollRun.id) == col(PayrollEntry.payroll_run_id))
+        .join(
+            EmployeeRecords,
+            col(EmployeeRecords.id) == col(PayrollContributionLedger.employee_id),
+        )
+        .where(
+            PayrollRun.workflow_status == "finalized",
+            col(PayrollRun.status).in_([PayrollRunStatus.APPROVED, PayrollRunStatus.PAID]),
+            col(PayrollRun.is_deleted).is_(False),
+            col(PayrollEntry.is_deleted).is_(False),
+        )
+    )
+    if employee_id is not None:
+        base = base.where(PayrollContributionLedger.employee_id == employee_id)
+    if employee_code is not None:
+        base = base.where(EmployeeRecords.employee_code == employee_code.strip())
+    if contribution_month is not None:
+        base = base.where(PayrollContributionLedger.contribution_month == contribution_month)
+    if scheme is not None:
+        base = base.where(PayrollContributionLedger.scheme == scheme)
+    count = session.exec(select(func.count()).select_from(base.subquery())).one()
+    rows = session.exec(
+        select(PayrollContributionLedger, EmployeeRecords)
+        .join(
+            EmployeeRecords,
+            col(EmployeeRecords.id) == col(PayrollContributionLedger.employee_id),
+        )
+        .join(
+            PayrollEntry,
+            col(PayrollEntry.id) == col(PayrollContributionLedger.payroll_entry_id),
+        )
+        .join(PayrollRun, col(PayrollRun.id) == col(PayrollEntry.payroll_run_id))
+        .where(
+            PayrollRun.workflow_status == "finalized",
+            col(PayrollRun.status).in_([PayrollRunStatus.APPROVED, PayrollRunStatus.PAID]),
+            col(PayrollRun.is_deleted).is_(False),
+            col(PayrollEntry.is_deleted).is_(False),
+            *(
+                [PayrollContributionLedger.employee_id == employee_id]
+                if employee_id is not None
+                else []
+            ),
+            *(
+                [EmployeeRecords.employee_code == employee_code.strip()]
+                if employee_code is not None
+                else []
+            ),
+            *(
+                [PayrollContributionLedger.contribution_month == contribution_month]
+                if contribution_month is not None
+                else []
+            ),
+            *([PayrollContributionLedger.scheme == scheme] if scheme is not None else []),
+        )
+        .order_by(
+            col(PayrollContributionLedger.contribution_month).desc(),
+            col(EmployeeRecords.employee_code),
+            col(PayrollContributionLedger.scheme),
+            col(PayrollContributionLedger.sequence),
+        )
+        .offset(skip)
+        .limit(limit)
+    ).all()
+    data = [
+        PayrollContributionLedgerPublic.model_validate(
+            ledger,
+            update={
+                "employee_code": employee.employee_code,
+                "employee_name": f"{employee.first_name} {employee.last_name}".strip(),
+            },
+        )
+        for ledger, employee in rows
+    ]
+    return PayrollContributionLedgerList(data=data, count=count)
 
 
 def _confirmed_rest_day_factors(policy: dict[str, Any]) -> tuple[Decimal, Decimal]:

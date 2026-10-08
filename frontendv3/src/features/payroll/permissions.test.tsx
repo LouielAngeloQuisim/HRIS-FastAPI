@@ -30,6 +30,11 @@ vi.mock('@/lib/api/payroll', () => ({
   usePayrollSetup: () => ({
     groups: { data: [], isPending: false, isError: false },
   }),
+  usePayrollContributionLedger: () => ({
+    data: null,
+    isPending: false,
+    isError: false,
+  }),
   usePayrollRunPreflight: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePayrollAttendanceCalculationPreview: () => ({
     mutateAsync: vi.fn(),

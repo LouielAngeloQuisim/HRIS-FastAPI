@@ -298,4 +298,19 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   expect(payslip.headers()['content-type']).toContain('application/pdf')
   const pdfBody = await payslip.body()
   expect(pdfBody.subarray(0, 5).toString()).toBe('%PDF-')
+
+  await page.goto('/payroll')
+  await page.getByTestId('payroll-ledger-month').fill('2026-11')
+  await page.getByTestId('payroll-ledger-employee-code').fill(employee.employee_code)
+  const reconciliation = page.getByRole('region', {
+    name: 'Monthly statutory contribution ledger',
+  })
+  await expect(
+    reconciliation.getByRole('cell', {
+      name: new RegExp(employee.employee_code),
+    })
+  ).toHaveCount(3)
+  await expect(reconciliation.getByText('SSS', { exact: true })).toBeVisible()
+  await expect(reconciliation.getByText('PHILHEALTH', { exact: true })).toBeVisible()
+  await expect(reconciliation.getByText('PAGIBIG', { exact: true })).toBeVisible()
 })

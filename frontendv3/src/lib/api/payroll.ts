@@ -316,6 +316,68 @@ export interface PayrollReviewActionResult {
   unresolved_count: number
 }
 
+export interface PayrollContributionLedgerRow {
+  id: string
+  employee_id: string
+  employee_code: string
+  employee_name: string
+  payroll_entry_id: string
+  scheme: 'sss' | 'philhealth' | 'pagibig'
+  contribution_month: string
+  sequence: number
+  monthly_basis: string
+  employee_amount: string
+  employer_amount: string
+  source_references: string[]
+  adjustment_reason: string | null
+  reverses_id: string | null
+  created_at: string | null
+}
+
+export interface PayrollContributionLedgerList {
+  data: PayrollContributionLedgerRow[]
+  count: number
+}
+
+export function usePayrollContributionLedger({
+  month,
+  scheme,
+  employeeCode,
+  skip,
+}: {
+  month: string
+  scheme: string
+  employeeCode: string
+  skip: number
+}) {
+  return useQuery({
+    queryKey: [
+      'payroll-contribution-ledger',
+      month,
+      scheme,
+      employeeCode,
+      skip,
+    ],
+    queryFn: () =>
+      api
+        .get<PayrollContributionLedgerList>(
+          `${API}/payroll/contribution-ledger`,
+          {
+            params: {
+              contribution_month: `${month}-01`,
+              scheme: scheme || undefined,
+              employee_code: employeeCode.trim() || undefined,
+              skip,
+              limit: 100,
+            },
+          }
+        )
+        .then((response) => response.data),
+    enabled: Boolean(month),
+    placeholderData: keepPreviousData,
+  })
+}
+
 function usePayrollReviewMutation<TPayload>(
   mutationFn: (payload: TPayload) => Promise<PayrollReviewActionResult>,
   runId: string

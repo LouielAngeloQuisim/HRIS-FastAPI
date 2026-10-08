@@ -674,6 +674,29 @@ class PayrollDeliveryStatusPublic(SQLModel):
     last_action_reason: str | None
 
 
+class PayrollContributionLedgerPublic(SQLModel):
+    id: uuid.UUID
+    employee_id: uuid.UUID
+    employee_code: str
+    employee_name: str
+    payroll_entry_id: uuid.UUID
+    scheme: Literal["sss", "philhealth", "pagibig"]
+    contribution_month: date
+    sequence: int
+    monthly_basis: Decimal
+    employee_amount: Decimal
+    employer_amount: Decimal
+    source_references: list[str]
+    adjustment_reason: str | None
+    reverses_id: uuid.UUID | None
+    created_at: datetime | None
+
+
+class PayrollContributionLedgerList(SQLModel):
+    data: list[PayrollContributionLedgerPublic]
+    count: int
+
+
 class PayrollDeliveryAddressUpdate(SQLModel):
     email: EmailStr
     reason: str = Field(min_length=5, max_length=1024)

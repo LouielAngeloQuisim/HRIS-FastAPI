@@ -1884,10 +1884,7 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             "break_minutes": 60,
             "grace_minutes": 0,
             "overtime_rule": {"multiplier": "1.25"},
-            # The long, approved overtime example crosses 22:00 in Manila.
-            # Confirm the required night-differential rule so the attendance
-            # preview is valid and its overtime is included in tax testing.
-            "premium_rules": {"night_differential_rate": "0.10"},
+            "premium_rules": {},
             "allowance_tax_treatment": {
                 "fixed_recurring": "taxable",
                 "proration": "calendar_days",
@@ -1911,6 +1908,8 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             EmployeeSalary(
                 employee_id=employee.id,
                 basic_rate=basic_rate,
+                # EmployeeSalary defaults this to zero; derive the monthly
+                # salary's hourly equivalent so approved OT is taxable pay.
                 overtime_rate=(
                     Decimal(basic_rate) * Decimal(60) / (Decimal("22") * Decimal("480"))
                     if pay_type == PayType.MONTHLY and supplementary_trigger
@@ -1968,7 +1967,7 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
         work_date = date(2025, 11, day)
         if work_date.weekday() < 5:
             overtime_minutes = (
-                480
+                60
                 if supplementary_trigger and work_date == date(2025, 11, 3)
                 else 0
             )

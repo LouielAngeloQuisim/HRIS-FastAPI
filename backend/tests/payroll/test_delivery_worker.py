@@ -419,6 +419,58 @@ def test_retry_limit_excludes_exhausted_job(
     assert job.attempts == MAX_ATTEMPTS
 
 
+def test_connection_failures_retry_within_the_bounded_attempt_limit(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_job: PayrollDeliveryOutbox,
+) -> None:
+    monkeypatch.setattr(settings, "SMTP_HOST", "mail.example.test")
+    monkeypatch.setattr(settings, "EMAILS_FROM_EMAIL", "noreply@example.test")
+    job = delivery_job
+    job.status = "processing"
+    job.attempts = 1
+    db.add(job)
+    db.commit()
+
+    with patch(
+        "app.payroll.delivery_worker._send_smtp_once",
+        side_effect=ConnectionRefusedError(),
+    ) as send:
+        _send_job(job.id)
+        db.refresh(job)
+        assert job.status == "failed"
+        assert job.attempts == 1
+        assert job.last_error_code == "ConnectionRefusedError"
+
+        for expected_attempt in range(2, MAX_ATTEMPTS + 1):
+            now = datetime.now(timezone.utc)
+            job.next_attempt_at = now - timedelta(seconds=1)
+            db.add(job)
+            db.commit()
+
+            assert _claim_due_jobs(now=now) == [job.id]
+            db.refresh(job)
+            assert job.status == "processing"
+            assert job.attempts == expected_attempt
+
+            _send_job(job.id)
+            db.refresh(job)
+            assert job.status == "failed"
+            assert job.next_attempt_at is not None
+            assert job.next_attempt_at > now
+
+        assert send.call_count == MAX_ATTEMPTS
+
+    now = datetime.now(timezone.utc)
+    job.next_attempt_at = now - timedelta(seconds=1)
+    db.add(job)
+    db.commit()
+    assert _claim_due_jobs(now=now) == []
+    db.refresh(job)
+    assert job.status == "failed"
+    assert job.attempts == MAX_ATTEMPTS
+
+
 def test_disabled_worker_never_claims_or_sends(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

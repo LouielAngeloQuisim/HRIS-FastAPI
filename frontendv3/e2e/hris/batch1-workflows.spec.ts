@@ -87,6 +87,7 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
     await page.getByLabel('Taxable compensation already paid this year').fill('125000.00')
     await page.getByLabel('Withholding tax already withheld this year').fill('4500.00')
     await page.getByLabel('Figures include a previous employer').check()
+    await page.getByLabel(/Opening payroll periods covered by these totals/).fill('6')
     await page.getByLabel(/Source \/ review note/).fill('Form 2316 verified for test employee')
     await page.getByLabel(/I reviewed these figures/).check()
 
@@ -103,7 +104,11 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
       { headers: await authHeaders(page) },
     )
     expect(readback.status()).toBe(200)
-    expect((await readback.json()).id).toBe(response.id)
+    expect(await readback.json()).toMatchObject({
+      id: response.id,
+      opening_pay_period_count: 6,
+      opening_pay_period_type: 'monthly',
+    })
     await page.reload()
     await expect(page.getByText(/Reviewed by payroll approver/)).toBeVisible()
     await expect(page.getByLabel('Taxable compensation already paid this year')).toHaveValue('125000.00')

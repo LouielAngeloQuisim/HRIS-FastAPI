@@ -128,3 +128,30 @@ def test_previous_employer_declaration_requires_period_count_and_source_note(
         headers=superuser_token_headers,
     )
     assert response.status_code == 200, response.text
+
+
+def test_minimum_wage_earner_classification_requires_wage_order_evidence(
+    client: TestClient,
+    employee_record: EmployeeRecords,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    url = f"{API}/employees/{employee_record.id}/tax-year-declarations/2026"
+    payload = {
+        "tax_classification": "minimum_wage_earner",
+        "opening_as_of": "2026-01-01",
+        "is_verified": True,
+    }
+    missing_source = client.put(url, json=payload, headers=superuser_token_headers)
+    assert missing_source.status_code == 422
+    assert "DOLE wage order" in missing_source.text
+
+    with_source = client.put(
+        url,
+        json={
+            **payload,
+            "source_reference": "DOLE Wage Order NCR-XX; assigned NCR workplace",
+        },
+        headers=superuser_token_headers,
+    )
+    assert with_source.status_code == 200, with_source.text
+    assert with_source.json()["tax_classification"] == "minimum_wage_earner"

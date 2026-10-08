@@ -220,18 +220,32 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
                 </span>
               </label>
             ) : null}
+            {classification === 'minimum_wage_earner' ? (
+              <p className='text-xs text-muted-foreground'>
+                BIR exemption is applied only to the statutory minimum wage and
+                approved overtime captured here. Before verifying, confirm the
+                employee is paid the applicable rate for their assigned work
+                location and cite the DOLE regional wage order below. Payroll
+                remains blocked for unsupported taxable allowances or benefits.
+              </p>
+            ) : null}
             <label className='flex flex-col gap-1 text-sm'>
-              Source / review note (for example, Form 2316)
+              Source / review note
               <Input
                 maxLength={512}
-                required={openingHistoryIncluded}
+                required={
+                  openingHistoryIncluded ||
+                  classification === 'minimum_wage_earner'
+                }
                 value={sourceReference}
                 onChange={(event) => setSourceReference(event.target.value)}
               />
             </label>
-            {openingHistoryIncluded && !sourceReference.trim() ? (
+            {(openingHistoryIncluded ||
+              classification === 'minimum_wage_earner') &&
+            !sourceReference.trim() ? (
               <p role='alert' className='text-sm text-destructive'>
-                Add a source note before verifying opening tax-year figures.
+                Add the required supporting source before verifying these tax inputs.
               </p>
             ) : null}
             <label className='flex items-start gap-2 text-sm'>
@@ -258,8 +272,10 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
               type='submit'
               disabled={
                 save.isPending ||
-                (openingHistoryIncluded &&
-                  (!sourceReference.trim() || !Number(openingPayPeriodCount)))
+                ((openingHistoryIncluded ||
+                  classification === 'minimum_wage_earner') &&
+                  !sourceReference.trim()) ||
+                (openingHistoryIncluded && !Number(openingPayPeriodCount))
               }
             >
               {save.isPending ? 'Saving…' : 'Save tax-year inputs'}

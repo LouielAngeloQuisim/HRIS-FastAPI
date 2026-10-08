@@ -528,8 +528,26 @@ def test_december_draft_uses_annualized_tax_and_opening_balance(
     assert withholding_adjustment == Decimal("5297.27")
 
 
-def test_previous_employer_uses_verified_cumulative_average_inputs(
-    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+@pytest.mark.parametrize(
+    ("tax_classification", "source_reference", "basic_rate", "pay_type"),
+    [
+        ("ordinary", "QA reviewed Form 2316", "35000.00", PayType.MONTHLY),
+        (
+            "minimum_wage_earner",
+            "QA DOLE wage-order evidence for assigned workplace",
+            "650.00",
+            PayType.DAILY,
+        ),
+    ],
+)
+def test_verified_tax_classification_uses_supported_bir_treatment(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+    tax_classification: str,
+    source_reference: str,
+    basic_rate: str,
+    pay_type: PayType,
 ) -> None:
     employee = EmployeeRecords(
         employee_code=f"CUMULATIVE-{uuid.uuid4().hex[:8]}",
@@ -560,9 +578,9 @@ def test_previous_employer_uses_verified_cumulative_average_inputs(
         [
             EmployeeSalary(
                 employee_id=employee.id,
-                basic_rate="35000.00",
+                basic_rate=basic_rate,
                 effective_date=date(2025, 11, 1),
-                pay_type=PayType.MONTHLY,
+                pay_type=pay_type,
             ),
             EmployeePayGroupAssignment(
                 employee_id=employee.id,
@@ -577,14 +595,14 @@ def test_previous_employer_uses_verified_cumulative_average_inputs(
             EmployeeTaxYearDeclaration(
                 employee_id=employee.id,
                 tax_year=2025,
-                tax_classification="ordinary",
+                tax_classification=tax_classification,
                 opening_as_of=date(2025, 10, 31),
                 taxable_compensation_ytd="180000.00",
                 tax_withheld_ytd="11000.40",
                 opening_pay_period_count=6,
                 opening_pay_period_type="semi_monthly",
                 previous_employer_included=True,
-                source_reference="QA reviewed Form 2316",
+                source_reference=source_reference,
                 is_verified=True,
             ),
             PayrollPolicyVersion(
@@ -656,13 +674,18 @@ def test_previous_employer_uses_verified_cumulative_average_inputs(
         blocker["code"] for blocker in entry["blockers"]
     }
     trace = entry["input_snapshot"]["bir_calculation"]
-    assert trace["method"] == "cumulative_average_rr_11_2018"
-    # November 1–15, 2025 has 10 weekdays. Monthly proration uses the
-    # configured 22-day divisor, so current taxable pay is 35,000 * 10 / 22.
-    assert trace["cumulative_taxable_compensation"] == "195909.09"
-    assert trace["cumulative_period_count"] == 7
-    assert trace["average_period_compensation"] == "27987.01"
-    assert trace["prior_tax_withheld"] == "11000.40"
+    if tax_classification == "ordinary":
+        assert trace["method"] == "cumulative_average_rr_11_2018"
+        # November 1–15, 2025 has 10 weekdays. Monthly proration uses the
+        # configured 22-day divisor, so current taxable pay is 35,000 * 10 / 22.
+        assert trace["cumulative_taxable_compensation"] == "195909.09"
+        assert trace["cumulative_period_count"] == 7
+        assert trace["average_period_compensation"] == "27987.01"
+        assert trace["prior_tax_withheld"] == "11000.40"
+    else:
+        assert trace["method"] == "mwe_exemption_rr_8_2018"
+        assert trace["taxable_compensation"] == "0.00"
+        assert trace["withholding"] == "0.00"
     assert Decimal(trace["withholding"]) == Decimal(entry["deductions"]["bir_withholding"])
     history = entry["input_snapshot"]["bir_year_to_date_history"]
     assert history["opening_pay_period_count"] == 6

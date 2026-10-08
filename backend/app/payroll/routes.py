@@ -3114,11 +3114,14 @@ def prepare_attendance_payroll_draft(
                     message="A payroll approver must verify this employee's tax-year declaration before calculation.",
                 )
             )
-        elif tax_declaration.tax_classification != "ordinary":
+        elif (
+            tax_declaration.tax_classification == "minimum_wage_earner"
+            and not (tax_declaration.source_reference or "").strip()
+        ):
             blockers.append(
                 PayrollPreflightBlocker(
-                    code="bir_tax_classification_unsupported",
-                    message="Minimum-wage-earner tax treatment requires verified eligibility and compensation-limit rules before calculation.",
+                    code="bir_mwe_evidence_unavailable",
+                    message="A verified minimum-wage-earner classification needs a source note for the assigned work location and applicable DOLE wage order.",
                 )
             )
         dtr_rows = session.exec(
@@ -3237,6 +3240,7 @@ def prepare_attendance_payroll_draft(
                 "opening_pay_period_count": tax_declaration.opening_pay_period_count,
                 "opening_pay_period_type": tax_declaration.opening_pay_period_type,
                 "previous_employer_included": tax_declaration.previous_employer_included,
+                "source_reference": tax_declaration.source_reference,
                 "verified": tax_declaration.is_verified,
             }
         bir_period = group.cadence
@@ -3300,7 +3304,21 @@ def prepare_attendance_payroll_draft(
             - sum(employee_statutory.values(), Decimal("0.00"))
         )
         bir_withholding = Decimal("0.00")
-        if tax_declaration is not None and tax_declaration.is_verified and tax_declaration.tax_classification == "ordinary":
+        is_minimum_wage_earner = (
+            tax_declaration is not None
+            and tax_declaration.tax_classification == "minimum_wage_earner"
+        )
+        has_mwe_evidence = bool(
+            tax_declaration and (tax_declaration.source_reference or "").strip()
+        )
+        if (
+            tax_declaration is not None
+            and tax_declaration.is_verified
+            and (
+                tax_declaration.tax_classification == "ordinary"
+                or (is_minimum_wage_earner and has_mwe_evidence)
+            )
+        ):
             if taxable_pay < 0:
                 blockers.append(
                     PayrollPreflightBlocker(
@@ -3310,6 +3328,9 @@ def prepare_attendance_payroll_draft(
                 )
             else:
                 try:
+                    bir_taxable_pay = (
+                        Decimal("0.00") if is_minimum_wage_earner else taxable_pay
+                    )
                     is_year_end = obj_in.date_to == date(
                         obj_in.date_to.year,
                         12,
@@ -3370,7 +3391,7 @@ def prepare_attendance_payroll_draft(
                             prior_withheld = (
                                 tax_declaration.tax_withheld_ytd + history_withheld
                             )
-                            annual_taxable = prior_taxable + taxable_pay
+                            annual_taxable = prior_taxable + bir_taxable_pay
                             annual_tax_due = calculate_annualized_compensation_tax(
                                 annual_taxable
                             )
@@ -3391,7 +3412,7 @@ def prepare_attendance_payroll_draft(
                             }
                             snapshot["bir_calculation"] = {
                                 "method": "annualized_rr_11_2018_2023_onward",
-                                "taxable_compensation": str(taxable_pay),
+                                "taxable_compensation": str(bir_taxable_pay),
                                 "annual_taxable_compensation": str(annual_taxable),
                                 "annual_tax_due": str(annual_tax_due),
                                 "prior_tax_withheld": str(prior_withheld),
@@ -3399,6 +3420,19 @@ def prepare_attendance_payroll_draft(
                                 "schedule_reference": "https://bir-cdn.bir.gov.ph/local/pdf/RR%20No.%2011-2018.pdf",
                                 "year_end_adjustment_pending": False,
                             }
+                    elif is_minimum_wage_earner:
+                        snapshot["bir_calculation"] = {
+                            "method": "mwe_exemption_rr_8_2018",
+                            "taxable_compensation": "0.00",
+                            "withholding": "0.00",
+                            "exempt_categories": [
+                                "statutory_minimum_wage",
+                                "approved_overtime_pay",
+                            ],
+                            "classification_source": tax_declaration.source_reference,
+                            "schedule_reference": "https://bir-cdn.bir.gov.ph/local/pdf/RR%20No.%208-2018.pdf",
+                            "year_end_adjustment_pending": False,
+                        }
                     else:
                         declaration = tax_declaration
                         if declaration is not None and (
@@ -3475,7 +3509,7 @@ def prepare_attendance_payroll_draft(
                                     cumulative_taxable = (
                                         declaration.taxable_compensation_ytd
                                         + history_taxable
-                                        + taxable_pay
+                                        + bir_taxable_pay
                                     )
                                     prior_withheld = declaration.tax_withheld_ytd + history_withheld
                                     average_compensation = (
@@ -3511,7 +3545,7 @@ def prepare_attendance_payroll_draft(
                                     snapshot["bir_calculation"] = {
                                         "method": "cumulative_average_rr_11_2018",
                                         "period_type": group.cadence.value,
-                                        "taxable_compensation": str(taxable_pay),
+                                        "taxable_compensation": str(bir_taxable_pay),
                                         "cumulative_taxable_compensation": str(cumulative_taxable),
                                         "cumulative_period_count": cumulative_period_count,
                                         "average_period_compensation": str(average_compensation),
@@ -3525,14 +3559,14 @@ def prepare_attendance_payroll_draft(
                         else:
                             bir_withholding = calculate_bir_tax(
                                 session,
-                                taxable_pay,
+                                bir_taxable_pay,
                                 group.cadence.value,
                                 obj_in.date_to.isoformat(),
                             )
                             snapshot["bir_calculation"] = {
                                 "method": "periodic_annex_e",
                                 "period_type": group.cadence.value,
-                                "taxable_compensation": str(taxable_pay),
+                                "taxable_compensation": str(bir_taxable_pay),
                                 "withholding": str(bir_withholding),
                                 "schedule_effective_date": obj_in.date_to.isoformat(),
                                 "year_end_adjustment_pending": False,
@@ -4696,6 +4730,13 @@ def upsert_employee_tax_year_declaration(
     """Record reviewed tax classification and opening year-to-date totals."""
     if tax_year < 2000 or tax_year > 2200:
         raise HTTPException(status_code=422, detail="tax_year must be between 2000 and 2200")
+    if obj_in.tax_classification == "minimum_wage_earner" and not (
+        obj_in.source_reference or ""
+    ).strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Minimum-wage-earner classification requires a source note identifying the assigned work location and applicable DOLE wage order.",
+        )
     if obj_in.opening_as_of.year != tax_year or obj_in.opening_as_of > date.today():
         raise HTTPException(
             status_code=422,

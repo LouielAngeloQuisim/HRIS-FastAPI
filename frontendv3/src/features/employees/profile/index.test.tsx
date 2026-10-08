@@ -192,6 +192,46 @@ describe('EmployeeProfile', () => {
     )
   })
 
+  it('requires wage-order evidence before verifying minimum-wage-earner treatment', async () => {
+    const { useEmployee } = await import('@/lib/api/employees')
+    vi.mocked(useEmployee).mockReturnValue({
+      data: mockEmployee,
+      isPending: false,
+      isError: false,
+    } as ReturnType<typeof useEmployee>)
+    const screen = await render(<EmployeeProfile />)
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Tax classification'),
+      'minimum_wage_earner'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Opening balances are complete through/i),
+      '2026-06-30'
+    )
+    await expect
+      .element(screen.getByText(/assigned work location/i))
+      .toBeInTheDocument()
+    const saveButton = screen.getByRole('button', {
+      name: /Save tax-year inputs/i,
+    })
+    await expect.element(saveButton).toBeDisabled()
+
+    await userEvent.fill(
+      screen.getByLabelText(/Source \/ review note/i),
+      'DOLE Wage Order evidence; assigned workplace confirmed'
+    )
+    await expect.element(saveButton).not.toBeDisabled()
+    await userEvent.click(saveButton)
+    expect(saveTaxInputs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tax_classification: 'minimum_wage_earner',
+        source_reference:
+          'DOLE Wage Order evidence; assigned workplace confirmed',
+      })
+    )
+  })
+
   it('shows the latest finalized employee deductions separately from employer contributions', async () => {
     const { useEmployee } = await import('@/lib/api/employees')
     const { useEmployeeLatestPayroll } = await import('@/lib/api/payroll')

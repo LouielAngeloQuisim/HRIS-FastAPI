@@ -1884,7 +1884,10 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             "break_minutes": 60,
             "grace_minutes": 0,
             "overtime_rule": {"multiplier": "1.25"},
-            "premium_rules": {},
+            # The long, approved overtime example crosses 22:00 in Manila.
+            # Confirm the required night-differential rule so the attendance
+            # preview is valid and its overtime is included in tax testing.
+            "premium_rules": {"night_differential_rate": "0.10"},
             "allowance_tax_treatment": {
                 "fixed_recurring": "taxable",
                 "proration": "calendar_days",

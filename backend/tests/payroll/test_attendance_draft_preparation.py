@@ -1911,6 +1911,11 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             EmployeeSalary(
                 employee_id=employee.id,
                 basic_rate=basic_rate,
+                overtime_rate=(
+                    Decimal(basic_rate) * Decimal(60) / (Decimal("22") * Decimal("480"))
+                    if pay_type == PayType.MONTHLY and supplementary_trigger
+                    else Decimal("0.000")
+                ),
                 effective_date=date(2025, 11, 1),
                 pay_type=pay_type,
                 non_taxable_allowance=(
@@ -2013,7 +2018,14 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
         }
         if tax_classification == "ordinary":
             trace = entry["input_snapshot"]["bir_calculation"]
-            assert trace["method"] == "cumulative_average_rr_11_2018"
+            assert trace["method"] == "cumulative_average_rr_11_2018", {
+                "blockers": entry["blockers"],
+                "compensation": entry["input_snapshot"].get(
+                    "bir_compensation_breakdown"
+                ),
+                "earnings": entry["earnings"],
+                "tax": trace,
+            }
             if supplementary_trigger:
                 assert entry["input_snapshot"]["bir_compensation_breakdown"][
                     "supplementary_taxable_compensation"

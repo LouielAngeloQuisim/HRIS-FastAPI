@@ -102,7 +102,7 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   await page.getByLabel(`${employee.employee_code} basic rate`).fill('26000.00')
   await page.getByLabel(`${employee.employee_code} salary basis`).selectOption('monthly')
   await page.getByLabel(`${employee.employee_code} overtime rate`).fill('1.25')
-  await page.getByLabel(`${employee.employee_code} fixed monthly allowance`).fill('0.00')
+  await page.getByLabel(`${employee.employee_code} fixed monthly allowance`).fill('1500.00')
   await page.getByLabel('Bulk effective date').fill('2026-11-01')
   const salaryPreflight = page.waitForResponse(response =>
     response.url().includes('/payroll/salaries/bulk/preflight') && response.request().method() === 'POST',
@@ -221,6 +221,10 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   const preparedEntry = draft.entries.find((entry: { employee_id: string }) => entry.employee_id === employee.id)
   expect(preparedEntry, 'The fictional employee must be included').toBeTruthy()
   expect(preparedEntry.blockers, JSON.stringify(preparedEntry.blockers)).toEqual([])
+  expect(preparedEntry.earnings.fixed_recurring_allowance).toBe('750.00')
+  expect(preparedEntry.input_snapshot.fixed_recurring_allowance).toEqual(
+    expect.objectContaining({ amount: '750.00', tax_treatment: 'taxable' }),
+  )
 
   await page.goto(`/payroll-runs/${draft.id}`)
   await expect(page.getByRole('heading', { name: 'Payroll review' })).toBeVisible()

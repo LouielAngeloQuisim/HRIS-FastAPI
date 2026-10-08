@@ -836,14 +836,41 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     db.add(leave_policy)
     db.commit()
     assert _payroll_entry_inputs_are_current(db, frozen_entry)
+    leave_request.requested_hours = Decimal("4.00")
+    db.add(leave_request)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, frozen_entry)
+    leave_request.requested_hours = None
+    db.add(leave_request)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, frozen_entry)
 
     preview_params = {
         "pay_group_id": str(group.id),
         "date_from": "2026-10-01",
         "date_to": "2026-10-15",
     }
-    leave_request.requested_hours = Decimal("4.00")
-    db.add(leave_request)
+    partial_leave_date = date(2026, 10, 7)
+    partial_dtr = db.exec(
+        select(DailyTimeRecord).where(
+            DailyTimeRecord.employee_id == employee.id,
+            DailyTimeRecord.work_date == partial_leave_date,
+        )
+    ).one()
+    partial_dtr.logout_date = partial_dtr.login_date + timedelta(hours=5)  # type: ignore[operator]
+    partial_dtr.rendered_minutes = 240
+    db.add(partial_dtr)
+    partial_leave_request = LeaveRequest(
+        employee_id=employee.id,
+        policy_id=leave_policy.id,
+        date_start=partial_leave_date,
+        date_end=partial_leave_date,
+        leave_year=2026,
+        requested_hours=Decimal("4.00"),
+        total_days_requested=Decimal("0.50"),
+        status="approved",
+    )
+    db.add(partial_leave_request)
     db.commit()
     hourly_leave_preview = client.get(
         f"{API}/runs/attendance-calculation-preview",
@@ -856,13 +883,106 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         for row in hourly_leave_preview.json()["entries"]
         if row["employee_id"] == str(employee.id)
     )
-    assert any(
-        blocker["code"] == "partial_leave_treatment_unavailable"
+    assert not any(
+        blocker["code"].startswith("partial_leave_")
         for blocker in hourly_leave_entry["blockers"]
+    ), hourly_leave_entry["blockers"]
+    assert any("240 approved hourly leave minutes; unpaid treatment" in formula
+               for formula in hourly_leave_entry["formula"])
+    assert hourly_leave_entry["attendance_deduction"] == "1785.04"
+    assert hourly_leave_entry["short_time_deduction"] == "12.31"
+    duplicate_partial_request = LeaveRequest(
+        employee_id=employee.id,
+        policy_id=leave_policy.id,
+        date_start=partial_leave_date,
+        date_end=partial_leave_date,
+        leave_year=2026,
+        requested_hours=Decimal("2.00"),
+        total_days_requested=Decimal("0.25"),
+        status="approved",
     )
-    leave_request.requested_hours = None
-    leave_request.policy_id = None
-    db.add(leave_request)
+    db.add(duplicate_partial_request)
+    db.commit()
+    duplicate_partial_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params=preview_params,
+        headers=superuser_token_headers,
+    )
+    duplicate_partial_entry = next(
+        row
+        for row in duplicate_partial_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert duplicate_partial_preview.status_code == 200, duplicate_partial_preview.text
+    assert any(
+        blocker["code"] == "multiple_partial_leave_requests_unresolved"
+        for blocker in duplicate_partial_entry["blockers"]
+    )
+    db.delete(duplicate_partial_request)
+    db.commit()
+    partial_leave_request.requested_hours = Decimal("4.01")
+    db.add(partial_leave_request)
+    db.commit()
+    fractional_leave_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params=preview_params,
+        headers=superuser_token_headers,
+    )
+    fractional_leave_entry = next(
+        row
+        for row in fractional_leave_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert fractional_leave_preview.status_code == 200, fractional_leave_preview.text
+    assert any(
+        blocker["code"] == "partial_leave_minute_precision_invalid"
+        for blocker in fractional_leave_entry["blockers"]
+    )
+    partial_leave_request.requested_hours = Decimal("4.25")
+    db.add(partial_leave_request)
+    db.commit()
+    overlapping_leave_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params=preview_params,
+        headers=superuser_token_headers,
+    )
+    overlapping_leave_entry = next(
+        row
+        for row in overlapping_leave_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert overlapping_leave_preview.status_code == 200, overlapping_leave_preview.text
+    assert any(
+        blocker["code"] == "partial_leave_attendance_overlap"
+        for blocker in overlapping_leave_entry["blockers"]
+    )
+    partial_leave_request.requested_hours = Decimal("4.00")
+    db.add(partial_leave_request)
+    db.commit()
+    leave_policy.is_paid = True
+    db.add(leave_policy)
+    db.commit()
+    paid_hourly_leave_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params=preview_params,
+        headers=superuser_token_headers,
+    )
+    assert paid_hourly_leave_preview.status_code == 200, paid_hourly_leave_preview.text
+    paid_hourly_leave_entry = next(
+        row
+        for row in paid_hourly_leave_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert any("240 approved hourly leave minutes; paid treatment" in formula
+               for formula in paid_hourly_leave_entry["formula"])
+    assert paid_hourly_leave_entry["attendance_deduction"] == "12.31"
+    assert paid_hourly_leave_entry["short_time_deduction"] == "12.31"
+    leave_policy.is_paid = False
+    db.add(leave_policy)
+    db.commit()
+    partial_leave_request.requested_hours = None
+    partial_leave_request.policy_id = None
+    db.add(partial_leave_request)
     db.commit()
     unclassified_leave_preview = client.get(
         f"{API}/runs/attendance-calculation-preview",
@@ -879,8 +999,10 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         blocker["code"] == "leave_policy_unavailable"
         for blocker in unclassified_leave_entry["blockers"]
     )
-    leave_request.policy_id = leave_policy.id
-    db.add(leave_request)
+    partial_dtr.logout_date = partial_dtr.login_date + timedelta(hours=9)  # type: ignore[operator]
+    partial_dtr.rendered_minutes = 480
+    db.add(partial_dtr)
+    db.delete(partial_leave_request)
     db.commit()
 
     replay = client.post(
@@ -1268,7 +1390,7 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     ("period_start", "period_end", "opening_as_of", "separation_date", "employee_status", "trigger", "expected_taxable", "expected_tax_due", "expected_withholding"),
     [
         (date(2026, 12, 16), date(2026, 12, 31), date(2026, 12, 15), None, EmployeeStatus.ACTIVE, "year_end", Decimal("323000.00"), Decimal("10950.00"), Decimal("6950.00")),
-        (date(2026, 6, 1), date(2026, 6, 15), date(2026, 5, 31), date(2026, 6, 15), EmployeeStatus.RESIGNED, "termination_final_pay", Decimal("323000.00"), Decimal("10950.00"), Decimal("6950.00")),
+        (date(2026, 6, 1), date(2026, 6, 15), date(2026, 5, 31), date(2026, 6, 15), EmployeeStatus.RESIGNED, "termination_final_pay", Decimal("321500.00"), Decimal("10725.00"), Decimal("6725.00")),
     ],
 )
 def test_final_pay_period_uses_annualized_tax_and_opening_balance(
@@ -1472,15 +1594,25 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
     assert benefit_row["benefit_type"] == "thirteenth_month"
     assert benefit_row["gross_amount"] == "30000.00"
     assert benefit_row["taxable_other_benefit_amount"] == "30000.00"
-    assert entry["input_snapshot"].get("monthly_contributions") is None
+    monthly_contributions = entry["input_snapshot"].get("monthly_contributions")
     if trigger == "termination_final_pay":
-        assert "termination_monthly_contribution_timing_unavailable" in blocker_codes
+        assert monthly_contributions is not None
+        assert {
+            scheme: values["employee"]
+            for scheme, values in monthly_contributions["schemes"].items()
+        } == {
+            "sss": "650.00",
+            "philhealth": "650.00",
+            "pagibig": "200.00",
+        }
+        assert "termination_monthly_contribution_timing_unavailable" not in blocker_codes
         assert "bir_2316_termination_delivery_unavailable" in blocker_codes
     else:
         # The year-end test intentionally has no 2026 contribution schedules.
         # It exercises annual BIR math from the available provisional taxable
         # basis while proving missing statutory inputs still block finalization.
         assert "statutory_schedule_unavailable" in blocker_codes
+        assert monthly_contributions is None
         assert "termination_monthly_contribution_timing_unavailable" not in blocker_codes
         assert "bir_2316_termination_delivery_unavailable" not in blocker_codes
     annual_taxable = Decimal(

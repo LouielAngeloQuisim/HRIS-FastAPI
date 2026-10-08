@@ -5,6 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from pydantic import field_validator
 from sqlmodel import Field, SQLModel
 
 from app.leave.models import (
@@ -116,6 +117,18 @@ class LeaveRequestBase(SQLModel):
     requested_hours: Decimal | None = Field(default=None)
     reason: str | None = Field(default=None, max_length=1024)
     document_ref: str | None = Field(default=None, max_length=255)
+
+    @field_validator("requested_hours")
+    @classmethod
+    def validate_requested_hours(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return value
+        if value <= 0:
+            raise ValueError("requested_hours must be greater than zero")
+        minutes = value * Decimal(60)
+        if minutes != minutes.to_integral_value():
+            raise ValueError("requested_hours must resolve to a whole number of minutes")
+        return value
 
 
 class LeaveRequestCreate(LeaveRequestBase):

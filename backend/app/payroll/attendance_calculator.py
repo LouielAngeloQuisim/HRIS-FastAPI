@@ -39,6 +39,8 @@ class AttendancePayDay:
     grace_minutes: int = 0
     paid_absence: bool = False
     absence: bool = False
+    paid_leave_minutes: int = 0
+    unpaid_leave_minutes: int = 0
     monthly_period_fraction: Decimal | None = None
     monthly_period_scheduled_days: int | None = None
     monthly_salary_proration: Literal[
@@ -122,6 +124,17 @@ def calculate_attendance_earnings(
             raise CalculationBlocker(f"Worked minutes exceed one day on {day.work_date}")
         if day.absence and day.paid_absence:
             raise CalculationBlocker(f"Date {day.work_date} cannot be both absence and paid leave")
+        if day.paid_leave_minutes < 0 or day.unpaid_leave_minutes < 0:
+            raise CalculationBlocker(f"Partial leave minutes cannot be negative on {day.work_date}")
+        if day.paid_leave_minutes and day.unpaid_leave_minutes:
+            raise CalculationBlocker(f"Paid and unpaid partial leave overlap on {day.work_date}")
+        leave_minutes = day.paid_leave_minutes + day.unpaid_leave_minutes
+        if leave_minutes > day.scheduled_minutes:
+            raise CalculationBlocker(f"Partial leave exceeds scheduled minutes on {day.work_date}")
+        if leave_minutes and (day.absence or day.paid_absence):
+            raise CalculationBlocker(f"Partial leave conflicts with a full-day disposition on {day.work_date}")
+        if leave_minutes and day.worked_minutes + leave_minutes > day.scheduled_minutes:
+            raise CalculationBlocker(f"Worked and leave minutes exceed the shift on {day.work_date}")
         if not day.absence and not day.paid_absence and day.worked_minutes == 0:
             raise CalculationBlocker(f"Attendance disposition is missing for {day.work_date}")
         if day.overtime_eligible_minutes < 0 or day.overtime_eligible_minutes > day.worked_minutes:
@@ -167,7 +180,7 @@ def calculate_attendance_earnings(
             payable_minutes = (
                 day.scheduled_minutes
                 if day.paid_absence
-                else min(day.worked_minutes, day.scheduled_minutes)
+                else min(day.worked_minutes + day.paid_leave_minutes, day.scheduled_minutes)
             )
             regular += day.basic_rate * Decimal(payable_minutes) / Decimal(60)
             if day.paid_absence:
@@ -190,14 +203,14 @@ def calculate_attendance_earnings(
                 )
                 payable_days += 1
             elif daily_partial_work == "full_day":
-                if day.worked_minutes >= day.scheduled_minutes:
+                if day.worked_minutes + day.paid_leave_minutes >= day.scheduled_minutes:
                     regular += day.basic_rate
                     payable_days += 1
             elif daily_partial_work == "pro_rated":
-                regular += day.basic_rate * min(day.worked_minutes, day.scheduled_minutes) / Decimal(day.scheduled_minutes)
+                regular += day.basic_rate * min(day.worked_minutes + day.paid_leave_minutes, day.scheduled_minutes) / Decimal(day.scheduled_minutes)
                 payable_days += 1
             else:  # hours_based: daily rate is normalized to scheduled hours.
-                regular += day.basic_rate * Decimal(min(day.worked_minutes, day.scheduled_minutes)) / Decimal(day.scheduled_minutes)
+                regular += day.basic_rate * Decimal(min(day.worked_minutes + day.paid_leave_minutes, day.scheduled_minutes)) / Decimal(day.scheduled_minutes)
                 payable_days += 1
         elif day.pay_type == "monthly":
             daily_rate = day.basic_rate / monthly_divisor
@@ -234,8 +247,20 @@ def calculate_attendance_earnings(
             else:
                 if day.monthly_salary_base_eligible:
                     payable_days += 1
+                    if day.unpaid_leave_minutes:
+                        deduction += (
+                            daily_rate
+                            * Decimal(day.unpaid_leave_minutes)
+                            / Decimal(day.scheduled_minutes)
+                        )
                 shortfall = (
-                    max(0, day.scheduled_minutes - day.worked_minutes)
+                    max(
+                        0,
+                        day.scheduled_minutes
+                        - day.worked_minutes
+                        - day.paid_leave_minutes
+                        - day.unpaid_leave_minutes,
+                    )
                     if day.monthly_salary_base_eligible and not day.paid_absence
                     else 0
                 )

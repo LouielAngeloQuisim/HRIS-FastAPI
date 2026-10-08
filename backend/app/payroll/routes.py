@@ -296,11 +296,13 @@ def _payroll_review_counts(session: Session, run_id: uuid.UUID) -> tuple[int, in
 def _stage_monthly_contribution_ledger(
     *, session: Session, run: PayrollRun, entries: Sequence[PayrollEntry], actor_id: uuid.UUID
 ) -> None:
-    """Stage the single monthly statutory collection in the final pay period.
+    """Stage one monthly collection in the final eligible employee pay period.
 
     The caller commits this with payroll finalization. Amounts must already be
     present in the reviewed entry and in its frozen monthly contribution input;
-    this function never calculates or guesses statutory values.
+    this function never calculates or guesses statutory values. An employee
+    separated during the month collects in the final-pay period covering their
+    separation date; active employees collect in the calendar month's last run.
     """
     if run.date_from is None or run.date_to is None:
         raise HTTPException(status_code=409, detail="Payroll period dates are required")
@@ -310,33 +312,45 @@ def _stage_monthly_contribution_ledger(
             detail="Monthly statutory collection cannot span calendar months",
         )
     month_end = calendar.monthrange(run.date_to.year, run.date_to.month)[1]
-    if run.date_to.day != month_end:
-        for entry in entries:
-            if entry.review_state == "excluded":
-                continue
-            for scheme in ("sss", "philhealth", "pagibig"):
-                try:
-                    amount = Decimal(str(entry.deductions.get(f"{scheme}_employee", "0")))
-                except (InvalidOperation, TypeError, ValueError) as exc:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Entry {entry.id} has an invalid {scheme} deduction line",
-                    ) from exc
-                if amount != 0:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"{scheme} may be collected only in the final payroll period of the month",
-                    )
-        return
     month = run.date_to.replace(day=1)
     schemes = ("sss", "philhealth", "pagibig")
+    collection_entries: list[PayrollEntry] = []
+    for entry in entries:
+        if entry.review_state == "excluded":
+            continue
+        employee = session.get(EmployeeRecords, entry.employee_id) if entry.employee_id else None
+        is_separation_final_pay = bool(
+            employee is not None
+            and str(getattr(employee.employee_status, "value", employee.employee_status))
+            in {"Resigned", "Terminated"}
+            and employee.date_separated is not None
+            and run.date_from <= employee.date_separated <= run.date_to
+        )
+        if run.date_to.day == month_end or is_separation_final_pay:
+            collection_entries.append(entry)
+            continue
+        for scheme in schemes:
+            try:
+                amount = Decimal(str(entry.deductions.get(f"{scheme}_employee", "0")))
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Entry {entry.id} has an invalid {scheme} deduction line",
+                ) from exc
+            if amount != 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{scheme} may be collected only in the final eligible payroll period of the month",
+                )
+    if not collection_entries:
+        return
     # Finalizing two different runs for the same employee/month at once must
     # serialize before either transaction checks the ledger. The unique index
     # remains the last line of defense for writers outside this workflow.
     for employee_id in sorted(
         {
             entry.employee_id
-            for entry in entries
+            for entry in collection_entries
             if entry.review_state != "excluded" and entry.employee_id is not None
         },
         key=lambda value: value.hex,
@@ -350,9 +364,7 @@ def _stage_monthly_contribution_ledger(
                 signed=True,
             )
             session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
-    for entry in entries:
-        if entry.review_state == "excluded":
-            continue
+    for entry in collection_entries:
         monthly = entry.input_snapshot.get("monthly_contributions")
         if not isinstance(monthly, dict) or monthly.get("month") != month.strftime("%Y-%m"):
             raise HTTPException(
@@ -1565,6 +1577,10 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
                 "policy_id": str(leave.policy_id) if leave.policy_id else None,
                 "date_start": leave.date_start.isoformat(),
                 "date_end": leave.date_end.isoformat(),
+                "requested_hours": str(leave.requested_hours)
+                if leave.requested_hours is not None
+                else None,
+                "total_days_requested": str(leave.total_days_requested),
                 "status": str(getattr(leave.status, "value", leave.status)),
             }
             if current_leave_reference != reference:
@@ -3065,7 +3081,9 @@ def attendance_calculation_preview(
     approved_leave_days: set[tuple[uuid.UUID, date]] = set()
     paid_leave_days: set[tuple[uuid.UUID, date]] = set()
     unclassified_leave_days: set[tuple[uuid.UUID, date]] = set()
-    partial_leave_days: set[tuple[uuid.UUID, date]] = set()
+    partial_leave_by_day: dict[
+        tuple[uuid.UUID, date], list[tuple[Decimal, uuid.UUID | None, uuid.UUID]]
+    ] = {}
     for leave in leave_rows:
         if leave.employee_id is None:
             continue
@@ -3079,7 +3097,9 @@ def attendance_calculation_preview(
         while cursor <= end:
             key = (leave.employee_id, cursor)
             if leave.requested_hours is not None:
-                partial_leave_days.add(key)
+                partial_leave_by_day.setdefault(key, []).append(
+                    (leave.requested_hours, leave.policy_id, leave.id)
+                )
             else:
                 approved_leave_days.add(key)
                 if leave_policy is None:
@@ -3294,15 +3314,6 @@ def attendance_calculation_preview(
                 cursor += timedelta(days=1)
                 continue
             leave_key = (employee_entry.employee_id, cursor)
-            if leave_key in partial_leave_days:
-                blockers.append(
-                    PayrollPreflightBlocker(
-                        code="partial_leave_treatment_unavailable",
-                        message="Approved hourly leave requires an explicit partial-leave pay rule before payroll calculation.",
-                        work_date=cursor,
-                    )
-                )
-                break
             if leave_key in unclassified_leave_days:
                 blockers.append(
                     PayrollPreflightBlocker(
@@ -3385,6 +3396,120 @@ def attendance_calculation_preview(
             paid_leave_record = (employee_entry.employee_id, cursor) in paid_leave_days
             paid_leave = paid_leave_record and bool(policy.policy.get("paid_leave"))
             approved_leave_record = (employee_entry.employee_id, cursor) in approved_leave_days
+            partial_leaves = partial_leave_by_day.get(leave_key, [])
+            partial_leave_minutes = 0
+            paid_partial_leave_minutes = 0
+            unpaid_partial_leave_minutes = 0
+            if len(partial_leaves) > 1:
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="multiple_partial_leave_requests_unresolved",
+                        message="Multiple approved hourly leave requests exist for this employee and work date; resolve them into one authorized request before payroll calculation.",
+                        work_date=cursor,
+                    )
+                )
+                break
+            if partial_leaves and leave_key in approved_leave_days:
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="partial_and_full_day_leave_conflict",
+                        message="Approved hourly and full-day leave overlap on this work date; resolve the conflicting leave records before payroll calculation.",
+                        work_date=cursor,
+                    )
+                )
+                break
+            if partial_leaves:
+                partial_leave = partial_leaves[0]
+                leave_hours, leave_policy_id, leave_id = partial_leave
+                partial_minutes_decimal = leave_hours * Decimal(60)
+                leave_policy = (
+                    leave_policies_by_id.get(leave_policy_id)
+                    if leave_policy_id is not None
+                    else None
+                )
+                if partial_minutes_decimal != partial_minutes_decimal.to_integral_value():
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="partial_leave_minute_precision_invalid",
+                            message="Approved hourly leave must resolve to a whole number of minutes.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                if leave_policy is None:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="leave_policy_unavailable",
+                            message="Approved hourly leave has no available leave policy, so paid versus unpaid treatment cannot be verified.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                partial_leave_minutes = int(partial_minutes_decimal)
+                if partial_leave_minutes <= 0 or partial_leave_minutes > shift.total_hours_minus_lunch:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="partial_leave_duration_invalid",
+                            message="Approved hourly leave must be greater than zero and no longer than the effective shift.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                if holiday_configs:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="partial_leave_holiday_unresolved",
+                            message="Hourly leave on a holiday requires a confirmed holiday-and-leave stacking rule.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                if dtr is not None and dtr.is_absent:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="partial_leave_attendance_conflict",
+                            message="Hourly leave conflicts with a full-day absence disposition; correct the attendance disposition.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                worked_for_leave = (
+                    0 if dtr is None or dtr.is_absent else int(dtr.rendered_minutes or 0)
+                )
+                if worked_for_leave + partial_leave_minutes > shift.total_hours_minus_lunch:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="partial_leave_attendance_overlap",
+                            message="Worked minutes plus approved hourly leave exceed the effective shift; resolve the overlapping attendance or leave record.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                if dtr is None and partial_leave_minutes < shift.total_hours_minus_lunch:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="partial_leave_attendance_unresolved",
+                            message="Partial hourly leave does not resolve the remaining scheduled work time; provide attendance or an authorized absence disposition.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                if partial_leave_minutes == shift.total_hours_minus_lunch:
+                    paid_leave = bool(leave_policy.is_paid) and bool(
+                        policy.policy.get("paid_leave")
+                    )
+                    approved_leave_record = True
+                    partial_leave_minutes = 0
+                else:
+                    if bool(leave_policy.is_paid) and bool(policy.policy.get("paid_leave")):
+                        paid_partial_leave_minutes = partial_leave_minutes
+                    else:
+                        unpaid_partial_leave_minutes = partial_leave_minutes
+                refs.append(f"leave:{leave_id}:approved-hours:{leave_hours}")
+                formulas.append(
+                    f"{cursor}: {partial_leave_minutes or int(partial_minutes_decimal)} approved hourly leave minutes; "
+                    f"{'paid' if paid_leave or paid_partial_leave_minutes else 'unpaid'} treatment"
+                )
             holiday_kind_for_date = holiday_configs[0][0] if holiday_configs else None
             if len(holiday_configs) > 1 and not (
                 len(holiday_configs) == 2
@@ -3787,7 +3912,11 @@ def attendance_calculation_preview(
                         raw_late_minutes=raw_late_minutes,
                         grace_minutes=grace_minutes,
                         paid_absence=(paid_leave or paid_holiday)
-                        and (dtr is None or dtr.is_absent),
+                        and (
+                            dtr is None
+                            or dtr.is_absent
+                            or (approved_leave_record and worked_minutes == 0)
+                        ),
                         absence=bool(
                             (dtr and dtr.is_absent and not (paid_leave or paid_holiday))
                             or (
@@ -3795,7 +3924,14 @@ def attendance_calculation_preview(
                                 and resolved_no_punch_day
                                 and not (paid_leave or paid_holiday)
                             )
+                            or (
+                                approved_leave_record
+                                and worked_minutes == 0
+                                and not (paid_leave or paid_holiday)
+                            )
                         ),
+                        paid_leave_minutes=paid_partial_leave_minutes,
+                        unpaid_leave_minutes=unpaid_partial_leave_minutes,
                         monthly_period_fraction=monthly_period_fraction,
                         monthly_period_scheduled_days=monthly_period_scheduled_days,
                         monthly_salary_proration=str(
@@ -4055,17 +4191,44 @@ def prepare_attendance_payroll_draft(
     month_end = month_start.replace(
         day=calendar.monthrange(month_start.year, month_start.month)[1]
     )
+    roster_employee_ids = {
+        row.employee_id for row in roster.entries if row.employee_id is not None
+    }
+    roster_employees = (
+        session.exec(
+            select(EmployeeRecords).where(
+                col(EmployeeRecords.id).in_(roster_employee_ids)
+            )
+        ).all()
+        if roster_employee_ids
+        else []
+    )
+    separation_dates = {
+        employee.id: employee.date_separated
+        for employee in roster_employees
+        if str(
+            getattr(employee.employee_status, "value", employee.employee_status)
+        )
+        in {"Resigned", "Terminated"}
+        and employee.date_separated is not None
+        and obj_in.date_from <= employee.date_separated <= obj_in.date_to
+    }
     full_month_previews: dict[uuid.UUID, PayrollAttendanceCalculationEntry] = {}
-    if obj_in.date_to == month_end:
+    if obj_in.date_to == month_end or separation_dates:
         # The preview endpoint accepts only complete configured earning
-        # periods. Build the statutory monthly basis from those slices instead
-        # of asking it to evaluate an invalid all-month range for a split-pay
-        # group.
+        # periods. Build the statutory monthly basis from the periods through
+        # the final-pay period, rather than asking it to evaluate an invalid
+        # all-month range for a split-pay group.
         for configured_period in configured_periods:
+            configured_period_from = date.fromisoformat(
+                str(configured_period.date_from)[:10]
+            )
+            if configured_period_from > obj_in.date_to:
+                continue
             slice_preview = attendance_calculation_preview(
                 session=session,
                 pay_group_id=obj_in.pay_group_id,
-                date_from=date.fromisoformat(str(configured_period.date_from)[:10]),
+                date_from=configured_period_from,
                 date_to=date.fromisoformat(str(configured_period.date_to)[:10]),
                 skip=0,
                 limit=200,
@@ -4215,10 +4378,9 @@ def prepare_attendance_payroll_draft(
             for salary in employee_salaries
         ]
         monthly_contributions: dict[str, Any] | None = None
-        final_period_of_month = obj_in.date_to.day == calendar.monthrange(
-            obj_in.date_to.year, obj_in.date_to.month
-        )[1]
-        if final_period_of_month:
+        final_period_of_month = obj_in.date_to == month_end
+        separation_final_pay = roster_entry.employee_id in separation_dates
+        if final_period_of_month or separation_final_pay:
             month_start = obj_in.date_to.replace(day=1)
             effective_salary = employee_salaries[-1] if employee_salaries else None
             if effective_salary is None:
@@ -4312,22 +4474,6 @@ def prepare_attendance_payroll_draft(
                             message=str(exc),
                         )
                     )
-        elif (
-            employee_record := session.get(EmployeeRecords, roster_entry.employee_id)
-        ) is not None and str(
-            getattr(employee_record.employee_status, "value", employee_record.employee_status)
-        ) in {"Resigned", "Terminated"} and employee_record.date_separated is not None and (
-            obj_in.date_from <= employee_record.date_separated <= obj_in.date_to
-        ):
-            blockers.append(
-                PayrollPreflightBlocker(
-                    code="termination_monthly_contribution_timing_unavailable",
-                    message=(
-                        "This employee's final-pay period is before the calendar month's final payroll period. "
-                        "Once-monthly statutory contributions require an approved termination-specific basis and collection rule."
-                    ),
-                )
-            )
         tax_declaration = session.exec(
             select(EmployeeTaxYearDeclaration).where(
                 EmployeeTaxYearDeclaration.employee_id == roster_entry.employee_id,
@@ -4477,6 +4623,10 @@ def prepare_attendance_payroll_draft(
                 "policy_id": str(row.policy_id) if row.policy_id else None,
                 "date_start": row.date_start.isoformat(),
                 "date_end": row.date_end.isoformat(),
+                "requested_hours": str(row.requested_hours)
+                if row.requested_hours is not None
+                else None,
+                "total_days_requested": str(row.total_days_requested),
                 "status": str(getattr(row.status, "value", row.status)),
             }
             for row in leave_rows

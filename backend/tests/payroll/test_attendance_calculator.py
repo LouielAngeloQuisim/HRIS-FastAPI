@@ -65,6 +65,103 @@ def test_hourly_overtime_minutes_are_not_paid_again_at_the_base_rate() -> None:
     assert result.regular + result.overtime == Decimal("1110.00")
 
 
+def test_hourly_paid_partial_leave_fills_only_the_unworked_scheduled_minutes() -> None:
+    result = calculate_attendance_earnings(
+        [_day(worked_minutes=240, paid_leave_minutes=240)],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("960.00")
+    assert result.worked_minutes == 240
+
+
+def test_daily_partial_leave_uses_the_confirmed_partial_work_rule() -> None:
+    day = _day(
+        pay_type="daily",
+        basic_rate=Decimal("960"),
+        worked_minutes=240,
+        paid_leave_minutes=240,
+    )
+    pro_rated = calculate_attendance_earnings(
+        [day], monthly_divisor=Decimal("22"), daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1"),
+    )
+    full_day = calculate_attendance_earnings(
+        [day], monthly_divisor=Decimal("22"), daily_partial_work="full_day",
+        overtime_multiplier=Decimal("1"),
+    )
+
+    assert pro_rated.regular == Decimal("960.00")
+    assert full_day.regular == Decimal("960.00")
+
+
+def test_monthly_paid_partial_leave_prevents_deduction_for_the_approved_minutes() -> None:
+    result = calculate_attendance_earnings(
+        [
+            _day(
+                pay_type="monthly",
+                basic_rate=Decimal("26000"),
+                worked_minutes=240,
+                paid_leave_minutes=240,
+                monthly_period_fraction=Decimal("0.5"),
+                monthly_period_scheduled_days=11,
+            )
+        ],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        monthly_partial_work="deduct_after_grace",
+        overtime_multiplier=Decimal("1"),
+    )
+
+    assert result.regular == Decimal("1181.82")
+    assert result.attendance_deduction == Decimal("0.00")
+
+
+def test_unpaid_partial_leave_is_deducted_even_when_short_time_rule_waives_undertime() -> None:
+    result = calculate_attendance_earnings(
+        [
+            _day(
+                pay_type="monthly",
+                basic_rate=Decimal("26000"),
+                worked_minutes=240,
+                unpaid_leave_minutes=240,
+                monthly_period_fraction=Decimal("0.5"),
+                monthly_period_scheduled_days=11,
+            )
+        ],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        monthly_partial_work="no_deduction",
+        overtime_multiplier=Decimal("1"),
+    )
+
+    assert result.regular == Decimal("1181.82")
+    assert result.short_time_deduction == Decimal("0.00")
+    assert result.attendance_deduction == Decimal("590.91")
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({"paid_leave_minutes": -1}, "cannot be negative"),
+        ({"paid_leave_minutes": 240, "unpaid_leave_minutes": 60}, "overlap"),
+        ({"worked_minutes": 300, "paid_leave_minutes": 240}, "exceed the shift"),
+    ],
+)
+def test_invalid_partial_leave_blocks_calculation(
+    updates: dict[str, int], message: str
+) -> None:
+    with pytest.raises(CalculationBlocker, match=message):
+        calculate_attendance_earnings(
+            [_day(**updates)],
+            monthly_divisor=Decimal("22"),
+            daily_partial_work="pro_rated",
+            overtime_multiplier=Decimal("1"),
+        )
+
+
 def test_configured_holiday_factors_add_regular_premium_and_override_overtime_factor() -> None:
     result = calculate_attendance_earnings(
         [

@@ -301,6 +301,11 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     db.commit()
     assert not _payroll_entry_inputs_are_current(db, payroll_entry)
     payroll_employee.date_separated = None
+    payroll_employee.employee_status = EmployeeStatus.TERMINATED
+    db.add(payroll_employee)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_employee.employee_status = EmployeeStatus.ACTIVE
     db.add(payroll_employee)
     db.commit()
     assert _payroll_entry_inputs_are_current(db, payroll_entry)

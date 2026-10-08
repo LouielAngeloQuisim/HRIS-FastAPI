@@ -657,9 +657,11 @@ def test_previous_employer_uses_verified_cumulative_average_inputs(
     }
     trace = entry["input_snapshot"]["bir_calculation"]
     assert trace["method"] == "cumulative_average_rr_11_2018"
-    assert trace["cumulative_taxable_compensation"] == "197500.00"
+    # November 1–15, 2025 has 10 weekdays. Monthly proration uses the
+    # configured 22-day divisor, so current taxable pay is 35,000 * 10 / 22.
+    assert trace["cumulative_taxable_compensation"] == "195909.09"
     assert trace["cumulative_period_count"] == 7
-    assert trace["average_period_compensation"] == "28214.29"
+    assert trace["average_period_compensation"] == "27987.01"
     assert trace["prior_tax_withheld"] == "11000.40"
     assert Decimal(trace["withholding"]) == Decimal(entry["deductions"]["bir_withholding"])
     history = entry["input_snapshot"]["bir_year_to_date_history"]

@@ -36,6 +36,13 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   loginAsUser,
   logout,
 }) => {
+  // This is the full critical payroll journey (setup, attendance import,
+  // review, independent finalization, recipient recovery, and PDF readback).
+  // Hosted CI's two-worker run reached the final assertions, then exhausted
+  // the default 30s budget during teardown; retain zero retries and allow a
+  // bounded minute for this integrated path.
+  test.setTimeout(60_000)
+
   await loginAsAdmin()
   const unique = Date.now().toString(36)
   const employee = await createParent(page, 'employees', {

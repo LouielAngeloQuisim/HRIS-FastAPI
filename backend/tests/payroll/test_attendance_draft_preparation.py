@@ -1535,6 +1535,11 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     assert payslip.headers["content-type"] == "application/pdf"
     assert payslip.content.startswith(b"%PDF-")
 
+    # This historical period is already due for delivery in the test clock.
+    # Remove the run-owned outbox row so the later worker test cannot claim it.
+    db.delete(outbox)
+    db.commit()
+
 
 @pytest.mark.parametrize(
     ("period_start", "period_end", "opening_as_of", "separation_date", "employee_status", "trigger", "expected_taxable", "expected_tax_due", "expected_withholding"),

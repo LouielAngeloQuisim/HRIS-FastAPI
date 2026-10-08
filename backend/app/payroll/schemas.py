@@ -702,9 +702,11 @@ class PayrollContributionCorrectionCreate(SQLModel):
 
     source_ledger_id: uuid.UUID
     target_entry_id: uuid.UUID
-    employee_amount: Decimal
-    employer_amount: Decimal
-    bir_withholding_delta: Decimal = Decimal("0.00")
+    employee_amount: Decimal = Field(max_digits=14, decimal_places=2)
+    employer_amount: Decimal = Field(max_digits=14, decimal_places=2)
+    bir_withholding_delta: Decimal = Field(
+        default=Decimal("0.00"), max_digits=14, decimal_places=2
+    )
     tax_review_reference: str | None = Field(default=None, max_length=512)
     reason: str = Field(min_length=5, max_length=1024)
     source_reference: str = Field(min_length=3, max_length=512)
@@ -718,6 +720,8 @@ class PayrollContributionCorrectionCreate(SQLModel):
             self.employer_amount,
             self.bir_withholding_delta,
         ):
+            if not value.is_finite():
+                raise ValueError("Contribution corrections must be finite amounts")
             if value != value.quantize(Decimal("0.01")):
                 raise ValueError("Contribution corrections must use whole cents")
         if self.employee_amount != 0 and not (self.tax_review_reference or "").strip():

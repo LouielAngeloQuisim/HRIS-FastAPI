@@ -10,6 +10,7 @@ from time import sleep
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -27,7 +28,24 @@ from app.payroll.routes import (
     _stage_monthly_contribution_ledger,
     list_payroll_contribution_ledger,
 )
+from app.payroll.schemas import PayrollContributionCorrectionCreate
 from app.user.models import User
+
+
+@pytest.mark.parametrize("amount", ["NaN", "Infinity", "-Infinity", "1.001"])
+def test_contribution_correction_rejects_non_finite_or_sub_cent_amounts(
+    amount: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        PayrollContributionCorrectionCreate(
+            source_ledger_id=uuid.uuid4(),
+            target_entry_id=uuid.uuid4(),
+            employee_amount=amount,
+            employer_amount="0.00",
+            tax_review_reference="reviewed tax adjustment",
+            reason="Correct contribution amount",
+            source_reference="QA workpaper reference",
+        )
 
 
 def _entry(

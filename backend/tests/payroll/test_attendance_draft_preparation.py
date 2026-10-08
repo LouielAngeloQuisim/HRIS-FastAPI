@@ -695,9 +695,12 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
         assert Decimal(trace["withholding"]) == Decimal(
             entry["deductions"]["bir_withholding"]
         )
-        history = entry["input_snapshot"]["bir_year_to_date_history"]
-        assert history["opening_pay_period_count"] == 6
-        assert history["complete"] is True
+        declaration = entry["input_snapshot"]["tax_year_declaration"]
+        assert declaration["opening_pay_period_count"] == 6
+        if tax_classification == "ordinary":
+            history = entry["input_snapshot"]["bir_year_to_date_history"]
+            assert history["opening_pay_period_count"] == 6
+            assert history["complete"] is True
     finally:
         # The module-scoped test database persists rows across test cases. This
         # fixed-period policy and draft must not contaminate later test cases.

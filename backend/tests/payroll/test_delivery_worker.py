@@ -402,6 +402,39 @@ def test_expired_send_lease_becomes_uncertain_and_is_not_reclaimed(
     assert job.last_error_code == "worker_lease_expired_after_send_started"
 
 
+def test_worker_restart_does_not_resend_job_with_expired_send_lease(
+    db: Session,
+    delivery_job: PayrollDeliveryOutbox,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A restarted process reconciles an interrupted send as uncertain, not due."""
+    import app.payroll.delivery_worker as worker
+
+    job = delivery_job
+    job.status = "processing"
+    job.attempts = 1
+    job.claimed_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.add(job)
+    db.commit()
+
+    monkeypatch.setattr(settings, "PAYSLIP_DELIVERY_ENABLED", True)
+    monkeypatch.setattr(worker, "HEARTBEAT_FILE", tmp_path / "heartbeat")
+    sent_ids: list[uuid.UUID] = []
+    monkeypatch.setattr(worker, "_send_job", sent_ids.append)
+
+    # This is the restarted worker's first poll. The prior process may have
+    # submitted SMTP DATA before dying, so automatic redelivery is forbidden.
+    run_worker(once=True)
+
+    db.refresh(job)
+    assert sent_ids == []
+    assert job.status == "uncertain"
+    assert job.attempts == 1
+    assert job.claimed_until is None
+    assert job.last_error_code == "worker_lease_expired_after_send_started"
+
+
 def test_retry_limit_excludes_exhausted_job(
     db: Session, delivery_job: PayrollDeliveryOutbox
 ) -> None:

@@ -87,6 +87,7 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
     await page.getByLabel('Taxable compensation already paid this year').fill('125000.00')
     await page.getByLabel('Withholding tax already withheld this year').fill('4500.00')
     await page.getByLabel('Figures include a previous employer').check()
+    await page.getByLabel(/I reconciled 13th-month and other benefit payments/).check()
     await page.getByLabel(/Opening payroll periods covered by these totals/).fill('6')
     await page.getByLabel(/Source \/ review note/).fill('Form 2316 verified for test employee')
     await page.getByLabel(/I reviewed these figures/).check()

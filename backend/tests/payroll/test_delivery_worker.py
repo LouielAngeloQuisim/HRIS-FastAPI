@@ -10,7 +10,6 @@ from email.parser import BytesParser
 from unittest.mock import patch
 
 import pytest
-from emails.message import Message
 from sqlalchemy import delete
 from sqlmodel import Session
 
@@ -123,10 +122,10 @@ def test_delivery_attaches_pdf_and_marks_success(
     monkeypatch.setattr(settings, "SMTP_HOST", "mailcatcher")
     monkeypatch.setattr(settings, "EMAILS_FROM_EMAIL", "noreply@example.test")
     job = delivery_job
-    with patch.object(Message, "send", autospec=True, return_value=None) as send:
+    with patch("app.payroll.delivery_worker._send_smtp_once") as send:
         _send_job(job.id)
     db.refresh(job)
-    message = send.call_args.args[0]
+    message = send.call_args.kwargs["message"]
     assert job.status == "sent"
     assert job.sent_at is not None
     assert message.attachments
@@ -158,6 +157,43 @@ class _SMTPCollector(socketserver.ThreadingTCPServer):
                             chunks.append(data_line[1:] if data_line.startswith(b"..") else data_line)
                         collector.messages.append(b"".join(chunks))
                         self.wfile.write(b"250 accepted by local test sink\r\n")
+                    elif command == "QUIT":
+                        self.wfile.write(b"221 closing connection\r\n")
+                        return
+                    else:
+                        self.wfile.write(b"250 ok\r\n")
+
+        super().__init__(("127.0.0.1", 0), Handler)
+
+
+class _SMTPAcceptThenDisconnect(socketserver.ThreadingTCPServer):
+    """Accept DATA, then drop the connection before SMTP confirms acceptance."""
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self) -> None:
+        self.messages: list[bytes] = []
+        collector = self
+
+        class Handler(socketserver.StreamRequestHandler):
+            def handle(self) -> None:
+                self.wfile.write(b"220 local test sink\r\n")
+                while line := self.rfile.readline():
+                    command = line.decode("ascii", errors="replace").strip().split(" ", 1)[0].upper()
+                    if command in {"EHLO", "HELO"}:
+                        self.wfile.write(b"250-local test sink\r\n250 SIZE 10485760\r\n")
+                    elif command == "DATA":
+                        self.wfile.write(b"354 send message data\r\n")
+                        chunks: list[bytes] = []
+                        while data_line := self.rfile.readline():
+                            if data_line == b".\r\n":
+                                break
+                            chunks.append(data_line[1:] if data_line.startswith(b"..") else data_line)
+                        collector.messages.append(b"".join(chunks))
+                        # The server accepted and recorded the message, but the
+                        # client never receives the final 250 response.
+                        return
                     elif command == "QUIT":
                         self.wfile.write(b"221 closing connection\r\n")
                         return
@@ -208,13 +244,52 @@ def test_worker_claims_scheduled_job_and_sends_frozen_pdf_to_local_smtp_sink(
     assert attachment.get_payload(decode=True).startswith(b"%PDF-")
 
 
+def test_smtp_accept_then_disconnect_marks_uncertain_without_automatic_resend(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_job: PayrollDeliveryOutbox,
+) -> None:
+    monkeypatch.setattr(settings, "PAYSLIP_DELIVERY_ENABLED", True)
+    monkeypatch.setattr(settings, "EMAILS_FROM_EMAIL", "noreply@example.test")
+    monkeypatch.setattr(settings, "SMTP_TLS", False)
+    monkeypatch.setattr(settings, "SMTP_SSL", False)
+    monkeypatch.setattr(settings, "SMTP_USER", "")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "")
+
+    with _SMTPAcceptThenDisconnect() as sink:
+        monkeypatch.setattr(settings, "SMTP_HOST", "127.0.0.1")
+        monkeypatch.setattr(settings, "SMTP_PORT", sink.server_address[1])
+        server_thread = threading.Thread(target=sink.serve_forever, daemon=True)
+        server_thread.start()
+        delivery_job.status = "scheduled"
+        delivery_job.attempts = 0
+        delivery_job.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        delivery_job.claimed_until = None
+        db.add(delivery_job)
+        db.commit()
+        try:
+            run_worker(once=True)
+            run_worker(once=True)
+        finally:
+            sink.shutdown()
+            server_thread.join(timeout=2)
+
+    db.refresh(delivery_job)
+    assert len(sink.messages) == 1
+    assert delivery_job.status == "uncertain"
+    assert delivery_job.last_error_code == "SMTPServerDisconnected"
+    assert delivery_job.attempts == 1
+
+
 def test_ambiguous_smtp_failure_is_not_retried(
     db: Session, monkeypatch, delivery_job: PayrollDeliveryOutbox
 ) -> None:
     monkeypatch.setattr(settings, "SMTP_HOST", "mailcatcher")
     monkeypatch.setattr(settings, "EMAILS_FROM_EMAIL", "noreply@example.test")
     job = delivery_job
-    with patch.object(Message, "send", autospec=True, side_effect=TimeoutError()):
+    with patch(
+        "app.payroll.delivery_worker._send_smtp_once", side_effect=TimeoutError()
+    ):
         _send_job(job.id)
     db.refresh(job)
     assert job.status == "uncertain"

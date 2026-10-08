@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import html
 import logging
+import smtplib
 import socket
 import time
 import uuid
@@ -162,7 +163,53 @@ def _render_email(snapshot: dict[str, Any]) -> tuple[str, str]:
     )
 
 
+def _send_smtp_once(
+    *,
+    message: Message,
+    recipient: str,
+    sender: str,
+    host: str,
+    port: int,
+    use_tls: bool,
+    use_ssl: bool,
+    username: str | None,
+    password: str | None,
+) -> None:
+    """Submit one SMTP transaction without library-level disconnect retries.
+
+    The ``emails`` SMTP backend retries ``SMTPServerDisconnected`` once. A
+    disconnect after DATA may mean the server accepted the message, so that
+    retry can send a payslip twice. Use smtplib directly and submit DATA once;
+    the caller records any ambiguous result as ``uncertain`` for reconciliation.
+    """
+    message.set_mail_to(recipient)
+    smtp_type = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+    smtp = smtp_type(host, port, timeout=10)
+    try:
+        if use_tls:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+        if username:
+            smtp.login(username, password or "")
+        refused = smtp.sendmail(
+            sender, recipient, message.as_bytes()
+        )
+        if refused:
+            raise RuntimeError("smtp_recipient_rejected")
+    finally:
+        try:
+            smtp.quit()
+        except Exception:
+            # A failure during QUIT happens after sendmail has either returned
+            # SMTP acceptance or raised an ambiguous DATA outcome. Preserve
+            # that result instead of converting a confirmed send into a retry.
+            smtp.close()
+
+
 def _send_job(job_id: uuid.UUID) -> None:
+    smtp_host = settings.SMTP_HOST
+    sender = settings.EMAILS_FROM_EMAIL
     with Session(engine) as session:
         job = session.exec(
             select(PayrollDeliveryOutbox)
@@ -174,7 +221,7 @@ def _send_job(job_id: uuid.UUID) -> None:
         ).first()
         if job is None:
             return
-        if not settings.emails_enabled or not job.recipient_snapshot:
+        if not settings.emails_enabled or not smtp_host or not sender or not job.recipient_snapshot:
             job.status = "blocked_email"
             job.last_error_code = (
                 "email_transport_not_configured"
@@ -209,21 +256,18 @@ def _send_job(job_id: uuid.UUID) -> None:
             }
         ],
     )
-    smtp: dict[str, object] = {"host": settings.SMTP_HOST, "port": settings.SMTP_PORT}
-    if settings.SMTP_TLS:
-        smtp["tls"] = True
-    elif settings.SMTP_SSL:
-        smtp["ssl"] = True
-    if settings.SMTP_USER:
-        smtp["user"] = settings.SMTP_USER
-    if settings.SMTP_PASSWORD:
-        smtp["password"] = settings.SMTP_PASSWORD
     try:
-        response = message.send(to=recipient, smtp=smtp)
-        # emails.Message.send delegates to smtplib.sendmail: a non-empty
-        # refusal mapping means the SMTP server rejected at least one address.
-        if isinstance(response, dict) and response:
-            raise RuntimeError("smtp_recipient_rejected")
+        _send_smtp_once(
+            message=message,
+            recipient=recipient,
+            sender=sender,
+            host=smtp_host,
+            port=settings.SMTP_PORT,
+            use_tls=settings.SMTP_TLS,
+            use_ssl=settings.SMTP_SSL,
+            username=settings.SMTP_USER,
+            password=settings.SMTP_PASSWORD,
+        )
     except (ConnectionRefusedError, socket.gaierror) as exc:
         # These errors happen before SMTP can accept a message. Retry with
         # exponential backoff, bounded to five attempts.

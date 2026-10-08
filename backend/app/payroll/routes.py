@@ -1045,6 +1045,12 @@ def _philhealth_monthly_basic_salary_basis(
         contribution_month.year, contribution_month.month
     )[1]
     month_end = contribution_month.replace(day=days_in_month)
+    employee = session.get(EmployeeRecords, employee_id)
+    separation_date = employee.date_separated if employee else None
+    if separation_date is not None and separation_date < contribution_month:
+        raise StatutoryScheduleUnavailable(
+            "The employee's separation date precedes the contribution month"
+        )
     assignments = session.exec(
         select(EmployeeShiftAssignment).where(
             EmployeeShiftAssignment.employee_id == employee_id,
@@ -1085,38 +1091,51 @@ def _philhealth_monthly_basic_salary_basis(
             date,
             EmployeeSalary,
             PayrollPolicyVersion,
+            Decimal,
             EmployeeShiftAssignment | None,
         ]
     ] = []
     cursor = contribution_month
     while cursor <= month_end:
-        salary_rows = [row for row in effective_salaries if row.effective_date <= cursor]
+        effective_cursor = (
+            min(cursor, separation_date)
+            if separation_date is not None
+            else cursor
+        )
+        salary_rows = [
+            row for row in effective_salaries if row.effective_date <= effective_cursor
+        ]
         policy_rows = [
             row for row in policies
             if row.confirmed
-            and row.effective_from <= cursor
-            and (row.effective_to is None or row.effective_to >= cursor)
+            and row.effective_from <= effective_cursor
+            and (row.effective_to is None or row.effective_to >= effective_cursor)
         ]
         if not salary_rows:
             raise StatutoryScheduleUnavailable(
-                f"An effective salary is required on {cursor.isoformat()}"
+                f"An effective salary is required on {effective_cursor.isoformat()}"
             )
         if len(policy_rows) != 1:
             raise StatutoryScheduleUnavailable(
-                f"Exactly one confirmed payroll policy is required on {cursor.isoformat()} for PhilHealth conversion"
+                f"Exactly one confirmed payroll policy is required on {effective_cursor.isoformat()} for PhilHealth conversion"
             )
         salary, policy = salary_rows[-1], policy_rows[0]
-        divisor = Decimal(str(policy.policy.get("monthly_divisor", "0")))
+        try:
+            divisor = Decimal(str(policy.policy.get("monthly_divisor", "0")))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise StatutoryScheduleUnavailable(
+                f"A positive monthly divisor is required on {effective_cursor.isoformat()} for PhilHealth conversion"
+            ) from exc
         if divisor <= 0:
             raise StatutoryScheduleUnavailable(
-                f"A positive monthly divisor is required on {cursor.isoformat()} for PhilHealth conversion"
+                f"A positive monthly divisor is required on {effective_cursor.isoformat()} for PhilHealth conversion"
             )
         pay_type = str(getattr(salary.pay_type, "value", salary.pay_type))
         assignment = next(
             (
                 row for row in assignments
-                if row.effective_from <= cursor
-                and (row.effective_to is None or row.effective_to >= cursor)
+                if row.effective_from <= effective_cursor
+                and (row.effective_to is None or row.effective_to >= effective_cursor)
             ),
             None,
         ) if pay_type in {"daily", "hourly"} else None
@@ -1129,18 +1148,27 @@ def _philhealth_monthly_basic_salary_basis(
         segment_end = cursor
         while segment_end < month_end:
             next_date = segment_end + timedelta(days=1)
-            next_salary = [row for row in effective_salaries if row.effective_date <= next_date]
+            next_effective_date = (
+                min(next_date, separation_date)
+                if separation_date is not None
+                else next_date
+            )
+            next_salary = [
+                row
+                for row in effective_salaries
+                if row.effective_date <= next_effective_date
+            ]
             next_policy = [
                 row for row in policies
                 if row.confirmed
-                and row.effective_from <= next_date
-                and (row.effective_to is None or row.effective_to >= next_date)
+                and row.effective_from <= next_effective_date
+                and (row.effective_to is None or row.effective_to >= next_effective_date)
             ]
             next_assignment = next(
                 (
                     row for row in assignments
-                    if row.effective_from <= next_date
-                    and (row.effective_to is None or row.effective_to >= next_date)
+                    if row.effective_from <= next_effective_date
+                    and (row.effective_to is None or row.effective_to >= next_effective_date)
                 ),
                 None,
             ) if pay_type in {"daily", "hourly"} else None
@@ -1160,11 +1188,11 @@ def _philhealth_monthly_basic_salary_basis(
             ):
                 break
             segment_end = next_date
-        segments.append((cursor, segment_end, salary, policy, assignment))
+        segments.append((cursor, segment_end, salary, policy, divisor, assignment))
         cursor = segment_end + timedelta(days=1)
 
     monthly_weighted = Decimal("0")
-    for segment_start, segment_end, salary, policy, assignment in segments:
+    for segment_start, segment_end, salary, _policy, divisor, assignment in segments:
         segment_days = (segment_end - segment_start).days + 1
         pay_type = str(getattr(salary.pay_type, "value", salary.pay_type))
         if pay_type == "monthly":
@@ -1194,7 +1222,7 @@ def _philhealth_monthly_basic_salary_basis(
             daily_equivalent = salary.basic_rate
             if pay_type == "hourly":
                 daily_equivalent = salary.basic_rate * average_minutes / Decimal(60)
-            equivalent = daily_equivalent * Decimal(str(policy.policy["monthly_divisor"]))
+            equivalent = daily_equivalent * divisor
         else:
             raise StatutoryScheduleUnavailable(
                 f"Unsupported salary basis {pay_type!r} for PhilHealth monthly conversion"

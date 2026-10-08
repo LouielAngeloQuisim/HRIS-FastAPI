@@ -536,7 +536,7 @@ def test_previous_employer_uses_verified_cumulative_average_inputs(
         first_name="QA",
         last_name="Cumulative Tax",
         birthdate=date(1990, 1, 1),
-        date_hired=date(2026, 10, 1),
+        date_hired=date(2025, 11, 1),
     )
     group = PayrollPayGroup(
         code=f"CA-{uuid.uuid4().hex[:8]}",
@@ -561,24 +561,24 @@ def test_previous_employer_uses_verified_cumulative_average_inputs(
             EmployeeSalary(
                 employee_id=employee.id,
                 basic_rate="35000.00",
-                effective_date=date(2026, 10, 1),
+                effective_date=date(2025, 11, 1),
                 pay_type=PayType.MONTHLY,
             ),
             EmployeePayGroupAssignment(
                 employee_id=employee.id,
                 pay_group_id=group.id,
-                effective_from=date(2026, 10, 1),
+                effective_from=date(2025, 11, 1),
             ),
             EmployeeShiftAssignment(
                 employee_id=employee.id,
                 shift_id=shift.id,
-                effective_from=date(2026, 10, 1),
+                effective_from=date(2025, 11, 1),
             ),
             EmployeeTaxYearDeclaration(
                 employee_id=employee.id,
-                tax_year=2026,
+                tax_year=2025,
                 tax_classification="ordinary",
-                opening_as_of=date(2026, 9, 30),
+                opening_as_of=date(2025, 10, 31),
                 taxable_compensation_ytd="180000.00",
                 tax_withheld_ytd="11000.40",
                 opening_pay_period_count=6,
@@ -589,8 +589,8 @@ def test_previous_employer_uses_verified_cumulative_average_inputs(
             ),
             PayrollPolicyVersion(
                 version=930_000 + int(uuid.uuid4().hex[:6], 16),
-                effective_from=date(2026, 10, 1),
-                effective_to=date(2026, 10, 15),
+                effective_from=date(2025, 11, 1),
+                effective_to=date(2025, 11, 15),
                 policy={
                     "timezone": "Asia/Manila",
                     "monthly_divisor": "22",
@@ -618,14 +618,14 @@ def test_previous_employer_uses_verified_cumulative_average_inputs(
         ]
     )
     for day in range(1, 16):
-        work_date = date(2026, 10, day)
+        work_date = date(2025, 11, day)
         if work_date.weekday() < 5:
             db.add(
                 DailyTimeRecord(
                     employee_id=employee.id,
                     shift_id=shift.id,
-                    login_date=datetime(2026, 10, day, tzinfo=timezone.utc),
-                    logout_date=datetime(2026, 10, day, tzinfo=timezone.utc)
+                    login_date=datetime(2025, 11, day, tzinfo=timezone.utc),
+                    logout_date=datetime(2025, 11, day, tzinfo=timezone.utc)
                     + timedelta(hours=9),
                     work_date=work_date,
                     rendered_minutes=480,
@@ -640,8 +640,8 @@ def test_previous_employer_uses_verified_cumulative_average_inputs(
         f"{API}/runs/prepare-attendance-draft",
         json={
             "pay_group_id": str(group.id),
-            "date_from": "2026-10-01",
-            "date_to": "2026-10-15",
+            "date_from": "2025-11-01",
+            "date_to": "2025-11-15",
         },
         headers=superuser_token_headers,
     )

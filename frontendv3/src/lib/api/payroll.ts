@@ -42,6 +42,8 @@ export interface EmployeeTaxYearDeclaration {
   is_verified: boolean
   verified_by: string | null
   verified_at: string | null
+  created_at: string | null
+  updated_at: string | null
 }
 
 export type EmployeeTaxYearDeclarationInput = Pick<

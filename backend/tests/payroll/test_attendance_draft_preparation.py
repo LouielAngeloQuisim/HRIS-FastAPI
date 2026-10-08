@@ -1007,6 +1007,25 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     db.commit()
     assert _payroll_entry_inputs_are_current(db, payroll_entry)
 
+    policy_revision = payroll_entry.input_snapshot["policy_versions"][0]
+    payroll_policy = db.get(
+        PayrollPolicyVersion, uuid.UUID(policy_revision["id"])
+    )
+    assert payroll_policy is not None
+    original_policy = dict(payroll_policy.policy)
+    changed_policy = dict(original_policy)
+    changed_policy["monthly_divisor"] = str(
+        Decimal(str(original_policy["monthly_divisor"])) + Decimal("1")
+    )
+    payroll_policy.policy = changed_policy
+    db.add(payroll_policy)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_policy.policy = original_policy
+    db.add(payroll_policy)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
     # Name, code and email are frozen inputs to the reviewed payslip/outbox
     # recipient, so an identity change requires renewed review.
     original_email = payroll_employee.email

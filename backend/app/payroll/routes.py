@@ -1369,18 +1369,31 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
                 != reference["updated_at"]
             ):
                 return False
-        policy_versions = set(
-            session.exec(
-                select(PayrollPolicyVersion.id).where(
-                    PayrollPolicyVersion.effective_from <= period_to,
-                    (col(PayrollPolicyVersion.effective_to).is_(None))
-                    | (col(PayrollPolicyVersion.effective_to) >= period_from),
-                )
-            ).all()
-        )
-        if policy_versions != {
-            uuid.UUID(str(row["id"])) for row in snapshot["policy_versions"]
-        }:
+        policy_rows = session.exec(
+            select(PayrollPolicyVersion).where(
+                PayrollPolicyVersion.effective_from <= period_to,
+                (col(PayrollPolicyVersion.effective_to).is_(None))
+                | (col(PayrollPolicyVersion.effective_to) >= period_from),
+            )
+        ).all()
+        current_policy_revisions = [
+            {
+                "id": str(row.id),
+                "version": row.version,
+                "effective_from": row.effective_from.isoformat(),
+                "effective_to": row.effective_to.isoformat()
+                if row.effective_to
+                else None,
+                "policy": row.policy,
+                "confirmed": row.confirmed,
+                "confirmed_by": str(row.confirmed_by) if row.confirmed_by else None,
+                "confirmed_at": row.confirmed_at.isoformat()
+                if row.confirmed_at
+                else None,
+            }
+            for row in sorted(policy_rows, key=lambda item: str(item.id))
+        ]
+        if current_policy_revisions != snapshot["policy_versions"]:
             return False
         for reference in snapshot.get("attendance_revisions", []):
             dtr = session.get(DailyTimeRecord, uuid.UUID(str(reference["id"])))
@@ -4413,7 +4426,24 @@ def prepare_attendance_payroll_draft(
             "leave_revisions": leave_refs,
             "holiday_revisions": holiday_refs,
             "holiday_config_revisions": holiday_config_refs,
-            "policy_versions": [{"id": str(policy.id), "version": policy.version}],
+            "policy_versions": [
+                {
+                    "id": str(policy.id),
+                    "version": policy.version,
+                    "effective_from": policy.effective_from.isoformat(),
+                    "effective_to": policy.effective_to.isoformat()
+                    if policy.effective_to
+                    else None,
+                    "policy": policy.policy,
+                    "confirmed": policy.confirmed,
+                    "confirmed_by": str(policy.confirmed_by)
+                    if policy.confirmed_by
+                    else None,
+                    "confirmed_at": policy.confirmed_at.isoformat()
+                    if policy.confirmed_at
+                    else None,
+                }
+            ],
             "employee_id": str(roster_entry.employee_id),
             "employee_record": (
                 {

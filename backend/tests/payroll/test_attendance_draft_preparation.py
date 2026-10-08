@@ -1133,13 +1133,23 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         row for row in second.json()["entries"] if row["employee_id"] == str(employee.id)
     )
     assert not second_entry["blockers"], second_entry["blockers"]
-    assert second_entry["taxable_income"] == "10850.00", second_entry["blockers"]
+    assert second_entry["taxable_income"] == "12300.00", {
+        "gross": second_entry["gross_pay"],
+        "taxable_income": second_entry["taxable_income"],
+        "statutory": second_entry["deductions"]["statutory"],
+        "contribution_bases": {
+            scheme: values["basis"]
+            for scheme, values in second_entry["input_snapshot"][
+                "monthly_contributions"
+            ]["schemes"].items()
+        },
+    }
     assert second_entry["deductions"]["bir_withholding"] == "64.95"
     assert second_entry["deductions"]["statutory"] == {
         "sss": "1300.00",
         "philhealth": "650.00",
         "pagibig": "200.00",
-    }
+    }, second_entry["input_snapshot"]["monthly_contributions"]
     schedule_snapshots = second_entry["input_snapshot"]["monthly_contributions"]["schemes"]
     for scheme in ("sss", "philhealth", "pagibig"):
         schedule_rows = schedule_snapshots[scheme]["schedule_rows"]

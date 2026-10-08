@@ -451,7 +451,9 @@ test('settles a finalized contribution through a later draft without changing th
   await page.getByRole('button', { name: 'Apply to draft' }).click()
   const correctionResponse = await correctionResponsePromise
   expect(correctionResponse.status(), await correctionResponse.text()).toBe(201)
-  await expect(decemberCorrectionRow.getByText('Correct documented November over-collection')).toBeVisible()
+  await expect(
+    page.getByText('Contribution correction added to the draft; review it again.')
+  ).toBeVisible()
 
   const correctedDecember = await page.request.get(`${apiUrl}/payroll/runs/${decemberDraft.id}`, {
     headers: await bearer(page),
@@ -464,6 +466,15 @@ test('settles a finalized contribution through a later draft without changing th
   expect(correctedDecemberEntry.deductions.pagibig_correction).toBe('-10.00')
   expect(correctedDecemberEntry.net_pay).toBe((Number(decemberEntry.net_pay) + 10).toFixed(2))
   expect(correctedDecemberEntry.taxable_income).toBe((Number(decemberEntry.taxable_income) + 10).toFixed(2))
+  expect(correctedDecemberEntry.input_snapshot.contribution_corrections).toEqual([
+    expect.objectContaining({
+      source_ledger_id: pagibigCollection.id,
+      scheme: 'pagibig',
+      employee_amount: '-10.00',
+      reason: 'Correct documented November over-collection',
+      source_reference: 'QA contribution reconciliation 2026-11',
+    }),
+  ])
   const novemberReadback = await page.request.get(`${apiUrl}/payroll/runs/${fixture.runId}`, {
     headers: await bearer(page),
   })

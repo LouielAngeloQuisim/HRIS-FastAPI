@@ -78,7 +78,12 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
       grace_minutes: 0,
       overtime_rule: { multiplier: '1.25' },
       premium_rules: { enabled: false },
-      allowance_tax_treatment: { default: 'taxable' },
+      allowance_tax_treatment: {
+        default: 'taxable',
+        fixed_recurring: 'taxable',
+        proration: 'calendar_days',
+        absence: 'not_deducted',
+      },
       rounding_mode: 'half_up',
       contribution_collection: { frequency: 'once_monthly', collection_period: 'last_period' },
       statutory_sources_reviewed: [

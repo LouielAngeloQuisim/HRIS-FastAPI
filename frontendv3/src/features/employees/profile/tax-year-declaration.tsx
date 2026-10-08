@@ -75,13 +75,56 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
   const [previousEmployer, setPreviousEmployer] = useState(
     initialData?.previous_employer_included ?? false
   )
+  const [employeeTin, setEmployeeTin] = useState(
+    initialData?.employee_tin ?? ''
+  )
+  const [employeeRdo, setEmployeeRdo] = useState(
+    initialData?.employee_rdo_code ?? ''
+  )
+  const [registeredAddress, setRegisteredAddress] = useState(
+    initialData?.employee_registered_address ?? ''
+  )
+  const [registeredPostal, setRegisteredPostal] = useState(
+    initialData?.employee_registered_postal_code ?? ''
+  )
+  const [localAddress, setLocalAddress] = useState(
+    initialData?.employee_local_home_address ?? ''
+  )
+  const [localPostal, setLocalPostal] = useState(
+    initialData?.employee_local_postal_code ?? ''
+  )
+  const [previousEmployerTin, setPreviousEmployerTin] = useState(
+    initialData?.previous_employer_tin ?? ''
+  )
+  const [previousEmployerName, setPreviousEmployerName] = useState(
+    initialData?.previous_employer_name ?? ''
+  )
+  const [previousEmployerAddress, setPreviousEmployerAddress] = useState(
+    initialData?.previous_employer_address ?? ''
+  )
+  const [previousEmployerPostal, setPreviousEmployerPostal] = useState(
+    initialData?.previous_employer_postal_code ?? ''
+  )
+  const [previousEmployerFrom, setPreviousEmployerFrom] = useState(
+    initialData?.previous_employer_period_from ?? ''
+  )
+  const [previousEmployerTo, setPreviousEmployerTo] = useState(
+    initialData?.previous_employer_period_to ?? ''
+  )
+  const [certificateIdentityVerified, setCertificateIdentityVerified] =
+    useState(initialData?.certificate_identity_verified ?? false)
+  const [certificateIdentitySource, setCertificateIdentitySource] = useState(
+    initialData?.certificate_identity_source ?? ''
+  )
   const [openingBenefitsExemptYtd, setOpeningBenefitsExemptYtd] = useState(
     initialData?.opening_benefits_exempt_ytd ?? '0.00'
   )
   const [openingBenefitsReconciled, setOpeningBenefitsReconciled] = useState(
     initialData?.opening_benefits_reconciled ?? false
   )
-  const [annualDeMinimis, setAnnualDeMinimis] = useState<Record<string, string>>({
+  const [annualDeMinimis, setAnnualDeMinimis] = useState<
+    Record<string, string>
+  >({
     uniform_clothing: '0.00',
     actual_medical_assistance: '0.00',
     achievement_award: '0.00',
@@ -89,7 +132,9 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
     cba_productivity_incentive: '0.00',
     ...initialData?.opening_de_minimis_annual_ytd,
   })
-  const [monthlyDeMinimis, setMonthlyDeMinimis] = useState<Record<string, string>>({
+  const [monthlyDeMinimis, setMonthlyDeMinimis] = useState<
+    Record<string, string>
+  >({
     medical_cash_dependents: '0.00',
     rice_subsidy: '0.00',
     laundry_allowance: '0.00',
@@ -102,7 +147,10 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
     initialData?.is_verified ?? false
   )
   const openingHistoryIncluded =
-    previousEmployer || Number(taxableYtd) > 0 || Number(withheldYtd) > 0 || Number(openingBenefitsExemptYtd) > 0
+    previousEmployer ||
+    Number(taxableYtd) > 0 ||
+    Number(withheldYtd) > 0 ||
+    Number(openingBenefitsExemptYtd) > 0
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -118,10 +166,40 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
         ? openingPayPeriodType
         : null,
       previous_employer_included: previousEmployer,
+      employee_tin: employeeTin.trim() || null,
+      employee_rdo_code: employeeRdo.trim() || null,
+      employee_registered_address: registeredAddress.trim() || null,
+      employee_registered_postal_code: registeredPostal.trim() || null,
+      employee_local_home_address: localAddress.trim() || null,
+      employee_local_postal_code: localPostal.trim() || null,
+      previous_employer_tin: previousEmployer
+        ? previousEmployerTin.trim() || null
+        : null,
+      previous_employer_name: previousEmployer
+        ? previousEmployerName.trim() || null
+        : null,
+      previous_employer_address: previousEmployer
+        ? previousEmployerAddress.trim() || null
+        : null,
+      previous_employer_postal_code: previousEmployer
+        ? previousEmployerPostal.trim() || null
+        : null,
+      previous_employer_period_from: previousEmployer
+        ? previousEmployerFrom || null
+        : null,
+      previous_employer_period_to: previousEmployer
+        ? previousEmployerTo || null
+        : null,
+      certificate_identity_verified: certificateIdentityVerified,
+      certificate_identity_source: certificateIdentitySource.trim() || null,
       opening_benefits_exempt_ytd: openingBenefitsExemptYtd,
       opening_benefits_reconciled: openingBenefitsReconciled,
-      opening_de_minimis_annual_ytd: openingBenefitsReconciled ? annualDeMinimis : {},
-      opening_de_minimis_monthly_ytd: openingBenefitsReconciled ? monthlyDeMinimis : {},
+      opening_de_minimis_annual_ytd: openingBenefitsReconciled
+        ? annualDeMinimis
+        : {},
+      opening_de_minimis_monthly_ytd: openingBenefitsReconciled
+        ? monthlyDeMinimis
+        : {},
       source_reference: sourceReference.trim() || null,
       is_verified: confirmReviewed,
     })
@@ -208,6 +286,164 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
               />
               Figures include a previous employer
             </label>
+            <fieldset className='space-y-3 rounded-md border p-3'>
+              <legend className='px-1 text-sm font-medium'>
+                Form 2316 employee identity
+              </legend>
+              <p className='text-xs text-muted-foreground'>
+                These are tax-year snapshot values. Verify them against the
+                employee's BIR record and proof of address; the employee profile
+                stores only one address/ZIP.
+              </p>
+              <div className='grid gap-3 sm:grid-cols-2'>
+                <label className='flex flex-col gap-1 text-sm'>
+                  Employee TIN
+                  <Input
+                    maxLength={32}
+                    value={employeeTin}
+                    onChange={(event) => setEmployeeTin(event.target.value)}
+                  />
+                </label>
+                <label className='flex flex-col gap-1 text-sm'>
+                  Employee RDO code
+                  <Input
+                    maxLength={8}
+                    value={employeeRdo}
+                    onChange={(event) => setEmployeeRdo(event.target.value)}
+                  />
+                </label>
+                <label className='flex flex-col gap-1 text-sm'>
+                  Registered address
+                  <Input
+                    maxLength={512}
+                    value={registeredAddress}
+                    onChange={(event) =>
+                      setRegisteredAddress(event.target.value)
+                    }
+                  />
+                </label>
+                <label className='flex flex-col gap-1 text-sm'>
+                  Registered address ZIP code
+                  <Input
+                    maxLength={10}
+                    value={registeredPostal}
+                    onChange={(event) =>
+                      setRegisteredPostal(event.target.value)
+                    }
+                  />
+                </label>
+                <label className='flex flex-col gap-1 text-sm'>
+                  Local home address
+                  <Input
+                    maxLength={512}
+                    value={localAddress}
+                    onChange={(event) => setLocalAddress(event.target.value)}
+                  />
+                </label>
+                <label className='flex flex-col gap-1 text-sm'>
+                  Local home address ZIP code
+                  <Input
+                    maxLength={10}
+                    value={localPostal}
+                    onChange={(event) => setLocalPostal(event.target.value)}
+                  />
+                </label>
+              </div>
+              {previousEmployer ? (
+                <div className='grid gap-3 border-t pt-3 sm:grid-cols-2'>
+                  <p className='text-xs text-muted-foreground sm:col-span-2'>
+                    Previous-employer certificate identity, as shown on the
+                    source Form 2316.
+                  </p>
+                  <label className='flex flex-col gap-1 text-sm'>
+                    Previous employer TIN
+                    <Input
+                      maxLength={32}
+                      value={previousEmployerTin}
+                      onChange={(event) =>
+                        setPreviousEmployerTin(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className='flex flex-col gap-1 text-sm'>
+                    Previous employer name
+                    <Input
+                      maxLength={255}
+                      value={previousEmployerName}
+                      onChange={(event) =>
+                        setPreviousEmployerName(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className='flex flex-col gap-1 text-sm sm:col-span-2'>
+                    Previous employer address
+                    <Input
+                      maxLength={512}
+                      value={previousEmployerAddress}
+                      onChange={(event) =>
+                        setPreviousEmployerAddress(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className='flex flex-col gap-1 text-sm'>
+                    Previous employer ZIP code
+                    <Input
+                      maxLength={10}
+                      value={previousEmployerPostal}
+                      onChange={(event) =>
+                        setPreviousEmployerPostal(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className='flex flex-col gap-1 text-sm'>
+                    Previous employer period from
+                    <Input
+                      type='date'
+                      value={previousEmployerFrom}
+                      onChange={(event) =>
+                        setPreviousEmployerFrom(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className='flex flex-col gap-1 text-sm'>
+                    Previous employer period to
+                    <Input
+                      type='date'
+                      value={previousEmployerTo}
+                      onChange={(event) =>
+                        setPreviousEmployerTo(event.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+              ) : null}
+              <label className='flex flex-col gap-1 text-sm'>
+                Identity supporting source
+                <Input
+                  maxLength={512}
+                  value={certificateIdentitySource}
+                  onChange={(event) =>
+                    setCertificateIdentitySource(event.target.value)
+                  }
+                />
+              </label>
+              <label className='flex items-start gap-2 text-sm'>
+                <input
+                  type='checkbox'
+                  checked={certificateIdentityVerified}
+                  onChange={(event) =>
+                    setCertificateIdentityVerified(event.target.checked)
+                  }
+                />
+                I checked the tax identity and address details against source
+                documents.
+              </label>
+              <p className='text-xs text-muted-foreground'>
+                This verifies identity fields only. It does not generate Form
+                2316 or certify compensation totals, signatures, or tax
+                treatment.
+              </p>
+            </fieldset>
             <label className='flex flex-col gap-1 text-sm'>
               Opening benefits already counted toward the ₱90,000 exemption
               <Input
@@ -217,43 +453,87 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
                 step='0.01'
                 required
                 value={openingBenefitsExemptYtd}
-                onChange={(event) => setOpeningBenefitsExemptYtd(event.target.value)}
+                onChange={(event) =>
+                  setOpeningBenefitsExemptYtd(event.target.value)
+                }
               />
               <span className='text-xs text-muted-foreground'>
-                Enter the exempt portion through the opening date, not the taxable excess. Use source payroll/tax records; later payments must be recorded below.
+                Enter the exempt portion through the opening date, not the
+                taxable excess. Use source payroll/tax records; later payments
+                must be recorded below.
               </span>
             </label>
             <label className='flex items-start gap-2 text-sm'>
               <input
                 type='checkbox'
                 checked={openingBenefitsReconciled}
-                onChange={(event) => setOpeningBenefitsReconciled(event.target.checked)}
+                onChange={(event) =>
+                  setOpeningBenefitsReconciled(event.target.checked)
+                }
               />
-              I reconciled 13th-month and other benefit payments through the opening date against source records.
+              I reconciled 13th-month and other benefit payments through the
+              opening date against source records.
             </label>
             {openingBenefitsReconciled ? (
               <fieldset className='space-y-3 rounded-md border p-3 sm:col-span-2'>
-                <legend className='px-1 text-sm font-medium'>De minimis amounts already paid through the opening date</legend>
-                <p className='text-xs text-muted-foreground'>Enter prior totals by category, including zero where none were paid. Monthly amounts apply to the month containing the opening date. These keep statutory category ceilings continuous across employers and payroll history.</p>
+                <legend className='px-1 text-sm font-medium'>
+                  De minimis amounts already paid through the opening date
+                </legend>
+                <p className='text-xs text-muted-foreground'>
+                  Enter prior totals by category, including zero where none were
+                  paid. Monthly amounts apply to the month containing the
+                  opening date. These keep statutory category ceilings
+                  continuous across employers and payroll history.
+                </p>
                 <div className='grid gap-3 sm:grid-cols-2'>
                   {Object.entries({
                     uniform_clothing: 'Uniform/clothing · annual',
-                    actual_medical_assistance: 'Actual medical assistance · annual',
+                    actual_medical_assistance:
+                      'Actual medical assistance · annual',
                     achievement_award: 'Achievement award · annual',
-                    christmas_anniversary_gift: 'Christmas/anniversary gift · annual',
-                    cba_productivity_incentive: 'CBA/productivity incentive · annual',
+                    christmas_anniversary_gift:
+                      'Christmas/anniversary gift · annual',
+                    cba_productivity_incentive:
+                      'CBA/productivity incentive · annual',
                   }).map(([key, label]) => (
-                    <label key={key} className='flex flex-col gap-1 text-sm'>{label}
-                      <Input type='number' min='0' step='0.01' required value={annualDeMinimis[key] ?? '0.00'} onChange={event => setAnnualDeMinimis(current => ({ ...current, [key]: event.target.value }))} />
+                    <label key={key} className='flex flex-col gap-1 text-sm'>
+                      {label}
+                      <Input
+                        type='number'
+                        min='0'
+                        step='0.01'
+                        required
+                        value={annualDeMinimis[key] ?? '0.00'}
+                        onChange={(event) =>
+                          setAnnualDeMinimis((current) => ({
+                            ...current,
+                            [key]: event.target.value,
+                          }))
+                        }
+                      />
                     </label>
                   ))}
                   {Object.entries({
-                    medical_cash_dependents: 'Medical cash to dependents · monthly',
+                    medical_cash_dependents:
+                      'Medical cash to dependents · monthly',
                     rice_subsidy: 'Rice subsidy · monthly',
                     laundry_allowance: 'Laundry allowance · monthly',
                   }).map(([key, label]) => (
-                    <label key={key} className='flex flex-col gap-1 text-sm'>{label}
-                      <Input type='number' min='0' step='0.01' required value={monthlyDeMinimis[key] ?? '0.00'} onChange={event => setMonthlyDeMinimis(current => ({ ...current, [key]: event.target.value }))} />
+                    <label key={key} className='flex flex-col gap-1 text-sm'>
+                      {label}
+                      <Input
+                        type='number'
+                        min='0'
+                        step='0.01'
+                        required
+                        value={monthlyDeMinimis[key] ?? '0.00'}
+                        onChange={(event) =>
+                          setMonthlyDeMinimis((current) => ({
+                            ...current,
+                            [key]: event.target.value,
+                          }))
+                        }
+                      />
                     </label>
                   ))}
                 </div>
@@ -328,7 +608,8 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
               openingBenefitsReconciled) &&
             !sourceReference.trim() ? (
               <p role='alert' className='text-sm text-destructive'>
-                Add the required supporting source before verifying these tax inputs.
+                Add the required supporting source before verifying these tax
+                inputs.
               </p>
             ) : null}
             <label className='flex items-start gap-2 text-sm'>
@@ -355,7 +636,8 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
               type='submit'
               disabled={
                 save.isPending ||
-                ((previousEmployer || Number(openingBenefitsExemptYtd) > 0) && !openingBenefitsReconciled) ||
+                ((previousEmployer || Number(openingBenefitsExemptYtd) > 0) &&
+                  !openingBenefitsReconciled) ||
                 ((openingHistoryIncluded ||
                   classification === 'minimum_wage_earner' ||
                   Number(openingBenefitsExemptYtd) > 0 ||

@@ -81,27 +81,45 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
       last_name: 'Review',
       birthdate: '1990-01-01',
     })
+    const taxYear = new Date().getFullYear()
+    const openingDate = new Date().toISOString().slice(0, 10)
     await page.goto(`/employees/${employee.id}`)
     await expect(page.getByText(/BIR tax-year inputs/)).toBeVisible()
-    await page.getByLabel('Opening balances are complete through').fill(`${new Date().getFullYear()}-09-30`)
+    await page.getByLabel('Opening balances are complete through').fill(openingDate)
     await page.getByLabel('Taxable compensation already paid this year').fill('125000.00')
     await page.getByLabel('Withholding tax already withheld this year').fill('4500.00')
     await page.getByLabel('Figures include a previous employer').check()
+    await page.getByLabel(/^Employee TIN$/i).fill('123-456-789-000')
+    await page.getByLabel(/Employee RDO code/i).fill('039')
+    await page.getByLabel(/^Registered address$/i).fill('1 Test Street')
+    await page.getByLabel(/Registered address ZIP code/i).fill('1100')
+    await page.getByLabel(/^Local home address$/i).fill('2 Home Street')
+    await page.getByLabel(/Local home address ZIP code/i).fill('1100')
+    await page.getByLabel(/Previous employer TIN/i).fill('987-654-321-000')
+    await page.getByLabel(/Previous employer name/i).fill('Prior E2E Employer Inc.')
+    await page.getByLabel(/Previous employer address$/i).fill('3 Business Street')
+    await page.getByLabel(/Previous employer ZIP code/i).fill('1000')
+    await page.getByLabel(/Previous employer period from/i).fill(`${taxYear}-01-01`)
+    await page.getByLabel(/Previous employer period to/i).fill(`${taxYear}-03-31`)
+    await page.getByLabel(/Identity supporting source/i).fill('Fictional E2E Form 2316 and identity documents')
+    await page.getByLabel(/I checked the tax identity and address details/i).check()
     await page.getByLabel(/I reconciled 13th-month and other benefit payments/).check()
     await page.getByLabel(/Opening payroll periods covered by these totals/).fill('6')
     await page.getByLabel(/Source \/ review note/).fill('Form 2316 verified for test employee')
     await page.getByLabel(/I reviewed these figures/).check()
 
-    const writing = waitForWrite(page, `payroll/employees/${employee.id}/tax-year-declarations`, 'PUT', String(new Date().getFullYear()))
+    const writing = waitForWrite(page, `payroll/employees/${employee.id}/tax-year-declarations`, 'PUT', String(taxYear))
     await page.getByRole('button', { name: 'Save tax-year inputs' }).click()
     const response = await assertWrite(await writing, 200)
     expect(response.is_verified).toBe(true)
     expect(response.taxable_compensation_ytd).toBe('125000.00')
     expect(response.tax_withheld_ytd).toBe('4500.00')
-    expect(response.opening_as_of).toBe(`${new Date().getFullYear()}-09-30`)
+    expect(response.opening_as_of).toBe(openingDate)
+    expect(response.certificate_identity_verified).toBe(true)
+    expect(response.previous_employer_name).toBe('Prior E2E Employer Inc.')
 
     const readback = await page.request.get(
-      `${apiUrl}/payroll/employees/${employee.id}/tax-year-declarations/${new Date().getFullYear()}`,
+      `${apiUrl}/payroll/employees/${employee.id}/tax-year-declarations/${taxYear}`,
       { headers: await authHeaders(page) },
     )
     expect(readback.status()).toBe(200)
@@ -109,6 +127,11 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
       id: response.id,
       opening_pay_period_count: 6,
       opening_pay_period_type: 'monthly',
+      employee_tin: '123-456-789-000',
+      employee_rdo_code: '039',
+      previous_employer_tin: '987-654-321-000',
+      previous_employer_period_from: `${taxYear}-01-01`,
+      certificate_identity_verified: true,
     })
     await page.reload()
     await expect(page.getByText(/Reviewed by payroll approver/)).toBeVisible()

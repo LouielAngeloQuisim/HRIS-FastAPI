@@ -46,6 +46,20 @@ def test_tax_year_declaration_upsert_and_get(
         "opening_pay_period_count": 12,
         "opening_pay_period_type": "monthly",
         "previous_employer_included": True,
+        "employee_tin": "123-456-789-000",
+        "employee_rdo_code": "039",
+        "employee_registered_address": "1 Test Street, Quezon City",
+        "employee_registered_postal_code": "1100",
+        "employee_local_home_address": "2 Home Street, Quezon City",
+        "employee_local_postal_code": "1100",
+        "previous_employer_tin": "987-654-321-000",
+        "previous_employer_name": "Prior Test Employer Inc.",
+        "previous_employer_address": "3 Business Street, Manila",
+        "previous_employer_postal_code": "1000",
+        "previous_employer_period_from": "2026-01-01",
+        "previous_employer_period_to": "2026-03-31",
+        "certificate_identity_verified": True,
+        "certificate_identity_source": "Reviewed previous-employer BIR Form 2316",
         "opening_benefits_exempt_ytd": "70000.00",
         "opening_benefits_reconciled": True,
         "opening_de_minimis_annual_ytd": {
@@ -76,6 +90,11 @@ def test_tax_year_declaration_upsert_and_get(
     assert body["opening_pay_period_count"] == 12
     assert body["opening_pay_period_type"] == "monthly"
     assert body["previous_employer_included"] is True
+    assert body["employee_rdo_code"] == "039"
+    assert body["previous_employer_name"] == "Prior Test Employer Inc."
+    assert body["certificate_identity_verified"] is True
+    assert body["certificate_identity_verified_by"]
+    assert body["certificate_identity_verified_at"]
     assert body["opening_benefits_exempt_ytd"] == "70000.00"
     assert body["opening_benefits_reconciled"] is True
     assert body["is_verified"] is True
@@ -92,6 +111,101 @@ def test_tax_year_declaration_upsert_and_get(
     assert updated.json()["taxable_compensation_ytd"] == "140000.00"
     assert client.get(url, headers=superuser_token_headers).json()["id"] == body["id"]
     assert db.get(EmployeeTaxYearDeclaration, uuid.UUID(body["id"])) is not None
+
+
+def test_certificate_identity_cannot_be_verified_with_missing_required_fields(
+    client: TestClient,
+    employee_record: EmployeeRecords,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    response = client.put(
+        f"{API}/employees/{employee_record.id}/tax-year-declarations/2026",
+        json={
+            "opening_as_of": "2026-06-30",
+            "certificate_identity_verified": True,
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 422
+    assert "Certificate identity verification requires" in response.text
+
+
+def test_previous_employer_period_must_belong_to_declared_tax_year(
+    client: TestClient,
+    employee_record: EmployeeRecords,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    response = client.put(
+        f"{API}/employees/{employee_record.id}/tax-year-declarations/2026",
+        json={
+            "opening_as_of": "2026-06-30",
+            "opening_pay_period_count": 6,
+            "opening_pay_period_type": "monthly",
+            "previous_employer_included": True,
+            "opening_benefits_reconciled": True,
+            "opening_de_minimis_annual_ytd": {
+                "uniform_clothing": "0.00",
+                "actual_medical_assistance": "0.00",
+                "achievement_award": "0.00",
+                "christmas_anniversary_gift": "0.00",
+                "cba_productivity_incentive": "0.00",
+            },
+            "opening_de_minimis_monthly_ytd": {
+                "medical_cash_dependents": "0.00",
+                "rice_subsidy": "0.00",
+                "laundry_allowance": "0.00",
+            },
+            "source_reference": "Reviewed source form",
+            "previous_employer_tin": "987-654-321-000",
+            "previous_employer_name": "Prior Test Employer Inc.",
+            "previous_employer_address": "3 Business Street, Manila",
+            "previous_employer_postal_code": "1000",
+            "previous_employer_period_from": "2025-12-01",
+            "previous_employer_period_to": "2026-03-31",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 422
+    assert "within the declared tax year" in response.text
+
+
+def test_previous_employer_period_cannot_exceed_opening_balance_cutoff(
+    client: TestClient,
+    employee_record: EmployeeRecords,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    response = client.put(
+        f"{API}/employees/{employee_record.id}/tax-year-declarations/2026",
+        json={
+            "opening_as_of": "2026-06-30",
+            "opening_pay_period_count": 6,
+            "opening_pay_period_type": "monthly",
+            "previous_employer_included": True,
+            "opening_benefits_reconciled": True,
+            "opening_de_minimis_annual_ytd": {
+                "uniform_clothing": "0.00",
+                "actual_medical_assistance": "0.00",
+                "achievement_award": "0.00",
+                "christmas_anniversary_gift": "0.00",
+                "cba_productivity_incentive": "0.00",
+            },
+            "opening_de_minimis_monthly_ytd": {
+                "medical_cash_dependents": "0.00",
+                "rice_subsidy": "0.00",
+                "laundry_allowance": "0.00",
+            },
+            "source_reference": "Reviewed source form",
+            "previous_employer_tin": "987-654-321-000",
+            "previous_employer_name": "Prior Test Employer Inc.",
+            "previous_employer_address": "3 Business Street, Manila",
+            "previous_employer_postal_code": "1000",
+            "previous_employer_period_from": "2026-01-01",
+            "previous_employer_period_to": "2026-07-31",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 422
+    assert "cannot extend beyond the opening balance cutoff" in response.text
 
 
 def test_tax_year_benefit_ledger_is_auditable_and_supports_one_full_reversal(

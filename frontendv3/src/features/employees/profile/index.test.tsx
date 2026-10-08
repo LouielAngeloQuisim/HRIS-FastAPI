@@ -61,21 +61,23 @@ type TaxBenefitMock = {
   created_at: string | null
 }
 
-const { saveTaxInputs, saveBenefit, salaryQuery, benefitsQuery } = vi.hoisted(() => ({
-  saveTaxInputs: vi.fn(),
-  saveBenefit: vi.fn(),
-  salaryQuery: vi.fn(() => ({
-    data: { data: [], count: 0 },
-    isPending: false,
-    isError: false,
-  })),
-  benefitsQuery: vi.fn(() => ({
-    data: [] as TaxBenefitMock[],
-    isPending: false,
-    isError: false,
-    isSuccess: true,
-  })),
-}))
+const { saveTaxInputs, saveBenefit, salaryQuery, benefitsQuery } = vi.hoisted(
+  () => ({
+    saveTaxInputs: vi.fn(),
+    saveBenefit: vi.fn(),
+    salaryQuery: vi.fn(() => ({
+      data: { data: [], count: 0 },
+      isPending: false,
+      isError: false,
+    })),
+    benefitsQuery: vi.fn(() => ({
+      data: [] as TaxBenefitMock[],
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+    })),
+  })
+)
 
 vi.mock('@/lib/api/employees', () => ({
   useEmployee: vi.fn(),
@@ -208,8 +210,65 @@ describe('EmployeeProfile', () => {
       screen.getByLabelText(/Source \/ review note/i),
       'Form 2316 reviewed'
     )
+    await userEvent.fill(
+      screen.getByLabelText(/^Employee TIN$/i),
+      '123-456-789-000'
+    )
+    await userEvent.fill(screen.getByLabelText(/Employee RDO code/i), '039')
+    await userEvent.fill(
+      screen.getByLabelText(/^Registered address$/i),
+      '1 Test Street'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Registered address ZIP code/i),
+      '1100'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/^Local home address$/i),
+      '2 Home Street'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Local home address ZIP code/i),
+      '1100'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Identity supporting source/i),
+      'Employee tax record and proof of address reviewed'
+    )
     await userEvent.click(
-      screen.getByLabelText(/I reconciled 13th-month and other benefit payments/i)
+      screen.getByLabelText(/Figures include a previous employer/i)
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Previous employer TIN/i),
+      '987-654-321-000'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Previous employer name/i),
+      'Prior Test Employer Inc.'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Previous employer address$/i),
+      '3 Business Street'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Previous employer ZIP code/i),
+      '1000'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Previous employer period from/i),
+      '2026-01-01'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(/Previous employer period to/i),
+      '2026-03-31'
+    )
+    await userEvent.click(
+      screen.getByLabelText(/I checked the tax identity and address details/i)
+    )
+    await userEvent.click(
+      screen.getByLabelText(
+        /I reconciled 13th-month and other benefit payments/i
+      )
     )
     await userEvent.click(screen.getByLabelText(/I reviewed these figures/i))
     await userEvent.click(
@@ -224,7 +283,22 @@ describe('EmployeeProfile', () => {
         tax_withheld_ytd: '4500.00',
         opening_pay_period_count: 6,
         opening_pay_period_type: 'monthly',
-        previous_employer_included: false,
+        previous_employer_included: true,
+        employee_tin: '123-456-789-000',
+        employee_rdo_code: '039',
+        employee_registered_address: '1 Test Street',
+        employee_registered_postal_code: '1100',
+        employee_local_home_address: '2 Home Street',
+        employee_local_postal_code: '1100',
+        previous_employer_tin: '987-654-321-000',
+        previous_employer_name: 'Prior Test Employer Inc.',
+        previous_employer_address: '3 Business Street',
+        previous_employer_postal_code: '1000',
+        previous_employer_period_from: '2026-01-01',
+        previous_employer_period_to: '2026-03-31',
+        certificate_identity_verified: true,
+        certificate_identity_source:
+          'Employee tax record and proof of address reviewed',
         opening_benefits_exempt_ytd: '0.00',
         opening_benefits_reconciled: true,
         opening_de_minimis_annual_ytd: {
@@ -254,8 +328,13 @@ describe('EmployeeProfile', () => {
     const screen = await render(<EmployeeProfile />)
     await userEvent.fill(screen.getByLabelText('Paid date'), '2026-12-15')
     await userEvent.fill(screen.getByLabelText('Gross amount paid'), '30000.00')
-    await userEvent.fill(screen.getByLabelText('Payment source reference'), 'Voucher PV-26-12')
-    await userEvent.click(screen.getByRole('button', { name: 'Record paid benefit' }))
+    await userEvent.fill(
+      screen.getByLabelText('Payment source reference'),
+      'Voucher PV-26-12'
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Record paid benefit' })
+    )
     expect(saveBenefit).toHaveBeenCalledWith(
       expect.objectContaining({
         paid_on: '2026-12-15',
@@ -277,14 +356,25 @@ describe('EmployeeProfile', () => {
       isError: false,
     } as ReturnType<typeof useEmployee>)
     const screen = await render(<EmployeeProfile />)
-    await userEvent.selectOptions(screen.getByLabelText('Benefit type'), 'de_minimis')
-    await userEvent.selectOptions(screen.getByLabelText('De minimis category'), 'actual_medical_assistance')
+    await userEvent.selectOptions(
+      screen.getByLabelText('Benefit type'),
+      'de_minimis'
+    )
+    await userEvent.selectOptions(
+      screen.getByLabelText('De minimis category'),
+      'actual_medical_assistance'
+    )
     await userEvent.fill(screen.getByLabelText('Paid date'), '2026-07-01')
     await userEvent.fill(screen.getByLabelText('Gross amount paid'), '12000.00')
-    await userEvent.fill(screen.getByLabelText('Payment source reference'), 'Voucher PV-26-071')
+    await userEvent.fill(
+      screen.getByLabelText('Payment source reference'),
+      'Voucher PV-26-071'
+    )
     const submit = screen.getByRole('button', { name: 'Record paid benefit' })
     expect(submit).toBeDisabled()
-    await userEvent.click(screen.getByLabelText('Actual medical expense documentation verified'))
+    await userEvent.click(
+      screen.getByLabelText('Actual medical expense documentation verified')
+    )
     expect(submit).toBeEnabled()
     await userEvent.click(submit)
     expect(saveBenefit).toHaveBeenCalledWith(
@@ -325,11 +415,21 @@ describe('EmployeeProfile', () => {
       isSuccess: true,
     })
     const screen = await render(<EmployeeProfile />)
-    await userEvent.click(screen.getByRole('button', { name: 'Reverse record' }))
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Reverse record' })
+    )
     await userEvent.fill(screen.getByLabelText('Paid date'), '2026-12-16')
-    await userEvent.fill(screen.getByLabelText('Payment source reference'), 'Correction CM-12-16')
-    await userEvent.fill(screen.getByLabelText('Reason for full reversal'), 'Duplicate payment entry')
-    await userEvent.click(screen.getByRole('button', { name: 'Record full reversal' }))
+    await userEvent.fill(
+      screen.getByLabelText('Payment source reference'),
+      'Correction CM-12-16'
+    )
+    await userEvent.fill(
+      screen.getByLabelText('Reason for full reversal'),
+      'Duplicate payment entry'
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Record full reversal' })
+    )
     expect(saveBenefit).toHaveBeenCalledWith(
       expect.objectContaining({
         paid_on: '2026-12-16',

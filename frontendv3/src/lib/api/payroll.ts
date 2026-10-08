@@ -38,6 +38,22 @@ export interface EmployeeTaxYearDeclaration {
     | 'monthly'
     | null
   previous_employer_included: boolean
+  employee_tin: string | null
+  employee_rdo_code: string | null
+  employee_registered_address: string | null
+  employee_registered_postal_code: string | null
+  employee_local_home_address: string | null
+  employee_local_postal_code: string | null
+  previous_employer_tin: string | null
+  previous_employer_name: string | null
+  previous_employer_address: string | null
+  previous_employer_postal_code: string | null
+  previous_employer_period_from: string | null
+  previous_employer_period_to: string | null
+  certificate_identity_verified: boolean
+  certificate_identity_source: string | null
+  certificate_identity_verified_by: string | null
+  certificate_identity_verified_at: string | null
   opening_benefits_exempt_ytd: string
   opening_benefits_reconciled: boolean
   opening_de_minimis_annual_ytd: Record<string, string>
@@ -59,6 +75,20 @@ export type EmployeeTaxYearDeclarationInput = Pick<
   | 'opening_pay_period_count'
   | 'opening_pay_period_type'
   | 'previous_employer_included'
+  | 'employee_tin'
+  | 'employee_rdo_code'
+  | 'employee_registered_address'
+  | 'employee_registered_postal_code'
+  | 'employee_local_home_address'
+  | 'employee_local_postal_code'
+  | 'previous_employer_tin'
+  | 'previous_employer_name'
+  | 'previous_employer_address'
+  | 'previous_employer_postal_code'
+  | 'previous_employer_period_from'
+  | 'previous_employer_period_to'
+  | 'certificate_identity_verified'
+  | 'certificate_identity_source'
   | 'opening_benefits_exempt_ytd'
   | 'opening_benefits_reconciled'
   | 'opening_de_minimis_annual_ytd'
@@ -116,29 +146,43 @@ export type EmployeeTaxBenefitInput = Pick<
   | 'correction_reason'
 >
 
-export function useEmployeeTaxYearBenefits(employeeId: string, taxYear: number) {
+export function useEmployeeTaxYearBenefits(
+  employeeId: string,
+  taxYear: number
+) {
   return useQuery({
     queryKey: ['payroll-tax-year-benefits', employeeId, taxYear],
     queryFn: async () =>
-      (await api.get<EmployeeTaxBenefit[]>(
-        `/payroll/employees/${employeeId}/tax-year-benefits/${taxYear}`,
-        { params: { offset: 0, limit: 100 } }
-      )).data,
+      (
+        await api.get<EmployeeTaxBenefit[]>(
+          `/payroll/employees/${employeeId}/tax-year-benefits/${taxYear}`,
+          { params: { offset: 0, limit: 100 } }
+        )
+      ).data,
     enabled: Boolean(employeeId && taxYear),
   })
 }
 
-export function useRecordEmployeeTaxYearBenefit(employeeId: string, taxYear: number) {
+export function useRecordEmployeeTaxYearBenefit(
+  employeeId: string,
+  taxYear: number
+) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (payload: EmployeeTaxBenefitInput) =>
-      api.post<EmployeeTaxBenefit>(
-        `/payroll/employees/${employeeId}/tax-year-benefits/${taxYear}`,
-        payload
-      ).then(response => response.data),
+      api
+        .post<EmployeeTaxBenefit>(
+          `/payroll/employees/${employeeId}/tax-year-benefits/${taxYear}`,
+          payload
+        )
+        .then((response) => response.data),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['payroll-tax-year-benefits', employeeId, taxYear] })
-      void qc.invalidateQueries({ queryKey: ['payroll-tax-year-declaration', employeeId, taxYear] })
+      void qc.invalidateQueries({
+        queryKey: ['payroll-tax-year-benefits', employeeId, taxYear],
+      })
+      void qc.invalidateQueries({
+        queryKey: ['payroll-tax-year-declaration', employeeId, taxYear],
+      })
     },
   })
 }
@@ -910,7 +954,9 @@ export function useBulkPayGroupAssignments() {
         )
         .then((r) => r.data),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['payroll-pay-group-assignments'] })
+      await qc.invalidateQueries({
+        queryKey: ['payroll-pay-group-assignments'],
+      })
       await qc.invalidateQueries({ queryKey: ['payroll-runs'] })
     },
   })

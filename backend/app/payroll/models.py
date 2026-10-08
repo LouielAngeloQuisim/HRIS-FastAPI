@@ -324,6 +324,27 @@ class EmployeeTaxYearDeclaration(SQLModel, table=True):
     opening_pay_period_count: int = Field(default=0, ge=0)
     opening_pay_period_type: str | None = Field(default=None, max_length=16)
     previous_employer_included: bool = Field(default=False)
+    # Tax-year-scoped identity snapshot used only by the statutory certificate workflow.
+    employee_tin: str | None = Field(default=None, max_length=32)
+    employee_rdo_code: str | None = Field(default=None, max_length=8)
+    employee_registered_address: str | None = Field(default=None, max_length=512)
+    employee_registered_postal_code: str | None = Field(default=None, max_length=10)
+    employee_local_home_address: str | None = Field(default=None, max_length=512)
+    employee_local_postal_code: str | None = Field(default=None, max_length=10)
+    previous_employer_tin: str | None = Field(default=None, max_length=32)
+    previous_employer_name: str | None = Field(default=None, max_length=255)
+    previous_employer_address: str | None = Field(default=None, max_length=512)
+    previous_employer_postal_code: str | None = Field(default=None, max_length=10)
+    previous_employer_period_from: date | None = None
+    previous_employer_period_to: date | None = None
+    certificate_identity_verified: bool = Field(default=False)
+    certificate_identity_source: str | None = Field(default=None, max_length=512)
+    certificate_identity_verified_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    certificate_identity_verified_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore
     opening_benefits_exempt_ytd: Decimal = Field(
         default=Decimal("0.00"), sa_column=Numeric(14, 2)  # type: ignore
     )

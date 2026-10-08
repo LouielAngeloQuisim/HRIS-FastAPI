@@ -249,6 +249,20 @@ class EmployeeTaxYearDeclarationUpdate(SQLModel):
     opening_pay_period_count: int = Field(default=0, ge=0, le=366)
     opening_pay_period_type: Literal["daily", "weekly", "semi_monthly", "monthly"] | None = None
     previous_employer_included: bool = False
+    employee_tin: str | None = Field(default=None, max_length=32)
+    employee_rdo_code: str | None = Field(default=None, max_length=8)
+    employee_registered_address: str | None = Field(default=None, max_length=512)
+    employee_registered_postal_code: str | None = Field(default=None, max_length=10)
+    employee_local_home_address: str | None = Field(default=None, max_length=512)
+    employee_local_postal_code: str | None = Field(default=None, max_length=10)
+    previous_employer_tin: str | None = Field(default=None, max_length=32)
+    previous_employer_name: str | None = Field(default=None, max_length=255)
+    previous_employer_address: str | None = Field(default=None, max_length=512)
+    previous_employer_postal_code: str | None = Field(default=None, max_length=10)
+    previous_employer_period_from: date | None = None
+    previous_employer_period_to: date | None = None
+    certificate_identity_verified: bool = False
+    certificate_identity_source: str | None = Field(default=None, max_length=512)
     opening_benefits_exempt_ytd: Decimal = Field(default=Decimal("0.00"), ge=0, le=90000, max_digits=14, decimal_places=2)
     opening_benefits_reconciled: bool = False
     opening_de_minimis_annual_ytd: dict[str, str] = Field(default_factory=dict)
@@ -258,6 +272,60 @@ class EmployeeTaxYearDeclarationUpdate(SQLModel):
 
     @model_validator(mode="after")
     def validate_opening_de_minimis(self) -> "EmployeeTaxYearDeclarationUpdate":
+        if self.previous_employer_period_from and self.previous_employer_period_to:
+            if self.previous_employer_period_from > self.previous_employer_period_to:
+                raise ValueError("previous-employer period start must not follow its end")
+        if self.previous_employer_included:
+            previous_identity = (
+                self.previous_employer_tin,
+                self.previous_employer_name,
+                self.previous_employer_address,
+                self.previous_employer_postal_code,
+                self.previous_employer_period_from,
+                self.previous_employer_period_to,
+            )
+            if any(previous_identity) and not all(previous_identity):
+                raise ValueError(
+                    "Previous-employer certificate identity requires TIN, name, address, postal code and covered dates"
+                )
+        elif any(
+            (
+                self.previous_employer_tin,
+                self.previous_employer_name,
+                self.previous_employer_address,
+                self.previous_employer_postal_code,
+                self.previous_employer_period_from,
+                self.previous_employer_period_to,
+            )
+        ):
+            raise ValueError("Previous-employer details require previous_employer_included")
+        if self.certificate_identity_verified:
+            required_identity = (
+                self.employee_tin,
+                self.employee_rdo_code,
+                self.employee_registered_address,
+                self.employee_registered_postal_code,
+                self.employee_local_home_address,
+                self.employee_local_postal_code,
+                self.certificate_identity_source,
+            )
+            if any(not (value.strip() if isinstance(value, str) else value) for value in required_identity):
+                raise ValueError(
+                    "Certificate identity verification requires employee TIN, RDO, registered/local addresses and postal codes, and a source note"
+                )
+            if self.previous_employer_included and not all(
+                (
+                    self.previous_employer_tin,
+                    self.previous_employer_name,
+                    self.previous_employer_address,
+                    self.previous_employer_postal_code,
+                    self.previous_employer_period_from,
+                    self.previous_employer_period_to,
+                )
+            ):
+                raise ValueError(
+                    "Certificate identity verification requires complete previous-employer details"
+                )
         annual_categories = {
             "uniform_clothing",
             "actual_medical_assistance",
@@ -301,6 +369,8 @@ class EmployeeTaxYearDeclarationPublic(EmployeeTaxYearDeclarationUpdate):
     tax_year: int
     verified_by: uuid.UUID | None = None
     verified_at: datetime | None = None
+    certificate_identity_verified_by: uuid.UUID | None = None
+    certificate_identity_verified_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

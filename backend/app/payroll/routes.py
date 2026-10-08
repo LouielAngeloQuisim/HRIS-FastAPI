@@ -6617,6 +6617,23 @@ def upsert_employee_tax_year_declaration(
             status_code=422,
             detail="opening_as_of must be a date in the declared tax year that is not in the future",
         )
+    for period_date in (
+        obj_in.previous_employer_period_from,
+        obj_in.previous_employer_period_to,
+    ):
+        if period_date is not None and period_date.year != tax_year:
+            raise HTTPException(
+                status_code=422,
+                detail="Previous-employer covered dates must be within the declared tax year.",
+            )
+    if (
+        obj_in.previous_employer_period_to is not None
+        and obj_in.previous_employer_period_to > obj_in.opening_as_of
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Previous-employer coverage cannot extend beyond the opening balance cutoff date.",
+        )
     opening_history_included = (
         obj_in.previous_employer_included
         or obj_in.taxable_compensation_ytd > 0
@@ -6682,11 +6699,22 @@ def upsert_employee_tax_year_declaration(
             status_code=409,
             detail="Tax-year opening inputs are locked after payroll finalization; use the reasoned tax correction workflow.",
         )
-    for key, value in obj_in.model_dump(exclude={"is_verified"}).items():
+    for key, value in obj_in.model_dump(
+        exclude={"is_verified", "certificate_identity_verified"}
+    ).items():
+        if isinstance(value, str):
+            value = value.strip() or None
         setattr(row, key, value)
     row.is_verified = obj_in.is_verified
     row.verified_by = current_user.id if obj_in.is_verified else None
     row.verified_at = now if obj_in.is_verified else None
+    row.certificate_identity_verified = obj_in.certificate_identity_verified
+    row.certificate_identity_verified_by = (
+        current_user.id if obj_in.certificate_identity_verified else None
+    )
+    row.certificate_identity_verified_at = (
+        now if obj_in.certificate_identity_verified else None
+    )
     row.updated_at = now
     session.add(row)
     session.commit()

@@ -158,18 +158,24 @@ test('fictional employee payroll is reviewed, separately finalized and frozen fo
   await expect(page.getByRole('heading', { name: 'Payroll review' })).toBeVisible()
   await page.getByRole('button', { name: 'Start employee review' }).click()
   for (const candidate of draft.entries) {
-    const entryCard = page.getByTestId(`payroll-entry-${candidate.id}`)
-    if (candidate.employee_id === employee.id) {
-      await entryCard.getByRole('button', { name: 'Mark reviewed' }).click()
-      await expect(entryCard.getByText('Review state: reviewed')).toBeVisible()
-    } else {
-      await entryCard.getByRole('textbox', { name: 'Exclusion reason' }).fill(
-        'No effective assignment to this QA pay group; explicitly exclude from this run',
-      )
-      await entryCard.getByRole('button', { name: 'Exclude with reason' }).click()
-      await expect(entryCard.getByText('Review state: excluded')).toBeVisible()
-    }
+    if (candidate.employee_id === employee.id) continue
+    const response = await page.request.post(
+      `${apiUrl}/payroll/runs/${draft.id}/entries/${candidate.id}/review`,
+      {
+        headers: await bearer(page),
+        data: {
+          action: 'excluded',
+          expected_input_fingerprint: candidate.input_fingerprint,
+          reason: 'No effective assignment to this QA pay group; explicitly excluded from isolated run',
+        },
+      },
+    )
+    expect(response.status(), `Disposition unrelated unassigned QA entry ${candidate.id}: ${await response.text()}`).toBe(200)
   }
+  await page.reload()
+  const targetCard = page.getByTestId(`payroll-entry-${preparedEntry.id}`)
+  await targetCard.getByRole('button', { name: 'Mark reviewed' }).click()
+  await expect(targetCard.getByText('Review state: reviewed')).toBeVisible()
 
   const finalizerEmail = `payroll-finalizer-${unique}@example.com`
   const role = await page.request.post(`${apiUrl}/rbac/roles`, {

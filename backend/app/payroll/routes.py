@@ -33,7 +33,7 @@ from app.common.dependencies import CurrentUser, SessionDep
 from app.common.schemas import Message
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords
-from app.leave.models import HolidayConfig, HolidayInstance, LeaveRequest
+from app.leave.models import HolidayConfig, HolidayInstance, LeavePolicy, LeaveRequest
 from app.payroll.annualized_tax import (
     calculate_annualized_compensation_tax,
     cumulative_average_withholding,
@@ -1352,6 +1352,31 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
         if leave_ids != {
             uuid.UUID(str(row["id"])) for row in snapshot["leave_revisions"]
         }:
+            return False
+        leave_policy_ids = {
+            uuid.UUID(str(reference["id"]))
+            for reference in snapshot.get("leave_policy_revisions", [])
+        }
+        current_leave_policies = (
+            session.exec(
+                select(LeavePolicy).where(col(LeavePolicy.id).in_(leave_policy_ids))
+            ).all()
+            if leave_policy_ids
+            else []
+        )
+        current_leave_policy_revisions = [
+            {
+                "id": str(row.id),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "is_paid": row.is_paid,
+                "is_active": row.is_active,
+                "is_deleted": row.is_deleted,
+            }
+            for row in sorted(current_leave_policies, key=lambda item: str(item.id))
+        ]
+        if current_leave_policy_revisions != snapshot.get(
+            "leave_policy_revisions", []
+        ):
             return False
         holiday_ids = set(
             session.exec(
@@ -3024,17 +3049,43 @@ def attendance_calculation_preview(
             col(LeaveRequest.is_deleted).is_(False),
             LeaveRequest.date_start <= date_to,
             LeaveRequest.date_end >= eligibility_start,
-            col(LeaveRequest.requested_hours).is_(None),
         )
     ).all()
+    leave_policy_ids = {
+        leave.policy_id for leave in leave_rows if leave.policy_id is not None
+    }
+    leave_policy_rows = (
+        session.exec(
+            select(LeavePolicy).where(col(LeavePolicy.id).in_(leave_policy_ids))
+        ).all()
+        if leave_policy_ids
+        else []
+    )
+    leave_policies_by_id = {row.id: row for row in leave_policy_rows}
+    approved_leave_days: set[tuple[uuid.UUID, date]] = set()
     paid_leave_days: set[tuple[uuid.UUID, date]] = set()
+    unclassified_leave_days: set[tuple[uuid.UUID, date]] = set()
+    partial_leave_days: set[tuple[uuid.UUID, date]] = set()
     for leave in leave_rows:
         if leave.employee_id is None:
             continue
         cursor = max(eligibility_start, leave.date_start)
         end = min(date_to, leave.date_end)
+        leave_policy = (
+            leave_policies_by_id.get(leave.policy_id)
+            if leave.policy_id is not None
+            else None
+        )
         while cursor <= end:
-            paid_leave_days.add((leave.employee_id, cursor))
+            key = (leave.employee_id, cursor)
+            if leave.requested_hours is not None:
+                partial_leave_days.add(key)
+            else:
+                approved_leave_days.add(key)
+                if leave_policy is None:
+                    unclassified_leave_days.add(key)
+                elif leave_policy.is_paid:
+                    paid_leave_days.add(key)
             cursor += timedelta(days=1)
     holiday_rows = session.exec(
         select(HolidayInstance, HolidayConfig)
@@ -3242,6 +3293,25 @@ def attendance_calculation_preview(
             ):
                 cursor += timedelta(days=1)
                 continue
+            leave_key = (employee_entry.employee_id, cursor)
+            if leave_key in partial_leave_days:
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="partial_leave_treatment_unavailable",
+                        message="Approved hourly leave requires an explicit partial-leave pay rule before payroll calculation.",
+                        work_date=cursor,
+                    )
+                )
+                break
+            if leave_key in unclassified_leave_days:
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="leave_policy_unavailable",
+                        message="Approved leave has no available leave policy, so paid versus unpaid treatment cannot be verified.",
+                        work_date=cursor,
+                    )
+                )
+                break
             effective_salary = next(
                 (
                     item
@@ -3314,6 +3384,7 @@ def attendance_calculation_preview(
             policy = day_policies[0]
             paid_leave_record = (employee_entry.employee_id, cursor) in paid_leave_days
             paid_leave = paid_leave_record and bool(policy.policy.get("paid_leave"))
+            approved_leave_record = (employee_entry.employee_id, cursor) in approved_leave_days
             holiday_kind_for_date = holiday_configs[0][0] if holiday_configs else None
             if len(holiday_configs) > 1 and not (
                 len(holiday_configs) == 2
@@ -3494,7 +3565,7 @@ def attendance_calculation_preview(
                 # scheduled-day fraction for an unscheduled date.
                 cursor += timedelta(days=1)
                 continue
-            resolved_no_punch_day = paid_leave_record or holiday
+            resolved_no_punch_day = approved_leave_record or holiday
             if dtr is None and not resolved_no_punch_day:
                 blockers.append(
                     PayrollPreflightBlocker(
@@ -4410,6 +4481,26 @@ def prepare_attendance_payroll_draft(
             }
             for row in leave_rows
         ]
+        leave_policy_ids = {
+            row.policy_id for row in leave_rows if row.policy_id is not None
+        }
+        leave_policy_rows = (
+            session.exec(
+                select(LeavePolicy).where(col(LeavePolicy.id).in_(leave_policy_ids))
+            ).all()
+            if leave_policy_ids
+            else []
+        )
+        leave_policy_refs = [
+            {
+                "id": str(row.id),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "is_paid": row.is_paid,
+                "is_active": row.is_active,
+                "is_deleted": row.is_deleted,
+            }
+            for row in sorted(leave_policy_rows, key=lambda item: str(item.id))
+        ]
         holiday_rows = session.exec(
             select(HolidayInstance).where(
                 HolidayInstance.observed_date >= obj_in.date_from,
@@ -4466,6 +4557,7 @@ def prepare_attendance_payroll_draft(
             "shift_revisions": shift_references,
             "pay_group_assignments": group_refs,
             "leave_revisions": leave_refs,
+            "leave_policy_revisions": leave_policy_refs,
             "holiday_revisions": holiday_refs,
             "holiday_config_revisions": holiday_config_refs,
             "policy_versions": [

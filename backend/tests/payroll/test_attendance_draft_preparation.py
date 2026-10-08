@@ -20,7 +20,7 @@ from app.audit.models import AuditLog
 from app.common.security import get_password_hash
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords, EmployeeStatus
-from app.leave.models import HolidayConfig, HolidayInstance
+from app.leave.models import HolidayConfig, HolidayInstance, LeavePolicy, LeaveRequest
 from app.payroll.models import (
     EmployeePayGroupAssignment,
     EmployeeSalary,
@@ -747,7 +747,7 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
             "monthly_salary_proration": "scheduled_workday_fraction",
             "daily_partial_work": "pro_rated",
             "monthly_partial_work": "deduct_after_grace",
-            "paid_leave": False,
+            "paid_leave": True,
             "paid_holidays": False,
             "break_minutes": 60,
             "grace_minutes": 10,
@@ -767,6 +767,23 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         },
         confirmed=True,
     )
+    leave_policy = LeavePolicy(
+        code=f"UNPAID-{uuid.uuid4().hex[:8]}",
+        name="Unpaid QA leave",
+        is_paid=False,
+    )
+    db.add(leave_policy)
+    db.flush()
+    leave_request = LeaveRequest(
+        employee_id=employee.id,
+        policy_id=leave_policy.id,
+        date_start=absent_date,
+        date_end=absent_date,
+        leave_year=2026,
+        total_days_requested=Decimal("1.00"),
+        status="approved",
+    )
+    db.add(leave_request)
     db.add(policy)
     db.commit()
 
@@ -798,6 +815,73 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         for blocker in entry["blockers"]
     )
     assert entry["input_fingerprint"]
+    assert entry["input_snapshot"]["leave_policy_revisions"] == [
+        {
+            "id": str(leave_policy.id),
+            "updated_at": leave_policy.updated_at.isoformat()
+            if leave_policy.updated_at
+            else None,
+            "is_paid": False,
+            "is_active": True,
+            "is_deleted": False,
+        }
+    ]
+    frozen_entry = db.get(PayrollEntry, uuid.UUID(entry["id"]))
+    assert frozen_entry is not None
+    leave_policy.is_paid = True
+    db.add(leave_policy)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, frozen_entry)
+    leave_policy.is_paid = False
+    db.add(leave_policy)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, frozen_entry)
+
+    preview_params = {
+        "pay_group_id": str(group.id),
+        "date_from": "2026-10-01",
+        "date_to": "2026-10-15",
+    }
+    leave_request.requested_hours = Decimal("4.00")
+    db.add(leave_request)
+    db.commit()
+    hourly_leave_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params=preview_params,
+        headers=superuser_token_headers,
+    )
+    assert hourly_leave_preview.status_code == 200, hourly_leave_preview.text
+    hourly_leave_entry = next(
+        row
+        for row in hourly_leave_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert any(
+        blocker["code"] == "partial_leave_treatment_unavailable"
+        for blocker in hourly_leave_entry["blockers"]
+    )
+    leave_request.requested_hours = None
+    leave_request.policy_id = None
+    db.add(leave_request)
+    db.commit()
+    unclassified_leave_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params=preview_params,
+        headers=superuser_token_headers,
+    )
+    assert unclassified_leave_preview.status_code == 200, unclassified_leave_preview.text
+    unclassified_leave_entry = next(
+        row
+        for row in unclassified_leave_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert any(
+        blocker["code"] == "leave_policy_unavailable"
+        for blocker in unclassified_leave_entry["blockers"]
+    )
+    leave_request.policy_id = leave_policy.id
+    db.add(leave_request)
+    db.commit()
 
     replay = client.post(
         f"{API}/runs/prepare-attendance-draft",

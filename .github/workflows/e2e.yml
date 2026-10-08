@@ -77,7 +77,7 @@ jobs:
         working-directory: frontendv3
       - run: pnpm exec playwright test
         working-directory: frontendv3
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: playwright-failure-report

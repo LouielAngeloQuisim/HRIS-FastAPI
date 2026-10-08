@@ -33,7 +33,7 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
     last_name: unique,
     birthdate: '1990-01-01',
     date_hired: '2026-01-01',
-    email: `qa-finalized-${unique}@example.test`,
+    email: null,
   })
 
   const group = await createPayrollResource(page, 'pay-groups', {
@@ -288,8 +288,46 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   expect(delivery.status(), await delivery.text()).toBe(200)
   const jobs = await delivery.json()
   expect(jobs).toEqual(expect.arrayContaining([
-    expect.objectContaining({ payroll_entry_id: preparedEntry.id, status: 'scheduled' }),
+    expect.objectContaining({ payroll_entry_id: preparedEntry.id, status: 'blocked_email' }),
   ]))
+
+  // Recover a missing recipient through the payroll UI. Delivery remains
+  // queued because the isolated test environment keeps the mail worker off.
+  const deliveryJob = jobs.find((job: { payroll_entry_id: string }) =>
+    job.payroll_entry_id === preparedEntry.id,
+  )
+  expect(deliveryJob).toBeTruthy()
+  await logout()
+  await loginAsAdmin()
+  await page.goto(`/payroll-runs/${draft.id}`)
+  const deliveryCard = page.getByTestId(`delivery-${deliveryJob.id}`)
+  await expect(deliveryCard).toContainText('Status: blocked email')
+  const correctedEmail = `qa-finalized-${unique}@example.com`
+  await deliveryCard.getByLabel('Correct recipient email').fill(correctedEmail)
+  await deliveryCard.getByLabel('Action reason').fill('Verified address with fictional QA employee')
+  const addressCorrection = page.waitForResponse(response =>
+    response.url().includes(`/payroll/runs/${draft.id}/delivery/${deliveryJob.id}/address`) &&
+    response.request().method() === 'POST',
+  )
+  await deliveryCard.getByRole('button', { name: 'Correct email and schedule' }).click()
+  const addressCorrectionResponse = await addressCorrection
+  expect(addressCorrectionResponse.status(), await addressCorrectionResponse.text()).toBe(200)
+  await expect(deliveryCard).toContainText('Status: scheduled')
+  const deliveryAfterAddressCorrection = await page.request.get(
+    `${apiUrl}/payroll/runs/${draft.id}/delivery-status`,
+    { headers: await bearer(page) },
+  )
+  expect(deliveryAfterAddressCorrection.status(), await deliveryAfterAddressCorrection.text()).toBe(200)
+  const correctedJobs = await deliveryAfterAddressCorrection.json()
+  expect(correctedJobs).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      id: deliveryJob.id,
+      status: 'scheduled',
+      recipient_snapshot: correctedEmail,
+      last_action_reason: 'Verified address with fictional QA employee',
+    }),
+  ]))
+
   const payslip = await page.request.get(
     `${apiUrl}/payroll/runs/${draft.id}/entries/${preparedEntry.id}/payslip.pdf`,
     { headers: await bearer(page) },

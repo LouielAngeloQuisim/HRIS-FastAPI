@@ -141,9 +141,9 @@ describe('Payroll readiness page', () => {
       date_from: '2026-09-01',
       date_to: '2026-09-15',
       policy_versions: [],
-      count: 1,
+      count: 2,
       blocked_count: 1,
-      ready_count: 0,
+      ready_count: 1,
       has_more: false,
       entries: [
         {
@@ -163,6 +163,19 @@ describe('Payroll readiness page', () => {
           eligible_overtime_minutes: 0,
           approved_overtime_minutes: 0,
         },
+        {
+          employee_id: 'employee-2',
+          employee_code: 'QA002',
+          employee_name: 'QA Employee With Email Warning',
+          email: null,
+          blockers: [],
+          warnings: [
+            'No employee email is on file; payslip delivery will need an authorized address correction.',
+          ],
+          attendance_records: 2,
+          eligible_overtime_minutes: 0,
+          approved_overtime_minutes: 0,
+        },
       ],
     })
     const screen = await renderWithClient(<PayrollPage />)
@@ -178,6 +191,12 @@ describe('Payroll readiness page', () => {
     await userEvent.click(screen.getByTestId('payroll-preflight-button'))
     await expect.element(screen.getByText(/QA001 · QA Employee/)).toBeVisible()
     await expect.element(screen.getByText(/No effective salary/i)).toBeVisible()
+    await expect
+      .element(screen.getByText(/No employee email is on file/))
+      .toBeVisible()
+    await expect
+      .element(screen.getByText('Ready for calculation review'))
+      .toBeVisible()
     expect(preflight).toHaveBeenCalledWith(
       expect.objectContaining({
         pay_group_id: 'group-1',

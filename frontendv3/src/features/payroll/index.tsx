@@ -480,7 +480,7 @@ export default function PayrollPage() {
                           {warning}
                         </p>
                       ))}
-                      {!entry.blockers.length && !entry.warnings.length && (
+                      {!entry.blockers.length && (
                         <span className='text-green-700'>
                           Ready for calculation review
                         </span>

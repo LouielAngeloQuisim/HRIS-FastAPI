@@ -280,8 +280,13 @@ def _send_job(job_id: uuid.UUID) -> None:
 
 def run_worker(*, once: bool = False) -> None:
     if not settings.PAYSLIP_DELIVERY_ENABLED:
-        logger.warning("Payslip delivery worker is disabled by configuration")
-        return
+        logger.info("Payslip delivery worker is disabled; remaining idle")
+        if once:
+            return
+        # Keep the supervised production process inert while delivery is off.
+        # Operators must recreate the container after changing its environment.
+        while True:
+            time.sleep(POLL_SECONDS)
     while True:
         jobs = _claim_due_jobs()
         for job_id in jobs:

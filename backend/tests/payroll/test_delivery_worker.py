@@ -289,3 +289,25 @@ def test_disabled_worker_never_claims_or_sends(
     )
 
     run_worker(once=True)
+
+
+def test_disabled_supervised_worker_stays_idle_without_claiming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.payroll.delivery_worker as worker
+
+    class StopIdleLoop(Exception):
+        pass
+
+    monkeypatch.setattr(settings, "PAYSLIP_DELIVERY_ENABLED", False)
+    monkeypatch.setattr(
+        worker, "_claim_due_jobs", lambda: pytest.fail("claimed while disabled")
+    )
+
+    def stop_after_one_poll(seconds: int) -> None:
+        assert seconds == worker.POLL_SECONDS
+        raise StopIdleLoop
+
+    monkeypatch.setattr(worker.time, "sleep", stop_after_one_poll)
+    with pytest.raises(StopIdleLoop):
+        run_worker()

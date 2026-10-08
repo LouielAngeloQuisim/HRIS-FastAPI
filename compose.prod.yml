@@ -137,7 +137,7 @@ services:
 
   payroll-delivery:
     image: ghcr.io/louielangeloquisim/hris-fastapi/backend:${IMAGE_TAG:-latest}
-    restart: always
+    restart: unless-stopped
     command: ["python", "-m", "app.payroll.delivery_worker"]
     depends_on:
       db:

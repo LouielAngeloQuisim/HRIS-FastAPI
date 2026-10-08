@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.config.settings import settings
-from app.payroll.calc import StatutoryScheduleUnavailable
 from app.payroll.models import BIRBracket, PagIBIGBracket, PhilHealthBracket
 
 CASES = [
@@ -63,10 +62,9 @@ def test_inactive_configuration_is_not_used_by_calculator(db: Session, slug: str
         # created inactive row must not override it for the same period.
         assert calculators[slug](db, Decimal('150000'), 'monthly', '2026-02-01') == Decimal('29375.05')
     elif slug == 'philhealth':
-        # A 2025 table must not be carried into 2026 without an active row
-        # effective in that year; an inactive 2026 row does not qualify.
-        with pytest.raises(StatutoryScheduleUnavailable, match='calendar year 2026'):
-            calculators[slug](db, Decimal('20000'), '2026-02-01')
+        # The active 2026 schedule remains authoritative; this newly-created
+        # inactive row must not replace it.
+        assert calculators[slug](db, Decimal('20000'), '2026-02-01') == Decimal('500.00')
     else:
         # The seeded 2024 schedule remains effective; an inactive 2026 row
         # must not replace the employee's capped share.

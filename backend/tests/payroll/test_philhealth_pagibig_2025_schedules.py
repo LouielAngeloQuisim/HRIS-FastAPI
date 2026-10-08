@@ -3,11 +3,9 @@
 from datetime import date
 from decimal import Decimal
 
-import pytest
 from sqlmodel import Session, select
 
 from app.payroll.calc import (
-    StatutoryScheduleUnavailable,
     calculate_pagibig_employee_share,
     calculate_pagibig_employer_share,
     calculate_philhealth_employee_share,
@@ -20,7 +18,7 @@ from app.payroll.routes import _statutory_schedule_errors
 def test_seeded_philhealth_and_pagibig_schedules_are_complete(db: Session) -> None:
     philhealth = db.exec(
         select(PhilHealthBracket).where(
-            PhilHealthBracket.effective_date == date(2025, 1, 1),
+            PhilHealthBracket.effective_date.in_([date(2025, 1, 1), date(2026, 1, 1)]),
             PhilHealthBracket.is_active.is_(True),  # type: ignore[attr-defined]
             PhilHealthBracket.is_deleted.is_(False),  # type: ignore[attr-defined]
         )
@@ -33,9 +31,17 @@ def test_seeded_philhealth_and_pagibig_schedules_are_complete(db: Session) -> No
         )
     ).all()
 
-    assert len(philhealth) == 1
-    assert (philhealth[0].salary_min, philhealth[0].salary_max, philhealth[0].rate) == (
-        Decimal("10000.00"), Decimal("100000.00"), Decimal("5.000")
+    assert {row.effective_date for row in philhealth} == {
+        date(2025, 1, 1), date(2026, 1, 1)
+    }
+    assert len(philhealth) == 2
+    assert all(
+        (row.salary_min, row.salary_max, row.rate, row.employee_share, row.employer_share)
+        == (
+            Decimal("10000.00"), Decimal("100000.00"), Decimal("5.000"),
+            Decimal("2.500"), Decimal("2.500"),
+        )
+        for row in philhealth
     )
     assert len(pagibig) == 2
     assert [(row.salary_min, row.salary_max, row.employee_rate, row.employer_rate) for row in pagibig] == [
@@ -50,6 +56,10 @@ def test_statutory_calculators_apply_published_floors_caps_and_rates(db: Session
     assert calculate_philhealth_employee_share(db, Decimal("9000"), "2025-01-01") == Decimal("250.00")
     assert calculate_philhealth_employer_share(db, Decimal("26000"), "2025-01-01") == Decimal("650.00")
     assert calculate_philhealth_employee_share(db, Decimal("120000"), "2025-01-01") == Decimal("2500.00")
+    # Advisory 2026-0042 reaffirms the 5% rate effective since January 2025;
+    # Circular 2020-0005 and Advisory 2025-0002 establish employer treatment.
+    assert calculate_philhealth_employee_share(db, Decimal("26000"), "2026-01-01") == Decimal("650.00")
+    assert calculate_philhealth_employer_share(db, Decimal("26000"), "2026-01-01") == Decimal("650.00")
 
     # Pag-IBIG Circular 460: employee 1% through ₱1,500, then 2%; employer
     # 2%; both shares use the ₱10,000 MFS ceiling.
@@ -60,14 +70,12 @@ def test_statutory_calculators_apply_published_floors_caps_and_rates(db: Session
     assert calculate_pagibig_employer_share(db, Decimal("26000"), "2024-02-01") == Decimal("200.00")
 
 
-def test_philhealth_schedule_must_be_effective_in_the_contribution_year(
+def test_philhealth_uses_the_explicit_verified_2026_schedule(
     db: Session,
 ) -> None:
-    with pytest.raises(StatutoryScheduleUnavailable, match="calendar year 2026"):
-        calculate_philhealth_employee_share(db, Decimal("26000"), "2026-01-01")
+    assert calculate_philhealth_employee_share(
+        db, Decimal("26000"), "2026-01-01"
+    ) == Decimal("650.00")
 
     errors = _statutory_schedule_errors(db, date(2026, 1, 1))
-    assert any(
-        "PhilHealth requires one active floor/ceiling schedule effective in 2026" in error
-        for error in errors
-    )
+    assert not any("PhilHealth" in error for error in errors)

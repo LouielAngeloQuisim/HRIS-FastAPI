@@ -35,12 +35,18 @@ export default function SalaryPage() {
   const [employeePage, setEmployeePage] = useState(1)
   const pageSize = 500
   const { data: employeesData, isPending: employeesPending } = useEmployees(
-    employeePage,
+    1,
     pageSize
   )
+  const { data: bulkEmployeesData, isPending: bulkEmployeesPending } =
+    useEmployees(employeePage, pageSize)
   const employees = useMemo(
     () => employeesData?.data ?? [],
     [employeesData?.data]
+  )
+  const bulkEmployees = useMemo(
+    () => bulkEmployeesData?.data ?? [],
+    [bulkEmployeesData?.data]
   )
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<
     string | undefined
@@ -112,8 +118,9 @@ export default function SalaryPage() {
     [employeeOptions, bulkSelected]
   )
   const activeEmployees = useMemo(
-    () => employees.filter((employee) => employee.employee_status === 'Active'),
-    [employees]
+    () =>
+      bulkEmployees.filter((employee) => employee.employee_status === 'Active'),
+    [bulkEmployees]
   )
   const selectedPayGroupEmployees = useMemo(
     () =>
@@ -364,7 +371,8 @@ export default function SalaryPage() {
                 Pay groups could not be loaded.
               </p>
             ) : null}
-            {!employeesPending && (employeesData?.count ?? 0) > pageSize ? (
+            {!bulkEmployeesPending &&
+            (bulkEmployeesData?.count ?? 0) > pageSize ? (
               <p className='text-sm text-amber-700'>
                 Select employees across pages; checked employees remain
                 selected.
@@ -374,7 +382,7 @@ export default function SalaryPage() {
               <Button
                 type='button'
                 variant='outline'
-                disabled={employeePage <= 1 || employeesPending}
+                disabled={employeePage <= 1 || bulkEmployeesPending}
                 onClick={() =>
                   setEmployeePage((current) => Math.max(1, current - 1))
                 }
@@ -383,14 +391,17 @@ export default function SalaryPage() {
               </Button>
               <span>
                 Page {employeePage} of{' '}
-                {Math.max(1, Math.ceil((employeesData?.count ?? 0) / pageSize))}
+                {Math.max(
+                  1,
+                  Math.ceil((bulkEmployeesData?.count ?? 0) / pageSize)
+                )}
               </span>
               <Button
                 type='button'
                 variant='outline'
                 disabled={
-                  employeesPending ||
-                  employeePage * pageSize >= (employeesData?.count ?? 0)
+                  bulkEmployeesPending ||
+                  employeePage * pageSize >= (bulkEmployeesData?.count ?? 0)
                 }
                 onClick={() => setEmployeePage((current) => current + 1)}
               >

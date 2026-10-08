@@ -1032,13 +1032,13 @@ def _philhealth_monthly_basic_salary_basis(
     employee_id: uuid.UUID,
     salaries: Sequence[EmployeeSalary],
     contribution_month: date,
-    monthly_divisor: Decimal,
+    policies: Sequence[PayrollPolicyVersion],
 ) -> Decimal:
     """Return the contract basic-salary monthly equivalent, independent of attendance.
 
     PhilHealth's published MBS definition excludes overtime and deductions for
-    absences/undertime. For daily/hourly rates this uses the explicitly confirmed
-    company monthly divisor and effective shift schedule, not actual worked days.
+    absences/undertime. For daily/hourly rates this uses each effective policy's
+    confirmed monthly divisor and effective shift schedule, not actual worked days.
     A missing effective salary or shift is a blocker rather than a guessed rate.
     """
     days_in_month = calendar.monthrange(
@@ -1067,65 +1067,134 @@ def _philhealth_monthly_basic_salary_basis(
         if shift_ids
         else {}
     )
-    effective_salaries = [
-        salary for salary in salaries if salary.effective_date <= month_end
-    ]
-    if not effective_salaries:
-        raise StatutoryScheduleUnavailable(
-            "An effective salary is required for the contribution month"
-        )
-
-    if effective_salaries[0].effective_date > contribution_month:
+    effective_salaries = sorted(
+        (salary for salary in salaries if salary.effective_date <= month_end),
+        key=lambda row: row.effective_date,
+    )
+    if not effective_salaries or effective_salaries[0].effective_date > contribution_month:
         raise StatutoryScheduleUnavailable(
             "An effective salary is required from the first day of the contribution month"
         )
 
+    # Split the statutory monthly equivalent whenever either salary or policy
+    # changes. Daily/hourly conversion uses the divisor and scheduled minutes
+    # effective for that segment, then calendar-weights the result.
+    segments: list[
+        tuple[
+            date,
+            date,
+            EmployeeSalary,
+            PayrollPolicyVersion,
+            EmployeeShiftAssignment | None,
+        ]
+    ] = []
+    cursor = contribution_month
+    while cursor <= month_end:
+        salary_rows = [row for row in effective_salaries if row.effective_date <= cursor]
+        policy_rows = [
+            row for row in policies
+            if row.confirmed
+            and row.effective_from <= cursor
+            and (row.effective_to is None or row.effective_to >= cursor)
+        ]
+        if not salary_rows:
+            raise StatutoryScheduleUnavailable(
+                f"An effective salary is required on {cursor.isoformat()}"
+            )
+        if len(policy_rows) != 1:
+            raise StatutoryScheduleUnavailable(
+                f"Exactly one confirmed payroll policy is required on {cursor.isoformat()} for PhilHealth conversion"
+            )
+        salary, policy = salary_rows[-1], policy_rows[0]
+        divisor = Decimal(str(policy.policy.get("monthly_divisor", "0")))
+        if divisor <= 0:
+            raise StatutoryScheduleUnavailable(
+                f"A positive monthly divisor is required on {cursor.isoformat()} for PhilHealth conversion"
+            )
+        pay_type = str(getattr(salary.pay_type, "value", salary.pay_type))
+        assignment = next(
+            (
+                row for row in assignments
+                if row.effective_from <= cursor
+                and (row.effective_to is None or row.effective_to >= cursor)
+            ),
+            None,
+        ) if pay_type in {"daily", "hourly"} else None
+        if pay_type in {"daily", "hourly"} and (
+            assignment is None or assignment.shift_id not in shifts
+        ):
+            raise StatutoryScheduleUnavailable(
+                f"An effective shift is required to convert the {pay_type} PhilHealth basic salary on {cursor.isoformat()}"
+            )
+        segment_end = cursor
+        while segment_end < month_end:
+            next_date = segment_end + timedelta(days=1)
+            next_salary = [row for row in effective_salaries if row.effective_date <= next_date]
+            next_policy = [
+                row for row in policies
+                if row.confirmed
+                and row.effective_from <= next_date
+                and (row.effective_to is None or row.effective_to >= next_date)
+            ]
+            next_assignment = next(
+                (
+                    row for row in assignments
+                    if row.effective_from <= next_date
+                    and (row.effective_to is None or row.effective_to >= next_date)
+                ),
+                None,
+            ) if pay_type in {"daily", "hourly"} else None
+            if (
+                not next_salary
+                or len(next_policy) != 1
+                or next_salary[-1].id != salary.id
+                or next_policy[0].id != policy.id
+                or (
+                    pay_type in {"daily", "hourly"}
+                    and (
+                        next_assignment is None
+                        or assignment is None
+                        or next_assignment.id != assignment.id
+                    )
+                )
+            ):
+                break
+            segment_end = next_date
+        segments.append((cursor, segment_end, salary, policy, assignment))
+        cursor = segment_end + timedelta(days=1)
+
     monthly_weighted = Decimal("0")
-    for index, salary in enumerate(effective_salaries):
-        segment_start = max(contribution_month, salary.effective_date)
-        next_salary_date = (
-            effective_salaries[index + 1].effective_date
-            if index + 1 < len(effective_salaries)
-            else month_end + timedelta(days=1)
-        )
-        segment_end = min(month_end, next_salary_date - timedelta(days=1))
-        if segment_start > segment_end:
-            continue
+    for segment_start, segment_end, salary, policy, assignment in segments:
         segment_days = (segment_end - segment_start).days + 1
         pay_type = str(getattr(salary.pay_type, "value", salary.pay_type))
         if pay_type == "monthly":
             equivalent = salary.basic_rate
         elif pay_type in {"daily", "hourly"}:
-            scheduled_minutes: list[Decimal] = []
-            cursor = segment_start
-            while cursor <= segment_end:
-                assignment = next(
-                    (
-                        row for row in assignments
-                        if row.effective_from <= cursor
-                        and (row.effective_to is None or row.effective_to >= cursor)
-                    ),
-                    None,
+            if assignment is None:
+                raise StatutoryScheduleUnavailable(
+                    f"An effective shift is required to convert the {pay_type} PhilHealth basic salary from {segment_start.isoformat()}"
                 )
-                shift = shifts.get(assignment.shift_id) if assignment else None
-                if shift is None:
-                    raise StatutoryScheduleUnavailable(
-                        f"An effective shift is required to convert the {pay_type} PhilHealth basic salary on {cursor.isoformat()}"
-                    )
-                if cursor.isoweekday() in {int(value) for value in shift.days_of_week}:
+            shift = shifts.get(assignment.shift_id)
+            if shift is None:
+                raise StatutoryScheduleUnavailable(
+                    f"An effective shift is required to convert the {pay_type} PhilHealth basic salary from {segment_start.isoformat()}"
+                )
+            scheduled_minutes: list[Decimal] = []
+            for work_day in (
+                segment_start + timedelta(days=offset)
+                for offset in range(segment_days)
+            ):
+                if work_day.isoweekday() in {int(value) for value in shift.days_of_week}:
                     scheduled_minutes.append(Decimal(str(shift.total_hours_minus_lunch)))
-                cursor += timedelta(days=1)
             if not scheduled_minutes:
                 raise StatutoryScheduleUnavailable(
                     f"No scheduled workdays are available to convert the {pay_type} PhilHealth basic salary from {segment_start.isoformat()}"
                 )
-            average_minutes = sum(scheduled_minutes, Decimal("0")) / Decimal(
-                len(scheduled_minutes)
-            )
+            average_minutes = sum(scheduled_minutes, Decimal("0")) / Decimal(len(scheduled_minutes))
             daily_equivalent = salary.basic_rate
             if pay_type == "hourly":
                 daily_equivalent = salary.basic_rate * average_minutes / Decimal(60)
-            equivalent = daily_equivalent * monthly_divisor
+            equivalent = daily_equivalent * Decimal(str(policy.policy["monthly_divisor"]))
         else:
             raise StatutoryScheduleUnavailable(
                 f"Unsupported salary basis {pay_type!r} for PhilHealth monthly conversion"
@@ -1140,7 +1209,7 @@ def _fixed_recurring_allowance_for_period(
     employee: EmployeeRecords | None,
     date_from: date,
     date_to: date,
-    policy: dict[str, Any],
+    policies: Sequence[PayrollPolicyVersion],
 ) -> Decimal:
     """Calculate the supported taxable fixed monthly cash allowance.
 
@@ -1152,8 +1221,11 @@ def _fixed_recurring_allowance_for_period(
     if date_from > date_to:
         raise StatutoryScheduleUnavailable("Allowance period start must not follow its end")
     effective_salaries = sorted(salaries, key=lambda row: row.effective_date)
-    total = Decimal("0.00")
-    has_allowance = False
+    # Keep an unrounded subtotal per calendar month and effective policy. This
+    # lets a policy change take effect on its effective date without applying
+    # the period's last rounding rule retroactively to earlier dates.
+    subtotals: dict[tuple[int, int, str], tuple[Decimal, str]] = {}
+    policy_rows = list(policies)
     cursor = date_from
     while cursor <= date_to:
         if employee is not None and employee.date_hired and cursor < employee.date_hired:
@@ -1178,34 +1250,56 @@ def _fixed_recurring_allowance_for_period(
         if monthly_amount < 0:
             raise StatutoryScheduleUnavailable("Fixed recurring allowance cannot be negative")
         if monthly_amount:
-            has_allowance = True
+            applicable = [
+                row
+                for row in policy_rows
+                if row.confirmed
+                and row.effective_from <= cursor
+                and (row.effective_to is None or row.effective_to >= cursor)
+            ]
+            if len(applicable) != 1:
+                raise StatutoryScheduleUnavailable(
+                    f"Exactly one confirmed payroll policy is required for fixed allowance calculation on {cursor.isoformat()}"
+                )
+            policy = applicable[0].policy
+            policy_id = str(applicable[0].id)
+            treatment = policy.get("allowance_tax_treatment")
+            if not isinstance(treatment, dict) or any(
+                treatment.get(key) != expected
+                for key, expected in (
+                    ("fixed_recurring", "taxable"),
+                    ("proration", "calendar_days"),
+                    ("absence", "not_deducted"),
+                )
+            ):
+                raise StatutoryScheduleUnavailable(
+                    "Configure fixed recurring allowances as taxable, prorated by employed calendar days, and not reduced for attendance before payroll preparation"
+                )
+            rounding_mode_name = str(policy.get("rounding_mode"))
+            if rounding_mode_name not in {"half_up", "half_even", "down"}:
+                raise StatutoryScheduleUnavailable(
+                    "A supported company rounding mode is required to calculate the fixed allowance"
+                )
             month_days = calendar.monthrange(cursor.year, cursor.month)[1]
-            total += monthly_amount / Decimal(month_days)
+            key = (cursor.year, cursor.month, policy_id)
+            prior_amount, _ = subtotals.get(key, (Decimal("0"), rounding_mode_name))
+            subtotals[key] = (
+                prior_amount + monthly_amount / Decimal(month_days),
+                rounding_mode_name,
+            )
         cursor += timedelta(days=1)
-    if not has_allowance:
-        return Decimal("0.00")
-    treatment = policy.get("allowance_tax_treatment")
-    if not isinstance(treatment, dict) or any(
-        treatment.get(key) != expected
-        for key, expected in (
-            ("fixed_recurring", "taxable"),
-            ("proration", "calendar_days"),
-            ("absence", "not_deducted"),
-        )
-    ):
-        raise StatutoryScheduleUnavailable(
-            "Configure fixed recurring allowances as taxable, prorated by employed calendar days, and not reduced for attendance before payroll preparation"
-        )
-    rounding_mode = {
+    rounding_modes = {
         "half_up": ROUND_HALF_UP,
         "half_even": ROUND_HALF_EVEN,
         "down": ROUND_DOWN,
-    }.get(str(policy.get("rounding_mode")))
-    if rounding_mode is None:
-        raise StatutoryScheduleUnavailable(
-            "A supported company rounding mode is required to calculate the fixed allowance"
-        )
-    return total.quantize(Decimal("0.01"), rounding=rounding_mode)
+    }
+    return sum(
+        (
+            amount.quantize(Decimal("0.01"), rounding=rounding_modes[rounding_name])
+            for amount, rounding_name in subtotals.values()
+        ),
+        Decimal("0.00"),
+    )
 
 
 def _same_calendar_day(value: date | datetime | str, expected: date) -> bool:
@@ -3576,14 +3670,6 @@ def attendance_calculation_preview(
             col(PayrollPolicyVersion.confirmed).is_(True),
         )
     ).all()
-    allowance_policy_rows = [
-        item
-        for item in policies
-        if item.confirmed
-        and item.effective_from <= date_from
-        and (item.effective_to is None or item.effective_to >= date_to)
-    ]
-    allowance_policy = allowance_policy_rows[0].policy if len(allowance_policy_rows) == 1 else {}
     leave_rows = session.exec(
         select(LeaveRequest).where(
             col(LeaveRequest.employee_id).in_(employee_ids),
@@ -4549,7 +4635,7 @@ def attendance_calculation_preview(
                 employee=employee,
                 date_from=date_from,
                 date_to=date_to,
-                policy=allowance_policy,
+                policies=policies,
             )
         except StatutoryScheduleUnavailable as exc:
             blockers.append(
@@ -4708,12 +4794,31 @@ def prepare_attendance_payroll_draft(
         )
         .order_by(col(PayrollPolicyVersion.effective_from))
     ).all()
-    if len(policies) != 1 or not policies[0].confirmed:
-        raise HTTPException(
-            status_code=409,
-            detail="Exactly one confirmed payroll policy must cover the prepared period",
-        )
-    policy = policies[0]
+    policy_by_day: dict[date, PayrollPolicyVersion] = {}
+    cursor = obj_in.date_from
+    while cursor <= obj_in.date_to:
+        applicable = [
+            row
+            for row in policies
+            if row.confirmed
+            and row.effective_from <= cursor
+            and (row.effective_to is None or row.effective_to >= cursor)
+        ]
+        if len(applicable) != 1:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Exactly one confirmed payroll policy must cover every day of the prepared period.",
+                    "work_date": cursor.isoformat(),
+                },
+            )
+        policy_by_day[cursor] = applicable[0]
+        cursor += timedelta(days=1)
+    # The run-level reference is the policy effective on period end. Calculation
+    # uses the full effective-dated schedule and snapshots every overlapping row.
+    policy = policy_by_day[obj_in.date_to]
+    policy_schedule = list({row.id: row for row in policy_by_day.values()}.values())
+    policy_schedule.sort(key=lambda row: (row.effective_from, str(row.id)))
     configured_periods = list_pay_group_periods(
         session=session,
         group_id=obj_in.pay_group_id,
@@ -4739,6 +4844,16 @@ def prepare_attendance_payroll_draft(
     month_end = month_start.replace(
         day=calendar.monthrange(month_start.year, month_start.month)[1]
     )
+    month_policy_rows = session.exec(
+        select(PayrollPolicyVersion)
+        .where(
+            PayrollPolicyVersion.effective_from <= month_end,
+            (col(PayrollPolicyVersion.effective_to).is_(None))
+            | (col(PayrollPolicyVersion.effective_to) >= month_start),
+            col(PayrollPolicyVersion.confirmed).is_(True),
+        )
+        .order_by(col(PayrollPolicyVersion.effective_from))
+    ).all()
     roster_employee_ids = {
         row.employee_id for row in roster.entries if row.employee_id is not None
     }
@@ -4904,7 +5019,7 @@ def prepare_attendance_payroll_draft(
                     employee=employee_record,
                     date_from=obj_in.date_from,
                     date_to=obj_in.date_to,
-                    policy=policy.policy,
+                    policies=policy_schedule,
                 )
             except StatutoryScheduleUnavailable as exc:
                 blockers.append(
@@ -4949,6 +5064,18 @@ def prepare_attendance_payroll_draft(
                 )
             else:
                 try:
+                    collection_configs = {
+                        json.dumps(
+                            row.policy.get("contribution_collection"),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        for row in month_policy_rows
+                    }
+                    if len(collection_configs) != 1 or "null" in collection_configs:
+                        raise StatutoryScheduleUnavailable(
+                            "The once-monthly contribution collection rule must be confirmed and consistent across all policy versions in the contribution month"
+                        )
                     full_month = full_month_previews.get(roster_entry.employee_id)
                     if full_month is None:
                         raise StatutoryScheduleUnavailable(
@@ -4965,7 +5092,7 @@ def prepare_attendance_payroll_draft(
                         date_to=month_start.replace(
                             day=calendar.monthrange(month_start.year, month_start.month)[1]
                         ),
-                        policy=policy.policy,
+                        policies=month_policy_rows,
                     )
                     sss_basis = (
                         full_month.regular_earnings
@@ -4982,34 +5109,26 @@ def prepare_attendance_payroll_draft(
                             "Full-month regular and approved overtime earnings are required for the SSS compensation basis"
                         )
                     pagibig_basis = sss_basis
-                    policy_sources = policy.policy.get("statutory_sources_reviewed", [])
-                    if not isinstance(policy_sources, list):
+                    policy_sources = sorted(
+                        {
+                            source
+                            for month_policy in month_policy_rows
+                            for source in month_policy.policy.get(
+                                "statutory_sources_reviewed", []
+                            )
+                            if isinstance(source, str)
+                        }
+                    )
+                    if not policy_sources:
                         raise StatutoryScheduleUnavailable(
-                            "Confirmed payroll policy has no reviewed statutory source list"
-                        )
-                    month_policy_rows = session.exec(
-                        select(PayrollPolicyVersion).where(
-                            PayrollPolicyVersion.effective_from <= obj_in.date_to,
-                            (col(PayrollPolicyVersion.effective_to).is_(None))
-                            | (col(PayrollPolicyVersion.effective_to) >= month_start),
-                            col(PayrollPolicyVersion.confirmed).is_(True),
-                        )
-                    ).all()
-                    divisors = {
-                        Decimal(str(row.policy["monthly_divisor"]))
-                        for row in month_policy_rows
-                        if row.policy.get("monthly_divisor") is not None
-                    }
-                    if len(divisors) != 1:
-                        raise StatutoryScheduleUnavailable(
-                            "One confirmed monthly divisor must apply throughout the contribution month for daily/hourly PhilHealth conversion"
+                            "Confirmed monthly payroll policies have no reviewed statutory source list"
                         )
                     philhealth_basis = _philhealth_monthly_basic_salary_basis(
                         session=session,
                         employee_id=roster_entry.employee_id,
                         salaries=employee_salaries,
                         contribution_month=month_start,
-                        monthly_divisor=next(iter(divisors)),
+                        policies=month_policy_rows,
                     )
                     if philhealth_basis <= 0:
                         raise StatutoryScheduleUnavailable(
@@ -5026,7 +5145,7 @@ def prepare_attendance_payroll_draft(
                     monthly_contributions["basis_method"] = {
                         "sss": "full-month regular earnings less unpaid absence and monthly short-time deductions, plus approved overtime and the confirmed taxable fixed recurring allowance; indexed by the effective SSS schedule",
                         "philhealth": (
-                            "contractual fixed-basic monthly equivalent; monthly salary is weighted by calendar days, while daily/hourly rates use the confirmed monthly divisor and effective scheduled shift minutes; overtime and absence deductions excluded"
+                            "contractual fixed-basic monthly equivalent; monthly salary is weighted by calendar days, while daily/hourly rates use each effective policy divisor and the effective scheduled shift minutes; overtime and absence deductions excluded"
                         ),
                         "pagibig": "full-month regular earnings less unpaid absence and monthly short-time deductions, plus approved overtime and taxable fixed recurring allowances; de minimis amounts remain blocked pending category and eligibility evidence",
                         "fixed_recurring_allowance": "monthly fixed amount prorated by employed calendar days; taxable under the confirmed company policy, not reduced for attendance, included in SSS and Pag-IBIG compensation, and excluded from PhilHealth monthly basic salary",
@@ -5276,21 +5395,22 @@ def prepare_attendance_payroll_draft(
             "holiday_config_revisions": holiday_config_refs,
             "policy_versions": [
                 {
-                    "id": str(policy.id),
-                    "version": policy.version,
-                    "effective_from": policy.effective_from.isoformat(),
-                    "effective_to": policy.effective_to.isoformat()
-                    if policy.effective_to
+                    "id": str(policy_row.id),
+                    "version": policy_row.version,
+                    "effective_from": policy_row.effective_from.isoformat(),
+                    "effective_to": policy_row.effective_to.isoformat()
+                    if policy_row.effective_to
                     else None,
-                    "policy": policy.policy,
-                    "confirmed": policy.confirmed,
-                    "confirmed_by": str(policy.confirmed_by)
-                    if policy.confirmed_by
+                    "policy": policy_row.policy,
+                    "confirmed": policy_row.confirmed,
+                    "confirmed_by": str(policy_row.confirmed_by)
+                    if policy_row.confirmed_by
                     else None,
-                    "confirmed_at": policy.confirmed_at.isoformat()
-                    if policy.confirmed_at
+                    "confirmed_at": policy_row.confirmed_at.isoformat()
+                    if policy_row.confirmed_at
                     else None,
                 }
+                for policy_row in sorted(policies, key=lambda item: str(item.id))
             ],
             "employee_id": str(roster_entry.employee_id),
             "employee_record": (

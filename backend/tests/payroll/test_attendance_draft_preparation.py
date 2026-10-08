@@ -4,6 +4,7 @@ import calendar
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -37,11 +38,73 @@ from app.payroll.models import (
     SSSBracket,
 )
 from app.payroll.payroll_tables import PayrollEntry, PayrollRun
-from app.payroll.routes import _payroll_entry_inputs_are_current
+from app.payroll.routes import (
+    StatutoryScheduleUnavailable,
+    _fixed_recurring_allowance_for_period,
+    _payroll_entry_inputs_are_current,
+)
 from app.user.models import User
 from tests.utils.user import user_authentication_headers
 
 API = f"{settings.API_V1_STR}/payroll"
+
+
+def test_fixed_allowance_uses_effective_policy_segments() -> None:
+    salary = SimpleNamespace(
+        id=uuid.uuid4(),
+        effective_date=date(2026, 10, 1),
+        non_taxable_allowance=Decimal("3100.00"),
+        de_minimis_monthly={},
+    )
+    common_policy = {
+        "allowance_tax_treatment": {
+            "fixed_recurring": "taxable",
+            "proration": "calendar_days",
+            "absence": "not_deducted",
+        },
+        "rounding_mode": "half_up",
+    }
+    first = SimpleNamespace(
+        id=uuid.uuid4(),
+        version=990_000 + int(uuid.uuid4().hex[:6], 16),
+        effective_from=date(2026, 10, 1),
+        effective_to=date(2026, 10, 7),
+        policy=common_policy,
+        confirmed=True,
+    )
+    second = SimpleNamespace(
+        id=uuid.uuid4(),
+        version=first.version + 1,
+        effective_from=date(2026, 10, 8),
+        effective_to=date(2026, 10, 31),
+        policy=common_policy,
+        confirmed=True,
+    )
+
+    assert _fixed_recurring_allowance_for_period(
+        salaries=[salary],
+        employee=None,
+        date_from=date(2026, 10, 1),
+        date_to=date(2026, 10, 15),
+        policies=[first, second],
+    ) == Decimal("1500.00")
+
+    overlapping = SimpleNamespace(
+        id=uuid.uuid4(),
+        version=second.version + 1,
+        effective_from=date(2026, 10, 7),
+        effective_to=date(2026, 10, 31),
+        policy=common_policy,
+        confirmed=True,
+    )
+    with pytest.raises(StatutoryScheduleUnavailable, match="Exactly one confirmed"):
+        _fixed_recurring_allowance_for_period(
+            salaries=[salary],
+            employee=None,
+            date_from=date(2026, 10, 1),
+            date_to=date(2026, 10, 15),
+            policies=[first, second, overlapping],
+        )
 
 
 def test_attendance_preview_applies_configured_holiday_multipliers(
@@ -741,7 +804,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     policy = PayrollPolicyVersion(
         version=900_000 + int(uuid.uuid4().hex[:6], 16),
         effective_from=date(2026, 10, 1),
-        effective_to=date(2026, 10, 31),
+        effective_to=date(2026, 10, 7),
         policy={
             "timezone": "Asia/Manila",
             "monthly_divisor": "22",
@@ -772,6 +835,13 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         },
         confirmed=True,
     )
+    policy_after_change = PayrollPolicyVersion(
+        version=policy.version + 1,
+        effective_from=date(2026, 10, 8),
+        effective_to=date(2026, 10, 31),
+        policy={**policy.policy, "overtime_rule": {"multiplier": "1.5"}},
+        confirmed=True,
+    )
     leave_policy = LeavePolicy(
         code=f"UNPAID-{uuid.uuid4().hex[:8]}",
         name="Unpaid QA leave",
@@ -789,7 +859,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         status="approved",
     )
     db.add(leave_request)
-    db.add(policy)
+    db.add_all([policy, policy_after_change])
     db.commit()
 
     payload = {
@@ -823,6 +893,10 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         for blocker in entry["blockers"]
     )
     assert entry["input_fingerprint"]
+    assert len(entry["input_snapshot"]["policy_versions"]) == 2
+    assert {
+        row["effective_from"] for row in entry["input_snapshot"]["policy_versions"]
+    } == {"2026-10-01", "2026-10-08"}
     assert entry["input_snapshot"]["leave_policy_revisions"] == [
         {
             "id": str(leave_policy.id),

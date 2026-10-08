@@ -22,6 +22,7 @@ from app.payroll.models import (
     BIRBracket,
     EmployeeSalary,
     PagIBIGBracket,
+    PayrollPolicyVersion,
     PayType,
     PhilHealthBracket,
     SSSBracket,
@@ -101,8 +102,8 @@ def test_monthly_contribution_snapshot_uses_each_effective_schedule(
 @pytest.mark.parametrize(
     ("pay_type", "rate", "expected"),
     [
-        (PayType.DAILY, "1000.00", "22000.00"),
-        (PayType.HOURLY, "125.00", "22000.00"),
+        (PayType.DAILY, "1000.00", "24064.52"),
+        (PayType.HOURLY, "125.00", "24064.52"),
     ],
 )
 def test_philhealth_monthly_basic_salary_converts_time_based_rates_without_attendance(
@@ -140,6 +141,22 @@ def test_philhealth_monthly_basic_salary_converts_time_based_rates_without_atten
             ),
         ]
     )
+    policy_version = 980_000 + int(uuid.uuid4().hex[:6], 16)
+    policy_before_change = PayrollPolicyVersion(
+        version=policy_version,
+        effective_from=date(2026, 10, 1),
+        effective_to=date(2026, 10, 15),
+        policy={"monthly_divisor": "22"},
+        confirmed=True,
+    )
+    policy_after_change = PayrollPolicyVersion(
+        version=policy_version + 1,
+        effective_from=date(2026, 10, 16),
+        effective_to=date(2026, 10, 31),
+        policy={"monthly_divisor": "26"},
+        confirmed=True,
+    )
+    db.add_all([policy_before_change, policy_after_change])
     db.flush()
 
     basis = _philhealth_monthly_basic_salary_basis(
@@ -147,7 +164,7 @@ def test_philhealth_monthly_basic_salary_converts_time_based_rates_without_atten
         employee_id=employee.id,
         salaries=[salary],
         contribution_month=date(2026, 10, 1),
-        monthly_divisor=Decimal("22"),
+        policies=[policy_before_change, policy_after_change],
     )
 
     assert basis == Decimal(expected)

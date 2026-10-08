@@ -19,7 +19,7 @@ async function createPayrollResource(page: Page, path: string, data: Record<stri
   return response.json()
 }
 
-test('fictional provisional payroll is reviewed but cannot be finalized or scheduled for delivery', async ({
+test('fictional attendance payroll is independently reviewed, finalized, and scheduled for payslips', async ({
   page,
   loginAsAdmin,
   loginAsUser,
@@ -254,28 +254,48 @@ test('fictional provisional payroll is reviewed but cannot be finalized or sched
   await logout()
   await loginAsUser(finalizerEmail, FINALIZER_PASSWORD)
   await page.goto(`/payroll-runs/${draft.id}`)
-  await expect(page.getByText(/still use provisional earnings/i)).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Calculation not approved' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Finalize and schedule payslips' })).toBeEnabled()
 
   const saved = await page.request.get(`${apiUrl}/payroll/runs/${draft.id}`, { headers: await bearer(page) })
   expect(saved.status(), await saved.text()).toBe(200)
-  const stillProvisional = await saved.json()
-  expect(stillProvisional.workflow_status).toBe('ready_for_finalization')
-  expect(stillProvisional.finalized_by).toBeNull()
-  expect(stillProvisional.frozen_snapshot ?? null).toBeNull()
-  const stillProvisionalEntry = stillProvisional.entries.find((entry: { id: string }) => entry.id === preparedEntry.id)
-  expect(stillProvisionalEntry).toBeDefined()
-  expect(stillProvisionalEntry.review_state).toBe('reviewed')
-  expect(stillProvisionalEntry.earnings.provisional).toBe(true)
+  const ready = await saved.json()
+  expect(ready.workflow_status).toBe('ready_for_finalization')
+  expect(ready.finalized_by).toBeNull()
+  expect(ready.frozen_snapshot ?? null).toBeNull()
+  const reviewedEntry = ready.entries.find((entry: { id: string }) => entry.id === preparedEntry.id)
+  expect(reviewedEntry).toBeDefined()
+  expect(reviewedEntry.review_state).toBe('reviewed')
+  expect(reviewedEntry.calculation_version).toBe('attendance-v1')
+  expect(reviewedEntry.earnings.provisional).toBe(false)
+  const finalizing = page.waitForResponse(response =>
+    response.url().includes(`/payroll/runs/${draft.id}/finalize`) && response.request().method() === 'POST',
+  )
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: 'Finalize and schedule payslips' }).click()
+  const finalizeResponse = await finalizing
+  expect(finalizeResponse.status(), await finalizeResponse.text()).toBe(200)
+  await expect(page.getByText('Workflow: finalized')).toBeVisible()
+  const finalizedReadback = await page.request.get(`${apiUrl}/payroll/runs/${draft.id}`, { headers: await bearer(page) })
+  expect(finalizedReadback.status(), await finalizedReadback.text()).toBe(200)
+  const finalized = await finalizedReadback.json()
+  expect(finalized.workflow_status).toBe('finalized')
+  expect(finalized.finalized_by).toBe(finalizer.id)
+  const finalizedEntry = finalized.entries.find((entry: { id: string }) => entry.id === preparedEntry.id)
+  expect(finalizedEntry.review_state).toBe('reviewed')
   const delivery = await page.request.get(`${apiUrl}/payroll/runs/${draft.id}/delivery-status`, {
     headers: await bearer(page),
   })
   expect(delivery.status(), await delivery.text()).toBe(200)
   const jobs = await delivery.json()
-  expect(jobs).toHaveLength(0)
-  const finalizeAttempt = await page.request.post(`${apiUrl}/payroll/runs/${draft.id}/finalize`, {
-    headers: await bearer(page),
-  })
-  expect(finalizeAttempt.status()).toBe(409)
-  expect((await finalizeAttempt.json()).detail).toContain('uses provisional attendance earnings')
+  expect(jobs).toEqual(expect.arrayContaining([
+    expect.objectContaining({ payroll_entry_id: preparedEntry.id, status: 'scheduled' }),
+  ]))
+  const payslip = await page.request.get(
+    `${apiUrl}/payroll/runs/${draft.id}/entries/${preparedEntry.id}/payslip.pdf`,
+    { headers: await bearer(page) },
+  )
+  expect(payslip.status()).toBe(200)
+  expect(payslip.headers()['content-type']).toContain('application/pdf')
+  const pdfBody = await payslip.body()
+  expect(pdfBody.subarray(0, 5).toString()).toBe('%PDF-')
 })

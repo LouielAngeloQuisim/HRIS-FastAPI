@@ -649,7 +649,7 @@ def test_attendance_preview_applies_configured_holiday_multipliers(
     )
 
 
-def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
+def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     client: TestClient,
     db: Session,
     superuser_token_headers: dict[str, str],
@@ -1357,6 +1357,13 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     db.commit()
     provisional_entry = db.get(PayrollEntry, uuid.UUID(second_entry["id"]))
     assert provisional_entry is not None
+    assert second_entry["review_state"] == "ready"
+    assert provisional_entry.calculation_version == "attendance-v1"
+    assert provisional_entry.earnings["provisional"] is False
+    provisional_entry.calculation_version = "attendance-v1-provisional"
+    provisional_entry.earnings = {**provisional_entry.earnings, "provisional": True}
+    db.add(provisional_entry)
+    db.commit()
     rejected_provisional = client.post(
         f"{API}/runs/{run_id}/finalize", headers=finalizer_headers
     )
@@ -1366,23 +1373,8 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     assert finalized_run is not None
     db.refresh(finalized_run)
     assert finalized_run.workflow_status == "ready_for_finalization"
-    assert finalized_run.finalized_by is None
     assert finalized_run.frozen_snapshot is None
-    assert not db.exec(
-        select(PayrollContributionLedger).where(
-            PayrollContributionLedger.payroll_entry_id == provisional_entry.id
-        )
-    ).all()
-    assert not db.exec(
-        select(PayrollDeliveryOutbox).where(
-            PayrollDeliveryOutbox.payroll_entry_id == provisional_entry.id
-        )
-    ).all()
-
-    # Exercise the immutable finalization/outbox pipeline with an explicit
-    # accepted-version fixture. The production calculator currently emits only
-    # the provisional version above, which the API must refuse to finalize.
-    provisional_entry.calculation_version = "attendance-v1-accepted-test"
+    provisional_entry.calculation_version = "attendance-v1"
     provisional_entry.earnings = {**provisional_entry.earnings, "provisional": False}
     db.add(provisional_entry)
     db.commit()
@@ -2020,7 +2012,9 @@ def test_daily_and_hourly_pay_bases_are_calculated_for_nonfinal_periods(
         "salaries": entry["input_snapshot"]["salary_versions"],
         "attendance_count": len(entry["input_snapshot"]["attendance_revisions"]),
     }
-    assert entry["earnings"]["provisional"] is True
+    assert entry["blockers"] == []
+    assert entry["earnings"]["provisional"] is False
+    assert entry["calculation_version"] == "attendance-v1"
     assert "pay_basis_unsupported" not in {
         blocker["code"] for blocker in entry["blockers"]
     }

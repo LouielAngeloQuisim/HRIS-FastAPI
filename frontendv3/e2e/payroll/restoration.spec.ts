@@ -5,7 +5,7 @@ test('restored payroll pages load the real backend and validate required input',
   await page.goto('/payroll')
   await expect(page.getByRole('heading', { name: 'Payroll readiness' })).toBeVisible()
   await expect(page.getByTestId('payroll-preflight-button')).toBeDisabled()
-  await expect(page.getByText(/statutory deductions.*remain disabled/i)).toBeVisible()
+  await expect(page.getByText(/final approval also requires.*system approval gate/i)).toBeVisible()
   await page.goto('/payroll-runs')
   await expect(page.getByRole('heading', { name: 'Payroll Runs', exact: true })).toBeVisible()
   await expect(page.getByRole('table')).toBeVisible()

@@ -225,7 +225,7 @@ export default function PayrollPage() {
           >
             {prepareMutation.isPending
               ? 'Saving draft…'
-              : 'Prepare blocked review draft'}
+              : 'Prepare payroll draft'}
           </Button>
         )}
       </section>
@@ -234,10 +234,10 @@ export default function PayrollPage() {
         role='status'
         className='rounded-md border border-amber-500/40 p-3 text-sm text-muted-foreground'
       >
-        Draft preparation saves attendance-based provisional earnings with
-        blockers. Statutory deductions, final approval, payslip generation and
-        delivery remain disabled pending verified rules and HR-approved sample
-        comparisons.
+        Drafts include versioned attendance calculations and named blockers for
+        unsupported or missing inputs. Final approval also requires the
+        employer's confirmed payroll rules, HR's parallel calculation review,
+        and the system approval gate.
       </div>
       {preparedRunId && (
         <p role='status' className='text-sm'>

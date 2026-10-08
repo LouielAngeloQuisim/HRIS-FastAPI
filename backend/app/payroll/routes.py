@@ -5328,6 +5328,7 @@ def prepare_attendance_payroll_draft(
         fingerprint = hashlib.sha256(
             json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+        entry_is_provisional = bool(blockers)
         session.add(
             PayrollEntry(
                 payroll_run_id=run.id,
@@ -5345,7 +5346,7 @@ def prepare_attendance_payroll_draft(
                     "holiday_premium": str(holiday_premium),
                     "rest_day_premium": str(rest_day_premium),
                     "night_differential": str(night_differential),
-                    "provisional": True,
+                    "provisional": entry_is_provisional,
                 },
                 deductions=deductions,
                 gross_pay=gross,
@@ -5355,8 +5356,12 @@ def prepare_attendance_payroll_draft(
                 thirteenth_month=Decimal("0.00"),
                 non_taxable_income=Decimal("0.00"),
                 taxable_income=taxable_pay,
-                review_state="blocked",
-                calculation_version="attendance-v1-provisional",
+                review_state="blocked" if blockers else "ready",
+                calculation_version=(
+                    "attendance-v1-provisional"
+                    if entry_is_provisional
+                    else "attendance-v1"
+                ),
                 input_snapshot=snapshot,
                 input_fingerprint=fingerprint,
                 blockers=[

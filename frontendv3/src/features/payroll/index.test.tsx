@@ -59,7 +59,7 @@ describe('Payroll readiness page', () => {
       .toBeVisible()
     await expect
       .element(screen.getByRole('status'))
-      .toHaveTextContent(/statutory deductions.*remain disabled/i)
+      .toHaveTextContent(/final approval also requires.*system approval gate/i)
     await expect
       .element(screen.getByTestId('payroll-preflight-button'))
       .toBeDisabled()

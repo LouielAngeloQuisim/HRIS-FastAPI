@@ -49,7 +49,7 @@ for (const [kind, fields, change] of [
   })
 }
 
-test('legacy payroll preview and generation stay blocked while readiness explains the remaining gates', async ({ page, loginAsAdmin }) => {
+test('legacy payroll preview and generation stay blocked while readiness explains the approval gates', async ({ page, loginAsAdmin }) => {
   await loginAsAdmin()
   const auth = await headers(page)
   const preview = await page.request.post(`${apiUrl}/payroll/runs/preview`, { headers: auth, data: { cutoff_type: 'monthly', date_from: '2026-10-01', date_to: '2026-10-31' } })
@@ -58,7 +58,7 @@ test('legacy payroll preview and generation stay blocked while readiness explain
   expect(generation.status()).toBe(409)
   await page.goto('/payroll')
   await expect(page.getByRole('heading', { name: 'Payroll readiness' })).toBeVisible()
-  await expect(page.getByText(/statutory deductions.*remain disabled/i)).toBeVisible()
+  await expect(page.getByText(/final approval also requires.*system approval gate/i)).toBeVisible()
   await expect(page.getByTestId('payroll-prepare-draft-button')).toBeDisabled()
 })
 

@@ -16,7 +16,7 @@ from app.attendance.models import (
 from app.audit.models import AuditLog
 from app.common.security import get_password_hash
 from app.config.settings import settings
-from app.employee.models import EmployeeRecords
+from app.employee.models import EmployeeRecords, EmployeeStatus
 from app.payroll.models import (
     EmployeePayGroupAssignment,
     EmployeeSalary,
@@ -293,6 +293,16 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         assert schedule_rows[0]["values"]
     payroll_entry = db.get(PayrollEntry, uuid.UUID(second_entry["id"]))
     assert payroll_entry is not None
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_employee = db.get(EmployeeRecords, employee.id)
+    assert payroll_employee is not None
+    payroll_employee.date_separated = date(2026, 10, 20)
+    db.add(payroll_employee)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_employee.date_separated = None
+    db.add(payroll_employee)
+    db.commit()
     assert _payroll_entry_inputs_are_current(db, payroll_entry)
 
     # An in-place edit must invalidate the frozen draft even when its row ID
@@ -1038,3 +1048,45 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
     assert bases["sss"]["basis"] == str(expected_actual)
     assert bases["philhealth"]["basis"] == str(expected_philhealth_basis)
     assert bases["pagibig"]["basis"] == str(expected_actual)
+
+
+def test_resigned_or_terminated_employee_needs_separation_date_for_payroll(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    employee = EmployeeRecords(
+        employee_code=f"END-DATE-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Separated",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2020, 1, 1),
+        employee_status=EmployeeStatus.TERMINATED,
+    )
+    group = PayrollPayGroup(
+        code=f"END-DATE-{uuid.uuid4().hex[:8]}",
+        name="QA terminated employee boundary",
+        cadence="monthly",
+        weekend_rule="next_business_day",
+    )
+    db.add_all([employee, group])
+    db.commit()
+
+    response = client.get(
+        f"{API}/runs/preflight",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2026-10-01",
+            "date_to": "2026-10-31",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 200, response.text
+    entry = next(
+        row
+        for row in response.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert "employment_end_date_missing" in {
+        blocker["code"] for blocker in entry["blockers"]
+    }

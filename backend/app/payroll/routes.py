@@ -817,6 +817,27 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
         if entry.employee_id is None:
             return False
         employee_id = entry.employee_id
+        employee_record = session.get(EmployeeRecords, employee_id)
+        employee_reference = snapshot.get("employee_record")
+        if employee_record is None or employee_record.is_deleted or not isinstance(
+            employee_reference, dict
+        ):
+            return False
+        current_employee_reference = {
+            "id": str(employee_record.id),
+            "is_deleted": employee_record.is_deleted,
+            "employee_status": str(
+                getattr(employee_record.employee_status, "value", employee_record.employee_status)
+            ),
+            "date_hired": employee_record.date_hired.isoformat()
+            if employee_record.date_hired
+            else None,
+            "date_separated": employee_record.date_separated.isoformat()
+            if employee_record.date_separated
+            else None,
+        }
+        if current_employee_reference != employee_reference:
+            return False
 
         tax_declaration = session.exec(
             select(EmployeeTaxYearDeclaration).where(
@@ -2118,6 +2139,14 @@ def preflight_payroll_run(
     for employee in page:
         blockers: list[PayrollPreflightBlocker] = []
         warnings: list[str] = []
+        employee_status = str(getattr(employee.employee_status, "value", employee.employee_status))
+        if employee_status in {"Resigned", "Terminated"} and employee.date_separated is None:
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="employment_end_date_missing",
+                    message="A resigned or terminated employee needs an effective separation date before payroll can be calculated.",
+                )
+            )
         employee_groups = assignments_by_employee.get(employee.id, [])
         member_groups = [
             item for item in employee_groups if item.pay_group_id == pay_group_id
@@ -3151,6 +3180,7 @@ def prepare_attendance_payroll_draft(
             }
             for row in dtr_rows
         ]
+        employee_record = session.get(EmployeeRecords, roster_entry.employee_id)
         shift_rows = session.exec(
             select(EmployeeShiftAssignment).where(
                 EmployeeShiftAssignment.employee_id == roster_entry.employee_id,
@@ -3224,6 +3254,23 @@ def prepare_attendance_payroll_draft(
             "holiday_revisions": holiday_refs,
             "policy_versions": [{"id": str(policy.id), "version": policy.version}],
             "employee_id": str(roster_entry.employee_id),
+            "employee_record": (
+                {
+                    "id": str(employee_record.id),
+                    "is_deleted": employee_record.is_deleted,
+                    "employee_status": str(
+                        getattr(employee_record.employee_status, "value", employee_record.employee_status)
+                    ),
+                    "date_hired": employee_record.date_hired.isoformat()
+                    if employee_record.date_hired
+                    else None,
+                    "date_separated": employee_record.date_separated.isoformat()
+                    if employee_record.date_separated
+                    else None,
+                }
+                if employee_record is not None
+                else None
+            ),
             "pay_group_id": str(group.id),
             "pay_group_cadence": group.cadence.value,
             "period": {

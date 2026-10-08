@@ -246,12 +246,14 @@ class BIRBracket(SQLModel, table=True):
 
 
 class EmployeeSalary(SQLModel, table=True):
-    """Employee salary configuration with rate and non-taxable allowances.
+    """Employee salary configuration with effective-dated rates and allowances.
 
     Supports multiple rate periods via ``effective_date`` (mid-period rate
     changes pro-rate days before/on the effective date), pay_type
-    (monthly/daily/hourly), and the non-taxable allowance set (de minimis caps,
-    13th-month exempt portion ≤ ₱90,000/yr).
+    (monthly/daily/hourly), a legacy-named fixed monthly cash allowance,
+    and a separately classified de minimis benefit map. The legacy allowance
+    is taxable only when the confirmed payroll policy explicitly applies the
+    supported fixed-allowance rule.
     """
 
     __tablename__ = "employee_salary"
@@ -274,6 +276,8 @@ class EmployeeSalary(SQLModel, table=True):
     )
     overtime_rate: Decimal = Field(default=Decimal("0.000"), sa_column=Numeric(6, 3))  # type: ignore
     absent_penalty_rate: Decimal = Field(default=Decimal("0.000"), sa_column=Numeric(6, 3))  # type: ignore
+    # Legacy column/API name; this is not evidence that the allowance qualifies
+    # for an income-tax exemption.
     non_taxable_allowance: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(12, 2))  # type: ignore
     de_minimis_monthly: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
     thirteenth_month_exempt_portion: Decimal = Field(

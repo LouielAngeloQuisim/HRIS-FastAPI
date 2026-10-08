@@ -830,6 +830,7 @@ export interface PayrollAttendanceCalculationPreview {
     holiday_premium: string | null
     rest_day_premium: string | null
     night_differential: string | null
+    fixed_recurring_allowance: string | null
     attendance_deduction: string | null
     gross_before_statutory: string | null
     blockers: { code: string; message: string; work_date: string | null }[]

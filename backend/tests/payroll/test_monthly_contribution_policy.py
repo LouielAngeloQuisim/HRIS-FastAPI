@@ -78,6 +78,40 @@ def test_policy_confirmation_requires_supported_monthly_partial_work_rule(
     db.commit()
 
 
+def test_policy_confirmation_rejects_unsupported_fixed_allowance_rule(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    payload = _policy("once_monthly", "last_period")
+    payload["allowance_tax_treatment"] = {
+        "fixed_recurring": "non_taxable",
+        "proration": "calendar_days",
+        "absence": "not_deducted",
+    }
+    created = client.post(
+        f"{API}/policies",
+        json={"effective_from": "2103-01-01", "policy": payload},
+        headers=superuser_token_headers,
+    )
+    assert created.status_code == 201, created.text
+    rejected = client.post(
+        f"{API}/policies/{created.json()['id']}/confirm",
+        headers=superuser_token_headers,
+    )
+    assert rejected.status_code == 422
+    detail = rejected.json()["detail"]
+    assert detail["required"] == {
+        "fixed_recurring": "taxable",
+        "proration": "calendar_days",
+        "absence": "not_deducted",
+    }
+    row = db.get(PayrollPolicyVersion, UUID(created.json()["id"]))
+    assert row is not None
+    db.delete(row)
+    db.commit()
+
+
 def test_policy_confirmation_rejects_unknown_monthly_salary_proration(
     client: TestClient,
     db: Session,

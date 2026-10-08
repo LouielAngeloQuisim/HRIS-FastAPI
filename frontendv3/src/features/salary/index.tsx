@@ -622,7 +622,7 @@ export default function SalaryPage() {
                       className='w-full rounded border bg-background px-2 py-1'
                     />
                     <input
-                      aria-label={`${emp.employee_code} allowance`}
+                      aria-label={`${emp.employee_code} fixed monthly allowance`}
                       type='number'
                       min='0'
                       step='0.01'
@@ -637,7 +637,7 @@ export default function SalaryPage() {
                         }))
                         resetBulkBatch()
                       }}
-                      placeholder='Allowance'
+                      placeholder='Fixed monthly allowance'
                       className='w-full rounded border bg-background px-2 py-1'
                     />
                   </div>
@@ -655,8 +655,8 @@ export default function SalaryPage() {
               </span>
               {invalidBulkEmployees.length > 0 && (
                 <span role='alert' className='text-xs text-destructive'>
-                  Enter a positive basic rate and non-negative
-                  overtime/allowance for each selected employee.
+                  Enter a positive basic rate and non-negative overtime and
+                  fixed monthly allowance for each selected employee.
                 </span>
               )}
               <Button

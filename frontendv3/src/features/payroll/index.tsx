@@ -717,6 +717,7 @@ export default function PayrollPage() {
                   <th className='p-2 text-right'>Holiday premium</th>
                   <th className='p-2 text-right'>Rest-day premium</th>
                   <th className='p-2 text-right'>Night differential</th>
+                  <th className='p-2 text-right'>Fixed allowance</th>
                   <th className='p-2 text-right'>Attendance deduction</th>
                   <th className='p-2 text-right'>Gross before statutory</th>
                 </tr>
@@ -760,6 +761,9 @@ export default function PayrollPage() {
                     </td>
                     <td className='p-2 text-right'>
                       {entry.night_differential ?? '—'}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.fixed_recurring_allowance ?? '—'}
                     </td>
                     <td className='p-2 text-right'>
                       {entry.attendance_deduction ?? '—'}

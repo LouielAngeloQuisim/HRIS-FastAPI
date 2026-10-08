@@ -499,6 +499,7 @@ class PayrollAttendanceCalculationEntry(SQLModel):
     holiday_premium: Decimal | None = None
     rest_day_premium: Decimal | None = None
     night_differential: Decimal | None = None
+    fixed_recurring_allowance: Decimal | None = None
     attendance_deduction: Decimal | None = None
     short_time_deduction: Decimal | None = None
     gross_before_statutory: Decimal | None = None

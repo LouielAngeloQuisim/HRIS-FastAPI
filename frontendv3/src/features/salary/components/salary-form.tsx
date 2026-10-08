@@ -273,10 +273,13 @@ export function SalaryForm({ open, onClose, employeeId, initialData }: Props) {
                   name='non_taxable_allowance'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Non-Taxable Allowance</FormLabel>
+                      <FormLabel>Fixed Monthly Allowance</FormLabel>
                       <FormControl>
                         <Input type='number' step='0.01' {...field} value={field.value ?? ''} data-testid='salary-form-non-taxable-input' />
                       </FormControl>
+                      <p className='text-xs text-muted-foreground'>
+                        Taxable under the confirmed payroll policy; prorated by employed calendar days and not reduced for attendance. Enter de minimis benefits in the tax-benefits ledger.
+                      </p>
                       <FormMessage />
                     </FormItem>
                   )}

@@ -129,7 +129,7 @@ function Compensation({ employeeId }: { employeeId: string }) {
           <Field label='Salary basis' value={latest.pay_type} />
           <Field label='Basic rate' value={`${latest.currency} ${latest.basic_rate}`} />
           <Field label='Effective from' value={latest.effective_date} />
-          <Field label='Non-taxable allowance' value={`${latest.currency} ${latest.non_taxable_allowance}`} />
+          <Field label='Fixed monthly allowance' value={`${latest.currency} ${latest.non_taxable_allowance}`} />
         </dl>
         <div>
           <h3 className='text-sm font-medium'>Salary history</h3>

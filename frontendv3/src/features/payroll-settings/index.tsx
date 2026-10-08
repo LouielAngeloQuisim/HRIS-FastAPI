@@ -51,7 +51,11 @@ export default function PayrollSettingsPage() {
   "grace_minutes": null,
   "overtime_rule": null,
   "premium_rules": null,
-  "allowance_tax_treatment": null,
+  "allowance_tax_treatment": {
+    "fixed_recurring": "taxable",
+    "proration": "calendar_days",
+    "absence": "not_deducted"
+  },
   "rounding_mode": null,
   "contribution_collection": {
     "frequency": "once_monthly",
@@ -207,9 +211,9 @@ export default function PayrollSettingsPage() {
         {canAdd && <form onSubmit={submitPolicy} className="space-y-3">
           <label className="grid gap-1 text-sm">Effective from<input data-testid="payroll-policy-effective-date" required type="date" value={policyEffectiveDate} onChange={e => setPolicyEffectiveDate(e.target.value)} className="h-9 w-fit rounded border bg-background px-3" /></label>
           <label className="grid gap-1 text-sm">Policy data (JSON)<textarea data-testid="payroll-policy-json" required rows={16} value={policyJson} onChange={e => setPolicyJson(e.target.value)} className="w-full rounded border bg-background p-3 font-mono text-xs" /></label>
-          <p className="text-xs text-muted-foreground">Set <code>monthly_salary_proration</code> to <code>scheduled_workday_fraction</code> for a fixed full-month or half-month base apportioned over scheduled workdays, or <code>monthly_divisor_per_workday</code> for the configured divisor amount per scheduled day. Set a reviewed <code>monthly_holiday_pay_divisor</code> for worked holiday premiums. For work on a weekly rest day without a holiday, configure <code>premium_rules.rest_day_regular_multiplier</code> (at least <code>1.30</code>) and <code>rest_day_overtime_multiplier</code> (at least <code>1.69</code>); otherwise the work blocks payroll. Set <code>premium_rules.night_differential_rate</code> to the company rate (at least <code>0.10</code>) for work between 10:00 p.m. and 6:00 a.m.; the app blocks night-work calculations if it is missing. Also set <code>monthly_partial_work</code> to <code>deduct_after_grace</code> or <code>no_deduction</code>. Full unpaid absences are deducted under either partial-work rule.</p>
+          <p className="text-xs text-muted-foreground">Set <code>monthly_salary_proration</code> to <code>scheduled_workday_fraction</code> for a fixed full-month or half-month base apportioned over scheduled workdays, or <code>monthly_divisor_per_workday</code> for the configured divisor amount per scheduled day. Set a reviewed <code>monthly_holiday_pay_divisor</code> for worked holiday premiums. For work on a weekly rest day without a holiday, configure <code>premium_rules.rest_day_regular_multiplier</code> (at least <code>1.30</code>) and <code>rest_day_overtime_multiplier</code> (at least <code>1.69</code>); otherwise the work blocks payroll. Set <code>premium_rules.night_differential_rate</code> to the company rate (at least <code>0.10</code>) for work between 10:00 p.m. and 6:00 a.m.; the app blocks night-work calculations if it is missing. Also set <code>monthly_partial_work</code> to <code>deduct_after_grace</code> or <code>no_deduction</code>. Full unpaid absences are deducted under either partial-work rule. Fixed recurring cash allowances must remain configured as taxable, prorated by employed calendar days, and not reduced for attendance; de minimis categories are separate and remain blocked until the employee benefit ledger has eligibility and cap evidence.</p>
           <Button type="submit" disabled={setup.createPolicy.isPending}>Save policy draft</Button>
-          <p className="text-xs text-muted-foreground">Confirmation records that the listed statutory source URLs were reviewed. Payroll finalization remains disabled until the attendance-driven calculation and independent review workflow is complete.</p>
+          <p className="text-xs text-muted-foreground">Confirmation records that the listed statutory source URLs were reviewed. Keep finalization and email delivery disabled until an HR-approved parallel payroll comparison and statutory schedule review are complete.</p>
         </form>}
       </section>
     </main>

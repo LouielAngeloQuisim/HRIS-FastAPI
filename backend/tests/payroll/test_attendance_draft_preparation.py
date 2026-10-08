@@ -689,6 +689,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
             basic_rate="26000.00",
             effective_date=date(2026, 10, 1),
             pay_type=PayType.MONTHLY,
+            non_taxable_allowance="3100.00",
         )
     )
     db.add(
@@ -753,7 +754,11 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
             "grace_minutes": 10,
             "overtime_rule": {"multiplier": "1.25"},
             "premium_rules": {},
-            "allowance_tax_treatment": {},
+            "allowance_tax_treatment": {
+                "fixed_recurring": "taxable",
+                "proration": "calendar_days",
+                "absence": "not_deducted",
+            },
             "rounding_mode": "half_up",
             "contribution_collection": {
                 "frequency": "once_monthly",
@@ -802,9 +807,12 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     assert data["workflow_status"] == "draft"
     entry = next(row for row in data["entries"] if row["employee_id"] == str(employee.id))
     assert entry["review_state"] == "blocked"
-    assert entry["gross_pay"] == "13000.00", entry["blockers"]
+    assert entry["gross_pay"] == "14500.00", entry["blockers"]
     assert entry["total_deductions"] == "1194.13"
-    assert entry["net_pay"] == "11805.87"
+    assert entry["net_pay"] == "13305.87"
+    assert entry["taxable_income"] == "13305.87"
+    assert entry["earnings"]["fixed_recurring_allowance"] == "1500.00"
+    assert entry["input_snapshot"]["fixed_recurring_allowance"]["amount"] == "1500.00"
     assert entry["earnings"]["provisional"] is True
     assert entry["deductions"]["attendance_breakdown"] == {
         "unpaid_absence": "1181.82",
@@ -826,6 +834,27 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
             "is_deleted": False,
         }
     ]
+    attendance_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2026-10-01",
+            "date_to": "2026-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert attendance_preview.status_code == 200, attendance_preview.text
+    attendance_preview_entry = next(
+        row
+        for row in attendance_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert attendance_preview_entry["fixed_recurring_allowance"] == "1500.00"
+    assert attendance_preview_entry["gross_before_statutory"] == "14500.00"
+    assert any(
+        "Fixed recurring allowance: 1500.00 taxable" in formula
+        for formula in attendance_preview_entry["formula"]
+    )
     frozen_entry = db.get(PayrollEntry, uuid.UUID(entry["id"]))
     assert frozen_entry is not None
     leave_policy.is_paid = True
@@ -1732,7 +1761,11 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             "grace_minutes": 0,
             "overtime_rule": {"multiplier": "1.25"},
             "premium_rules": {},
-            "allowance_tax_treatment": {},
+            "allowance_tax_treatment": {
+                "fixed_recurring": "taxable",
+                "proration": "calendar_days",
+                "absence": "not_deducted",
+            },
             "rounding_mode": "half_up",
             "contribution_collection": {
                 "frequency": "once_monthly",
@@ -1753,6 +1786,11 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
                 basic_rate=basic_rate,
                 effective_date=date(2025, 11, 1),
                 pay_type=pay_type,
+                non_taxable_allowance=(
+                    Decimal("600.00")
+                    if tax_classification == "minimum_wage_earner"
+                    else Decimal("0.00")
+                ),
             ),
             EmployeePayGroupAssignment(
                 employee_id=employee.id,
@@ -1835,8 +1873,8 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
         assert "bir_cumulative_opening_unavailable" not in {
             blocker["code"] for blocker in entry["blockers"]
         }
-        trace = entry["input_snapshot"]["bir_calculation"]
         if tax_classification == "ordinary":
+            trace = entry["input_snapshot"]["bir_calculation"]
             assert trace["method"] == "cumulative_average_rr_11_2018"
             # A semi-monthly monthly-salary base is half the monthly salary,
             # independent of how many weekdays fall in the cutoff.
@@ -1844,13 +1882,15 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             assert trace["cumulative_period_count"] == 7
             assert trace["average_period_compensation"] == "28214.29"
             assert trace["prior_tax_withheld"] == "11000.40"
+            assert Decimal(trace["withholding"]) == Decimal(
+                entry["deductions"]["bir_withholding"]
+            )
         else:
-            assert trace["method"] == "mwe_exemption_rr_8_2018"
-            assert trace["taxable_compensation"] == "0.00"
-            assert trace["withholding"] == "0.00"
-        assert Decimal(trace["withholding"]) == Decimal(
-            entry["deductions"]["bir_withholding"]
-        )
+            assert "bir_calculation" not in entry["input_snapshot"]
+            assert any(
+                blocker["code"] == "bir_mwe_taxable_allowance_ineligible"
+                for blocker in entry["blockers"]
+            )
         declaration = entry["input_snapshot"]["tax_year_declaration"]
         assert declaration["opening_pay_period_count"] == 6
         if tax_classification == "ordinary":
@@ -2076,6 +2116,7 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
                 basic_rate=updated_rate,
                 effective_date=date(year, 10, 16),
                 pay_type=pay_type,
+                non_taxable_allowance="6200.00",
             ),
             EmployeePayGroupAssignment(
                 employee_id=employee.id,
@@ -2113,7 +2154,11 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
                     "grace_minutes": 0,
                     "overtime_rule": {"multiplier": "1.25"},
                     "premium_rules": {},
-                    "allowance_tax_treatment": {},
+                    "allowance_tax_treatment": {
+                        "fixed_recurring": "taxable",
+                        "proration": "calendar_days",
+                        "absence": "not_deducted",
+                    },
                     "rounding_mode": "half_up",
                     "contribution_collection": {
                         "frequency": "once_monthly",
@@ -2204,7 +2249,9 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
         expected_period_gross = updated_rate / Decimal("2")
     else:
         expected_period_gross -= partial_day_reduction
+    expected_period_gross += Decimal("3200.00")
     assert Decimal(entry["gross_pay"]) == expected_period_gross, entry
+    assert entry["earnings"]["fixed_recurring_allowance"] == "3200.00"
     if pay_type == PayType.MONTHLY:
         assert Decimal(entry["deductions"]["attendance"]) == partial_day_reduction
         assert (
@@ -2234,6 +2281,7 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
             + daily_basis_after_change * Decimal(days_after_change)
             - partial_day_reduction
         ).quantize(Decimal("0.01"))
+    expected_actual += Decimal("3200.00")
     monthly_equivalent_before_change = (
         base_rate if pay_type == PayType.MONTHLY else base_rate * hours_per_shift * divisor
     )

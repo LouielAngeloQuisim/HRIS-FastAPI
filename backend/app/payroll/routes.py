@@ -11,7 +11,13 @@ import uuid
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 from datetime import time as time_of_day
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import (
+    ROUND_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    Decimal,
+    InvalidOperation,
+)
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1126,6 +1132,80 @@ def _philhealth_monthly_basic_salary_basis(
             )
         monthly_weighted += equivalent * Decimal(segment_days) / Decimal(days_in_month)
     return monthly_weighted.quantize(Decimal("0.01"))
+
+
+def _fixed_recurring_allowance_for_period(
+    *,
+    salaries: Sequence[EmployeeSalary],
+    employee: EmployeeRecords | None,
+    date_from: date,
+    date_to: date,
+    policy: dict[str, Any],
+) -> Decimal:
+    """Calculate the supported taxable fixed monthly cash allowance.
+
+    The legacy salary column does not establish a tax exemption. This rule
+    applies only with explicit taxable/calendar-day/no-attendance-deduction
+    policy settings. Category-specific de minimis benefits stay in their
+    separate ledger.
+    """
+    if date_from > date_to:
+        raise StatutoryScheduleUnavailable("Allowance period start must not follow its end")
+    effective_salaries = sorted(salaries, key=lambda row: row.effective_date)
+    total = Decimal("0.00")
+    has_allowance = False
+    cursor = date_from
+    while cursor <= date_to:
+        if employee is not None and employee.date_hired and cursor < employee.date_hired:
+            cursor += timedelta(days=1)
+            continue
+        if employee is not None and employee.date_separated and cursor > employee.date_separated:
+            cursor += timedelta(days=1)
+            continue
+        salary = next(
+            (row for row in reversed(effective_salaries) if row.effective_date <= cursor),
+            None,
+        )
+        if salary is None:
+            raise StatutoryScheduleUnavailable(
+                f"An effective salary is required to determine the fixed allowance on {cursor.isoformat()}"
+            )
+        if salary.de_minimis_monthly:
+            raise StatutoryScheduleUnavailable(
+                "De minimis benefits require category, eligibility, ceiling, and paid-benefit ledger reconciliation"
+            )
+        monthly_amount = Decimal(str(salary.non_taxable_allowance or 0))
+        if monthly_amount < 0:
+            raise StatutoryScheduleUnavailable("Fixed recurring allowance cannot be negative")
+        if monthly_amount:
+            has_allowance = True
+            month_days = calendar.monthrange(cursor.year, cursor.month)[1]
+            total += monthly_amount / Decimal(month_days)
+        cursor += timedelta(days=1)
+    if not has_allowance:
+        return Decimal("0.00")
+    treatment = policy.get("allowance_tax_treatment")
+    if not isinstance(treatment, dict) or any(
+        treatment.get(key) != expected
+        for key, expected in (
+            ("fixed_recurring", "taxable"),
+            ("proration", "calendar_days"),
+            ("absence", "not_deducted"),
+        )
+    ):
+        raise StatutoryScheduleUnavailable(
+            "Configure fixed recurring allowances as taxable, prorated by employed calendar days, and not reduced for attendance before payroll preparation"
+        )
+    rounding_mode = {
+        "half_up": ROUND_HALF_UP,
+        "half_even": ROUND_HALF_EVEN,
+        "down": ROUND_DOWN,
+    }.get(str(policy.get("rounding_mode")))
+    if rounding_mode is None:
+        raise StatutoryScheduleUnavailable(
+            "A supported company rounding mode is required to calculate the fixed allowance"
+        )
+    return total.quantize(Decimal("0.01"), rounding=rounding_mode)
 
 
 def _same_calendar_day(value: date | datetime | str, expected: date) -> bool:
@@ -3496,6 +3576,14 @@ def attendance_calculation_preview(
             col(PayrollPolicyVersion.confirmed).is_(True),
         )
     ).all()
+    allowance_policy_rows = [
+        item
+        for item in policies
+        if item.confirmed
+        and item.effective_from <= date_from
+        and (item.effective_to is None or item.effective_to >= date_to)
+    ]
+    allowance_policy = allowance_policy_rows[0].policy if len(allowance_policy_rows) == 1 else {}
     leave_rows = session.exec(
         select(LeaveRequest).where(
             col(LeaveRequest.employee_id).in_(employee_ids),
@@ -4454,6 +4542,26 @@ def attendance_calculation_preview(
         night_differential = sum(
             (result.night_differential for result in results), Decimal("0.00")
         )
+        fixed_allowance = Decimal("0.00")
+        try:
+            fixed_allowance = _fixed_recurring_allowance_for_period(
+                salaries=employee_salaries,
+                employee=employee,
+                date_from=date_from,
+                date_to=date_to,
+                policy=allowance_policy,
+            )
+        except StatutoryScheduleUnavailable as exc:
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="allowance_tax_treatment_unavailable",
+                    message=str(exc),
+                )
+            )
+        if fixed_allowance:
+            formulas.append(
+                f"Fixed recurring allowance: {fixed_allowance} taxable; calendar-day prorated over employed dates; attendance absences do not reduce it"
+            )
         attendance_deduction = sum(
             (result.attendance_deduction for result in results), Decimal("0.00")
         )
@@ -4470,6 +4578,7 @@ def attendance_calculation_preview(
                 holiday_premium=holiday_premium if not blockers else None,
                 rest_day_premium=rest_day_premium if not blockers else None,
                 night_differential=night_differential if not blockers else None,
+                fixed_recurring_allowance=fixed_allowance,
                 attendance_deduction=attendance_deduction if not blockers else None,
                 short_time_deduction=short_time_deduction if not blockers else None,
                 gross_before_statutory=(
@@ -4478,6 +4587,7 @@ def attendance_calculation_preview(
                     + holiday_premium
                     + rest_day_premium
                     + night_differential
+                    + fixed_allowance
                     if not blockers
                     else None
                 ),
@@ -4778,6 +4888,8 @@ def prepare_attendance_payroll_draft(
             )
             .order_by(col(EmployeeSalary.effective_date))
         ).all()
+        employee_record = session.get(EmployeeRecords, roster_entry.employee_id)
+        fixed_allowance = Decimal("0.00")
         if not employee_salaries:
             blockers.append(
                 PayrollPreflightBlocker(
@@ -4786,12 +4898,19 @@ def prepare_attendance_payroll_draft(
                 )
             )
         else:
-            effective_salary_for_period = employee_salaries[-1]
-            if effective_salary_for_period.non_taxable_allowance or effective_salary_for_period.de_minimis_monthly:
+            try:
+                fixed_allowance = _fixed_recurring_allowance_for_period(
+                    salaries=employee_salaries,
+                    employee=employee_record,
+                    date_from=obj_in.date_from,
+                    date_to=obj_in.date_to,
+                    policy=policy.policy,
+                )
+            except StatutoryScheduleUnavailable as exc:
                 blockers.append(
                     PayrollPreflightBlocker(
                         code="allowance_tax_treatment_unavailable",
-                        message="Allowance and de minimis tax treatment must be configured before this employee can be calculated.",
+                        message=str(exc),
                     )
                 )
         salary_refs = [
@@ -4839,14 +4958,20 @@ def prepare_attendance_payroll_draft(
                         raise StatutoryScheduleUnavailable(
                             "Resolve the full month's attendance and overtime blockers before assessing SSS compensation"
                         )
-                    if effective_salary.non_taxable_allowance or effective_salary.de_minimis_monthly:
-                        raise StatutoryScheduleUnavailable(
-                            "Additional allowances need an approved scheme-specific contribution treatment"
-                        )
+                    full_month_fixed_allowance = _fixed_recurring_allowance_for_period(
+                        salaries=employee_salaries,
+                        employee=employee_record,
+                        date_from=month_start,
+                        date_to=month_start.replace(
+                            day=calendar.monthrange(month_start.year, month_start.month)[1]
+                        ),
+                        policy=policy.policy,
+                    )
                     sss_basis = (
                         full_month.regular_earnings
                         - full_month.attendance_deduction
                         + full_month.approved_overtime
+                        + full_month_fixed_allowance
                         if full_month.regular_earnings is not None
                         and full_month.attendance_deduction is not None
                         and full_month.approved_overtime is not None
@@ -4899,11 +5024,12 @@ def prepare_attendance_payroll_draft(
                         source_urls=policy_sources,
                     )
                     monthly_contributions["basis_method"] = {
-                        "sss": "full-month regular earnings less unpaid absence and monthly short-time deductions, plus approved overtime; indexed by the effective SSS schedule",
+                        "sss": "full-month regular earnings less unpaid absence and monthly short-time deductions, plus approved overtime and the confirmed taxable fixed recurring allowance; indexed by the effective SSS schedule",
                         "philhealth": (
                             "contractual fixed-basic monthly equivalent; monthly salary is weighted by calendar days, while daily/hourly rates use the confirmed monthly divisor and effective scheduled shift minutes; overtime and absence deductions excluded"
                         ),
-                        "pagibig": "full-month regular earnings less unpaid absence and monthly short-time deductions, plus approved overtime; allowances remain blocked until their fund-salary treatment is configured",
+                        "pagibig": "full-month regular earnings less unpaid absence and monthly short-time deductions, plus approved overtime and taxable fixed recurring allowances; de minimis amounts remain blocked pending category and eligibility evidence",
+                        "fixed_recurring_allowance": "monthly fixed amount prorated by employed calendar days; taxable under the confirmed company policy, not reduced for attendance, included in SSS and Pag-IBIG compensation, and excluded from PhilHealth monthly basic salary",
                     }
                 except StatutoryScheduleUnavailable as exc:
                     blockers.append(
@@ -5208,6 +5334,13 @@ def prepare_attendance_payroll_draft(
                 "from": obj_in.date_from.isoformat(),
                 "to": obj_in.date_to.isoformat(),
             },
+            "fixed_recurring_allowance": {
+                "amount": str(fixed_allowance),
+                "tax_treatment": "taxable" if fixed_allowance else None,
+                "proration": "calendar_days_employed" if fixed_allowance else None,
+                "absence_treatment": "not_deducted" if fixed_allowance else None,
+                "policy": policy.policy.get("allowance_tax_treatment", {}),
+            },
         }
         if monthly_contributions is not None:
             snapshot["monthly_contributions"] = monthly_contributions
@@ -5336,7 +5469,12 @@ def prepare_attendance_payroll_draft(
             else Decimal("0.00")
         )
         gross = (
-            regular + overtime + holiday_premium + rest_day_premium + night_differential
+            regular
+            + overtime
+            + holiday_premium
+            + rest_day_premium
+            + night_differential
+            + fixed_allowance
         )
         employee_statutory = {
             scheme: Decimal(str(values["employee"]))
@@ -5367,6 +5505,16 @@ def prepare_attendance_payroll_draft(
             tax_declaration is not None
             and tax_declaration.tax_classification == "minimum_wage_earner"
         )
+        mwe_has_taxable_allowance = is_minimum_wage_earner and fixed_allowance > 0
+        if mwe_has_taxable_allowance:
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="bir_mwe_taxable_allowance_ineligible",
+                    message=(
+                        "A taxable fixed recurring allowance is incompatible with the declared minimum-wage-earner exemption under BIR RR 10-2008; verify and update the employee's tax classification before payroll review."
+                    ),
+                )
+            )
         has_mwe_evidence = bool(
             tax_declaration and (tax_declaration.source_reference or "").strip()
         )
@@ -5384,7 +5532,11 @@ def prepare_attendance_payroll_draft(
             and tax_declaration.is_verified
             and (
                 tax_declaration.tax_classification == "ordinary"
-                or (is_minimum_wage_earner and has_mwe_evidence)
+                or (
+                    is_minimum_wage_earner
+                    and has_mwe_evidence
+                    and not mwe_has_taxable_allowance
+                )
             )
         ):
             if taxable_pay < 0:
@@ -5736,6 +5888,22 @@ def prepare_attendance_payroll_draft(
             deductions["bir_withholding"] = str(bir_withholding)
             total_deductions += bir_withholding
         net_pay = gross - total_deductions
+        snapshot["earnings_calculation"] = {
+            "regular": str(regular),
+            "approved_overtime": str(overtime),
+            "holiday_premium": str(holiday_premium),
+            "rest_day_premium": str(rest_day_premium),
+            "night_differential": str(night_differential),
+            "fixed_recurring_allowance": str(fixed_allowance),
+            "gross": str(gross),
+            "attendance_deduction": str(attendance_deduction),
+            "employee_statutory_deductions": str(
+                sum(employee_statutory.values(), Decimal("0.00"))
+            ),
+            "bir_withholding": str(bir_withholding),
+            "net": str(net_pay),
+            "formula": "net = regular + approved overtime + premiums + fixed recurring allowance - attendance deductions - employee statutory contributions - BIR withholding",
+        }
         if monthly_contributions is None:
             # The monthly deduction is collected in the final period only.
             # A non-final period has no contribution snapshot by design.
@@ -5770,6 +5938,7 @@ def prepare_attendance_payroll_draft(
                     "holiday_premium": str(holiday_premium),
                     "rest_day_premium": str(rest_day_premium),
                     "night_differential": str(night_differential),
+                    "fixed_recurring_allowance": str(fixed_allowance),
                     "provisional": entry_is_provisional,
                 },
                 deductions=deductions,
@@ -6646,6 +6815,26 @@ def confirm_payroll_policy(
             raise HTTPException(
                 status_code=422, detail=f"{key} must be a non-empty policy object"
             )
+    allowance_treatment = row.policy["allowance_tax_treatment"]
+    if "fixed_recurring" in allowance_treatment and any(
+        allowance_treatment.get(key) != expected
+        for key, expected in (
+            ("fixed_recurring", "taxable"),
+            ("proration", "calendar_days"),
+            ("absence", "not_deducted"),
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Fixed recurring allowance policy is unsupported",
+                "required": {
+                    "fixed_recurring": "taxable",
+                    "proration": "calendar_days",
+                    "absence": "not_deducted",
+                },
+            },
+        )
     # The selected company rule is one statutory collection per calendar
     # month. An explicit final-period trigger prevents a twice-monthly run
     # from withholding a full monthly amount twice.

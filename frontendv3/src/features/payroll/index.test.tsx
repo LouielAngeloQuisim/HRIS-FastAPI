@@ -335,8 +335,9 @@ describe('Payroll readiness page', () => {
           regular_earnings: '12000.00',
           approved_overtime: '450.00',
           holiday_premium: '130.00',
+          fixed_recurring_allowance: '500.00',
           attendance_deduction: '0.00',
-          gross_before_statutory: '12580.00',
+          gross_before_statutory: '13080.00',
           blockers: [],
           formula: ['2026-09-01: hourly basis'],
           source_references: ['attendance:example:revision:1'],
@@ -362,7 +363,9 @@ describe('Payroll readiness page', () => {
     await expect.element(screen.getByText(/QA001 · QA Employee/)).toBeVisible()
     await expect.element(screen.getByText('Holiday premium')).toBeVisible()
     await expect.element(screen.getByText('130.00')).toBeVisible()
-    await expect.element(screen.getByText('12580.00')).toBeVisible()
+    await expect.element(screen.getByText('Fixed allowance')).toBeVisible()
+    await expect.element(screen.getByText('500.00')).toBeVisible()
+    await expect.element(screen.getByText('13080.00')).toBeVisible()
     expect(calculation).toHaveBeenCalledWith(
       expect.objectContaining({
         pay_group_id: 'group-1',

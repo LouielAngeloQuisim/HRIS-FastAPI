@@ -53,6 +53,12 @@ describe('Payroll settings monthly salary policy', () => {
 
   it('submits the explicit monthly salary proration rule in a new policy draft', async () => {
     const screen = await renderWithClient(<PayrollSettingsPage />)
+    const defaultPolicy = screen.getByTestId('payroll-policy-json').element() as HTMLTextAreaElement
+    expect(JSON.parse(defaultPolicy.value).allowance_tax_treatment).toEqual({
+      fixed_recurring: 'taxable',
+      proration: 'calendar_days',
+      absence: 'not_deducted',
+    })
     await userEvent.fill(
       screen.getByTestId('payroll-policy-effective-date'),
       '2026-11-01'

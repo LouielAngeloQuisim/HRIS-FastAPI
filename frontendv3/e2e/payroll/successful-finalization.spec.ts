@@ -112,7 +112,9 @@ test('fictional employee payroll is reviewed, separately finalized and frozen fo
   expect(shiftAssignment.status(), await shiftAssignment.text()).toBe(201)
 
   const attendanceRows = ['employee_code,login_date,logout_date']
-  for (let day = 16; day <= 30; day++) {
+  // Monthly SSS/PhilHealth/Pag-IBIG assessment requires the complete month,
+  // even though this run covers only the second semi-monthly pay period.
+  for (let day = 1; day <= 30; day++) {
     const workDate = new Date(Date.UTC(2026, 10, day))
     if (workDate.getUTCDay() === 0 || workDate.getUTCDay() === 6) continue
     const date = workDate.toISOString().slice(0, 10)

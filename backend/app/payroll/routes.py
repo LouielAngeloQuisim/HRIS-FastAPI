@@ -996,7 +996,6 @@ def _bir_tax_benefit_rows(
                 raise ValueError("A de minimis record is missing its category")
             month_key = (row.paid_on.year, row.paid_on.month, category)
             allocation = calculate_de_minimis_allocation(
-                paid_on=row.paid_on,
                 current_paid={category: gross},
                 month_to_date_paid={
                     category: monthly_paid.get(month_key, Decimal("0.00"))

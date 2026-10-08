@@ -22,7 +22,6 @@ days and needs leave-ledger evidence, not merely a monetary amount.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 from decimal import Decimal, InvalidOperation
 
 CENT = Decimal("0.01")
@@ -77,7 +76,6 @@ def _amount(value: object, *, field: str) -> Decimal:
 
 def calculate_de_minimis_allocation(
     *,
-    paid_on: date,
     current_paid: dict[str, Decimal],
     month_to_date_paid: dict[str, Decimal],
     year_to_date_paid: dict[str, Decimal],
@@ -125,19 +123,11 @@ def calculate_de_minimis_allocation(
                 month_to_date_paid.get(category, Decimal("0.00")),
                 field=f"month_to_date_paid.{category}",
             )
-            if current and paid_on.day == 1 and prior:
-                raise DeMinimisInputError(
-                    f"month_to_date_paid.{category} must be zero on the first day of a month"
-                )
         else:
             prior = _amount(
                 year_to_date_paid.get(category, Decimal("0.00")),
                 field=f"year_to_date_paid.{category}",
             )
-            if current and paid_on.timetuple().tm_yday == 1 and prior:
-                raise DeMinimisInputError(
-                    f"year_to_date_paid.{category} must be zero on the first day of a year"
-                )
 
         remaining_cap = max(Decimal("0.00"), cap - prior)
         eligible = min(current, remaining_cap).quantize(CENT)

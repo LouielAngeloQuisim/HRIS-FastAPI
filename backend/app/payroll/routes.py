@@ -5137,20 +5137,23 @@ def prepare_attendance_payroll_draft(
                             "Full-month regular and approved overtime earnings are required for the SSS compensation basis"
                         )
                     pagibig_basis = sss_basis
-                    policy_sources = sorted(
-                        {
-                            source
-                            for month_policy in month_policy_rows
-                            for source in month_policy.policy.get(
-                                "statutory_sources_reviewed", []
+                    policy_sources_set: set[str] = set()
+                    for month_policy in month_policy_rows:
+                        sources = month_policy.policy.get("statutory_sources_reviewed")
+                        if (
+                            not isinstance(sources, list)
+                            or not sources
+                            or any(
+                                not isinstance(source, str)
+                                or not source.startswith("https://")
+                                for source in sources
                             )
-                            if isinstance(source, str)
-                        }
-                    )
-                    if not policy_sources:
-                        raise StatutoryScheduleUnavailable(
-                            "Confirmed monthly payroll policies have no reviewed statutory source list"
-                        )
+                        ):
+                            raise StatutoryScheduleUnavailable(
+                                "Each confirmed monthly payroll policy must retain its reviewed HTTPS statutory source list"
+                            )
+                        policy_sources_set.update(sources)
+                    policy_sources = sorted(policy_sources_set)
                     philhealth_basis = _philhealth_monthly_basic_salary_basis(
                         session=session,
                         employee_id=roster_entry.employee_id,

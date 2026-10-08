@@ -352,6 +352,9 @@ export default function PayrollPage() {
                   <th className='p-2 text-left'>Blockers</th>
                   <th className='p-2 text-right'>Regular</th>
                   <th className='p-2 text-right'>Approved OT</th>
+                  <th className='p-2 text-right'>Holiday premium</th>
+                  <th className='p-2 text-right'>Rest-day premium</th>
+                  <th className='p-2 text-right'>Night differential</th>
                   <th className='p-2 text-right'>Attendance deduction</th>
                   <th className='p-2 text-right'>Gross before statutory</th>
                 </tr>
@@ -386,6 +389,15 @@ export default function PayrollPage() {
                     </td>
                     <td className='p-2 text-right'>
                       {entry.approved_overtime ?? '—'}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.holiday_premium ?? '—'}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.rest_day_premium ?? '—'}
+                    </td>
+                    <td className='p-2 text-right'>
+                      {entry.night_differential ?? '—'}
                     </td>
                     <td className='p-2 text-right'>
                       {entry.attendance_deduction ?? '—'}

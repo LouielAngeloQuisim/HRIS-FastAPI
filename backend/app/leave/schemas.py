@@ -228,6 +228,8 @@ class HolidayConfigBase(SQLModel):
     observe_weekend_as: ObserveWeekendAs | None = Field(default=None)
     multiplier_regular: Decimal | None = Field(default=None)
     multiplier_overtime: Decimal | None = Field(default=None)
+    multiplier_regular_rest_day: Decimal | None = Field(default=None, ge=1)
+    multiplier_overtime_rest_day: Decimal | None = Field(default=None, ge=1)
     is_recurring: bool = Field(default=True)
     is_active: bool = Field(default=True)
 
@@ -245,6 +247,8 @@ class HolidayConfigUpdate(SQLModel):
     observe_weekend_as: ObserveWeekendAs | None = Field(default=None)
     multiplier_regular: Decimal | None = Field(default=None)
     multiplier_overtime: Decimal | None = Field(default=None)
+    multiplier_regular_rest_day: Decimal | None = Field(default=None, ge=1)
+    multiplier_overtime_rest_day: Decimal | None = Field(default=None, ge=1)
     is_recurring: bool | None = Field(default=None)
     is_active: bool | None = Field(default=None)
 

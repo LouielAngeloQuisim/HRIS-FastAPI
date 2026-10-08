@@ -809,6 +809,8 @@ export interface HolidayConfigPublic {
   observe_weekend_as: string | null
   multiplier_regular: number | null
   multiplier_overtime: number | null
+  multiplier_regular_rest_day: number | null
+  multiplier_overtime_rest_day: number | null
   is_recurring: boolean
   is_active: boolean
   is_deleted: boolean
@@ -828,6 +830,8 @@ export interface HolidayConfigCreate {
   observe_weekend_as?: string | null
   multiplier_regular?: number | null
   multiplier_overtime?: number | null
+  multiplier_regular_rest_day?: number | null
+  multiplier_overtime_rest_day?: number | null
   is_recurring?: boolean
 }
 export interface HolidayConfigUpdate {
@@ -839,6 +843,8 @@ export interface HolidayConfigUpdate {
   observe_weekend_as?: string | null
   multiplier_regular?: number | null
   multiplier_overtime?: number | null
+  multiplier_regular_rest_day?: number | null
+  multiplier_overtime_rest_day?: number | null
   is_recurring?: boolean | null
   is_active?: boolean | null
 }

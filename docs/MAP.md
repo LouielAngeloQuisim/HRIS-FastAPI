@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-08
-Source commit: bfc05a86238cdd32363a55c7486f22d44b78c349
+Source commit: d8af3a7934b025f533bf947aca6ce95f6e3c9153
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 286 endpoints in 40 groups
+## Backend routes (`/api/*`): 291 endpoints in 40 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -240,7 +240,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/password-recovery-html-content/{email}`
 
-### `/api/v1/payroll` (79 routes)
+### `/api/v1/payroll` (84 routes)
 
 - `POST /api/v1/payroll/amortizations/{amortization_id}/pay`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/bir-brackets/`  `[perms: payroll:view]`
@@ -253,8 +253,13 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `GET /api/v1/payroll/employees/{employee_id}/payslip`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/employees/{employee_id}/salary`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/employees/{employee_id}/salary`  `[perms: payroll:add]`
+- `GET /api/v1/payroll/employees/{employee_id}/tax-year-benefits/{tax_year}`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/employees/{employee_id}/tax-year-benefits/{tax_year}`  `[perms: payroll:approve]`
 - `GET /api/v1/payroll/employees/{employee_id}/tax-year-declarations/{tax_year}`  `[perms: payroll:view]`
 - `PUT /api/v1/payroll/employees/{employee_id}/tax-year-declarations/{tax_year}`  `[perms: payroll:approve]`
+- `GET /api/v1/payroll/employer-profile`  `[perms: payroll:view]`
+- `PUT /api/v1/payroll/employer-profile`  `[perms: payroll:edit]`
+- `POST /api/v1/payroll/employer-profile/verify`  `[perms: payroll:approve]`
 - `GET /api/v1/payroll/integrations`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/integrations`  `[perms: payroll:add]`
 - `DELETE /api/v1/payroll/integrations/mappings/{mapping_id}`  `[perms: payroll:delete]`
@@ -473,7 +478,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `payroll`: api `departments`, `employees`, `payroll`, `save-error`; flags: route, test
 - `payroll-config`: api `auth`, `payroll-config`, `save-error`; flags: route, form, test
 - `payroll-runs`: api `payroll`; flags: route, test
-- `payroll-settings`: api `employees`, `payroll`; flags: (none)
+- `payroll-settings`: api `employees`, `payroll`; flags: test
 - `phases`: api `phases`, `save-error`, `subdivisions`; flags: route, form, test
 - `positions`: api `departments`, `positions`; flags: route, form, test
 - `project-types`: api `project-types`; flags: route, form
@@ -486,7 +491,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 43 revisions, single head `f3a4b5c6d7e8`
+## Migration chain (oldest -> newest): 48 revisions, single head `ef8091a2b3c4`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -534,6 +539,11 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 41. `c2d3e4f5a6b7` - Track the date covered by opening tax-year balances.
 42. `e7f8a9b0c1d2` - Store prior-employer periods used by cumulative-average tax.
 43. `f3a4b5c6d7e8` - Add idempotency records for explicit pay-group batches.
+44. `ab4c5d6e7f80` - Add explicit combined holiday and rest-day pay factors.
+45. `bc5d6e7f8091` - Add verified benefit records for annual BIR exemption reconciliation.
+46. `cd6e7f8091a2` - Add employer identity needed for payroll tax certificates.
+47. `de7f8091a2b3` - Track BIR de minimis benefit category and supporting evidence.
+48. `ef8091a2b3c4` - Store reconciled de minimis category opening balances.
 
 ### Migration anomalies (static findings, report-only)
 

@@ -389,6 +389,12 @@ class HolidayConfig(SQLModel, table=True):
     multiplier_overtime: Decimal | None = Field(  # type: ignore
         default=None, sa_column=Numeric(6, 3)
     )
+    multiplier_regular_rest_day: Decimal | None = Field(  # type: ignore
+        default=None, sa_column=Numeric(6, 3)
+    )
+    multiplier_overtime_rest_day: Decimal | None = Field(  # type: ignore
+        default=None, sa_column=Numeric(6, 3)
+    )
     is_recurring: bool = Field(default=True)
     is_active: bool = Field(default=True)
     is_deleted: bool = Field(default=False)

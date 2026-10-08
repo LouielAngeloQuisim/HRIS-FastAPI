@@ -1,7 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { useCan } from '@/context/permissions-provider'
 import { Button } from '@/components/ui/button'
-import { usePayGroupPeriods, usePayrollSetup } from '@/lib/api/payroll'
+import {
+  usePayGroupPeriods,
+  usePayrollEmployerProfile,
+  usePayrollSetup,
+} from '@/lib/api/payroll'
 import { useEmployees } from '@/lib/api/employees'
 import { toast } from 'sonner'
 
@@ -9,8 +13,21 @@ export default function PayrollSettingsPage() {
   const canView = useCan('payroll', 'view')
   const canAdd = useCan('payroll', 'add')
   const canEdit = useCan('payroll', 'edit')
+  const canApprove = useCan('payroll', 'approve')
   const setup = usePayrollSetup()
+  const employerProfile = usePayrollEmployerProfile()
   const employees = useEmployees(1, 500)
+  const [employerDraft, setEmployerDraft] = useState<{
+    tin_number?: string
+    registered_name?: string
+    registered_address?: string
+    postal_code?: string
+    rdo_code?: string
+    employer_type?: '' | 'main' | 'secondary'
+    signatory_name?: string
+    signatory_title?: string
+    source_reference?: string
+  }>({})
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [cadence, setCadence] = useState<'daily' | 'semi_monthly' | 'monthly'>('semi_monthly')
@@ -24,6 +41,8 @@ export default function PayrollSettingsPage() {
   const [policyJson, setPolicyJson] = useState(`{
   "timezone": "Asia/Manila",
   "monthly_divisor": null,
+  "monthly_salary_proration": "scheduled_workday_fraction",
+  "monthly_holiday_pay_divisor": null,
   "daily_partial_work": null,
   "monthly_partial_work": null,
   "paid_leave": null,
@@ -44,6 +63,19 @@ export default function PayrollSettingsPage() {
   const [periodGroupId, setPeriodGroupId] = useState('')
   const [periodMonth, setPeriodMonth] = useState(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit' }))
   const periods = usePayGroupPeriods(periodGroupId, periodMonth)
+
+  const savedEmployerProfile = employerProfile.profile.data
+  const employerIdentity = {
+    tin_number: employerDraft.tin_number ?? savedEmployerProfile?.tin_number ?? '',
+    registered_name: employerDraft.registered_name ?? savedEmployerProfile?.registered_name ?? '',
+    registered_address: employerDraft.registered_address ?? savedEmployerProfile?.registered_address ?? '',
+    postal_code: employerDraft.postal_code ?? savedEmployerProfile?.postal_code ?? '',
+    rdo_code: employerDraft.rdo_code ?? savedEmployerProfile?.rdo_code ?? '',
+    employer_type: employerDraft.employer_type ?? savedEmployerProfile?.employer_type ?? '',
+    signatory_name: employerDraft.signatory_name ?? savedEmployerProfile?.signatory_name ?? '',
+    signatory_title: employerDraft.signatory_title ?? savedEmployerProfile?.signatory_title ?? '',
+    source_reference: employerDraft.source_reference ?? savedEmployerProfile?.source_reference ?? '',
+  }
 
   if (!canView) return <p className="p-6 text-muted-foreground">You do not have permission to view payroll settings.</p>
 
@@ -68,6 +100,36 @@ export default function PayrollSettingsPage() {
     } catch { toast.error('Could not save assignment. Check the employee, group and effective date for conflicts.') }
   }
 
+  const submitEmployerIdentity = async (event: FormEvent) => {
+    event.preventDefault()
+    try {
+      await employerProfile.save.mutateAsync({
+        tin_number: employerIdentity.tin_number,
+        registered_name: employerIdentity.registered_name,
+        registered_address: employerIdentity.registered_address,
+        postal_code: employerIdentity.postal_code,
+        rdo_code: employerIdentity.rdo_code,
+        employer_type: employerIdentity.employer_type || null,
+        signatory_name: employerIdentity.signatory_name,
+        signatory_title: employerIdentity.signatory_title,
+        source_reference: employerIdentity.source_reference,
+      })
+      setEmployerDraft({})
+      toast.success('Employer certificate details saved')
+    } catch {
+      toast.error('Could not save employer certificate details.')
+    }
+  }
+
+  const verifyEmployerIdentity = async () => {
+    try {
+      await employerProfile.verify.mutateAsync()
+      toast.success('Employer certificate details verified')
+    } catch {
+      toast.error('Verification requires all employer details and a source note.')
+    }
+  }
+
   const submitPolicy = async (event: FormEvent) => {
     event.preventDefault()
     try {
@@ -77,7 +139,7 @@ export default function PayrollSettingsPage() {
     } catch { toast.error('Policy JSON is invalid or the policy could not be saved.') }
   }
 
-  const loadError = setup.groups.isError || setup.policies.isError || setup.assignments.isError
+  const loadError = setup.groups.isError || setup.policies.isError || setup.assignments.isError || employerProfile.profile.isError
 
   return (
     <main className="space-y-6 p-6">
@@ -86,6 +148,25 @@ export default function PayrollSettingsPage() {
         <p className="text-muted-foreground">Define payment cadence separately from salary basis, assign employees by effective date, and version the company rules.</p>
       </header>
       {loadError && <p role="alert" className="text-destructive">Some payroll settings could not be loaded. Refresh to try again.</p>}
+
+      <section className="space-y-3 rounded-lg border p-4">
+        <h2 className="text-lg font-semibold">Employer certificate identity</h2>
+        <p className="text-sm text-muted-foreground">These details are required for BIR Form 2316. A certificate remains blocked until the required employer and employee details and annual figures are verified.</p>
+        <p className="text-sm" role="status">{savedEmployerProfile?.is_verified ? 'Employer details verified' : 'Employer details not yet verified'}</p>
+        <form onSubmit={submitEmployerIdentity} className="grid gap-3 md:grid-cols-2">
+          <label className="grid gap-1 text-sm">Employer TIN<input value={employerIdentity.tin_number} onChange={e => setEmployerDraft({ ...employerDraft, tin_number: e.target.value })} maxLength={32} disabled={!canEdit} className="h-9 rounded border bg-background px-3" /></label>
+          <label className="grid gap-1 text-sm">Registered employer name<input value={employerIdentity.registered_name} onChange={e => setEmployerDraft({ ...employerDraft, registered_name: e.target.value })} maxLength={255} disabled={!canEdit} className="h-9 rounded border bg-background px-3" /></label>
+          <label className="grid gap-1 text-sm md:col-span-2">Registered address<input value={employerIdentity.registered_address} onChange={e => setEmployerDraft({ ...employerDraft, registered_address: e.target.value })} maxLength={512} disabled={!canEdit} className="h-9 rounded border bg-background px-3" /></label>
+          <label className="grid gap-1 text-sm">Postal code<input value={employerIdentity.postal_code} onChange={e => setEmployerDraft({ ...employerDraft, postal_code: e.target.value })} maxLength={10} disabled={!canEdit} className="h-9 rounded border bg-background px-3" /></label>
+          <label className="grid gap-1 text-sm">RDO code<input value={employerIdentity.rdo_code} onChange={e => setEmployerDraft({ ...employerDraft, rdo_code: e.target.value })} maxLength={8} disabled={!canEdit} className="h-9 rounded border bg-background px-3" /></label>
+          <label className="grid gap-1 text-sm">Employer type<select value={employerIdentity.employer_type} onChange={e => setEmployerDraft({ ...employerDraft, employer_type: e.target.value as typeof employerIdentity.employer_type })} disabled={!canEdit} className="h-9 rounded border bg-background px-3"><option value="">Choose type</option><option value="main">Main employer</option><option value="secondary">Secondary employer</option></select></label>
+          <label className="grid gap-1 text-sm">Authorized signatory name<input value={employerIdentity.signatory_name} onChange={e => setEmployerDraft({ ...employerDraft, signatory_name: e.target.value })} maxLength={255} disabled={!canEdit} className="h-9 rounded border bg-background px-3" /></label>
+          <label className="grid gap-1 text-sm">Authorized signatory title<input value={employerIdentity.signatory_title} onChange={e => setEmployerDraft({ ...employerDraft, signatory_title: e.target.value })} maxLength={128} disabled={!canEdit} className="h-9 rounded border bg-background px-3" /></label>
+          <label className="grid gap-1 text-sm md:col-span-2">Source note for employer details<input value={employerIdentity.source_reference} onChange={e => setEmployerDraft({ ...employerDraft, source_reference: e.target.value })} maxLength={512} disabled={!canEdit} className="h-9 rounded border bg-background px-3" /></label>
+          {canEdit && <Button type="submit" disabled={employerProfile.save.isPending} className="w-fit">Save employer details</Button>}
+        </form>
+        {canApprove && <Button type="button" variant="outline" onClick={verifyEmployerIdentity} disabled={!savedEmployerProfile || savedEmployerProfile.is_verified || employerProfile.verify.isPending}>Verify employer details</Button>}
+      </section>
 
       <section className="space-y-3 rounded-lg border p-4">
         <h2 className="text-lg font-semibold">Pay groups</h2>
@@ -124,9 +205,9 @@ export default function PayrollSettingsPage() {
         <h2 className="text-lg font-semibold">Versioned payroll policies</h2>
         {setup.policies.data?.map(policy => <article key={policy.id} className="flex flex-wrap items-center justify-between gap-2 border-b py-2"><span>Version {policy.version} · effective {policy.effective_from} · {policy.confirmed ? 'confirmed' : 'draft'}</span>{canEdit && !policy.confirmed && <Button variant="outline" onClick={async () => { try { await setup.confirmPolicy.mutateAsync(policy.id); toast.success('Policy confirmed') } catch { toast.error('Policy is incomplete. Fill all required values and statutory source references before confirming.') } }} disabled={setup.confirmPolicy.isPending}>Confirm policy</Button>}</article>)}
         {canAdd && <form onSubmit={submitPolicy} className="space-y-3">
-          <label className="grid gap-1 text-sm">Effective from<input required type="date" value={policyEffectiveDate} onChange={e => setPolicyEffectiveDate(e.target.value)} className="h-9 w-fit rounded border bg-background px-3" /></label>
-          <label className="grid gap-1 text-sm">Policy data (JSON)<textarea required rows={16} value={policyJson} onChange={e => setPolicyJson(e.target.value)} className="w-full rounded border bg-background p-3 font-mono text-xs" /></label>
-          <p className="text-xs text-muted-foreground">Set <code>monthly_partial_work</code> to <code>deduct_after_grace</code> to deduct monthly-rated short time after the shift grace period, or <code>no_deduction</code> to preserve the monthly rate. Full unpaid absences are still deducted under either rule.</p>
+          <label className="grid gap-1 text-sm">Effective from<input data-testid="payroll-policy-effective-date" required type="date" value={policyEffectiveDate} onChange={e => setPolicyEffectiveDate(e.target.value)} className="h-9 w-fit rounded border bg-background px-3" /></label>
+          <label className="grid gap-1 text-sm">Policy data (JSON)<textarea data-testid="payroll-policy-json" required rows={16} value={policyJson} onChange={e => setPolicyJson(e.target.value)} className="w-full rounded border bg-background p-3 font-mono text-xs" /></label>
+          <p className="text-xs text-muted-foreground">Set <code>monthly_salary_proration</code> to <code>scheduled_workday_fraction</code> for a fixed full-month or half-month base apportioned over scheduled workdays, or <code>monthly_divisor_per_workday</code> for the configured divisor amount per scheduled day. Set a reviewed <code>monthly_holiday_pay_divisor</code> for worked holiday premiums. For work on a weekly rest day without a holiday, configure <code>premium_rules.rest_day_regular_multiplier</code> (at least <code>1.30</code>) and <code>rest_day_overtime_multiplier</code> (at least <code>1.69</code>); otherwise the work blocks payroll. Set <code>premium_rules.night_differential_rate</code> to the company rate (at least <code>0.10</code>) for work between 10:00 p.m. and 6:00 a.m.; the app blocks night-work calculations if it is missing. Also set <code>monthly_partial_work</code> to <code>deduct_after_grace</code> or <code>no_deduction</code>. Full unpaid absences are deducted under either partial-work rule.</p>
           <Button type="submit" disabled={setup.createPolicy.isPending}>Save policy draft</Button>
           <p className="text-xs text-muted-foreground">Confirmation records that the listed statutory source URLs were reviewed. Payroll finalization remains disabled until the attendance-driven calculation and independent review workflow is complete.</p>
         </form>}

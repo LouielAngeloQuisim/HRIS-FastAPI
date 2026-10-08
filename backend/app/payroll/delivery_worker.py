@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import html
 import logging
+import os
 import smtplib
 import socket
 import time
@@ -17,6 +18,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from emails.message import Message
@@ -32,6 +34,25 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 5
 LEASE = timedelta(minutes=10)
 POLL_SECONDS = 15
+HEARTBEAT_FILE = Path("/tmp/hris-payroll-delivery-heartbeat")
+HEARTBEAT_MAX_AGE_SECONDS = 60
+
+
+def _write_heartbeat() -> None:
+    """Publish a local liveness marker for the container health check."""
+    temporary = HEARTBEAT_FILE.with_name(f"{HEARTBEAT_FILE.name}.{os.getpid()}.tmp")
+    temporary.write_text(str(time.time()), encoding="ascii")
+    temporary.replace(HEARTBEAT_FILE)
+
+
+def heartbeat_is_fresh(*, now: float | None = None) -> bool:
+    """Return whether the worker has polled recently enough to be healthy."""
+    current = time.time() if now is None else now
+    try:
+        age = current - HEARTBEAT_FILE.stat().st_mtime
+    except OSError:
+        return False
+    return 0 <= age <= HEARTBEAT_MAX_AGE_SECONDS
 
 
 def _money(value: object) -> str:
@@ -341,6 +362,7 @@ def _send_job(job_id: uuid.UUID) -> None:
 
 
 def run_worker(*, once: bool = False) -> None:
+    _write_heartbeat()
     if not settings.PAYSLIP_DELIVERY_ENABLED:
         logger.info("Payslip delivery worker is disabled; remaining idle")
         if once:
@@ -349,10 +371,13 @@ def run_worker(*, once: bool = False) -> None:
         # Operators must recreate the container after changing its environment.
         while True:
             time.sleep(POLL_SECONDS)
+            _write_heartbeat()
     while True:
         jobs = _claim_due_jobs()
         for job_id in jobs:
             _send_job(job_id)
+            _write_heartbeat()
+        _write_heartbeat()
         if once:
             return
         time.sleep(POLL_SECONDS)

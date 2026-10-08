@@ -22,16 +22,38 @@ class AttendancePayDay:
     worked_minutes: int
     overtime_eligible_minutes: int = 0
     overtime_approved_minutes: int | None = None
+    # Configured total-pay factors for holiday work. A multiplier of 2.0 means
+    # total regular-time pay is 2x base; because normal earnings already include
+    # the base portion, only the premium is added here. Holiday overtime factors
+    # replace the general overtime factor for that day.
+    holiday_regular_multiplier: Decimal | None = None
+    holiday_overtime_multiplier: Decimal | None = None
+    holiday_regular_base: Decimal | None = None
+    rest_day_regular_multiplier: Decimal | None = None
+    rest_day_overtime_multiplier: Decimal | None = None
+    rest_day_regular_base: Decimal | None = None
+    night_regular_minutes: int = 0
+    night_overtime_minutes: int = 0
+    night_differential_rate: Decimal | None = None
     raw_late_minutes: int = 0
     grace_minutes: int = 0
     paid_absence: bool = False
     absence: bool = False
+    monthly_period_fraction: Decimal | None = None
+    monthly_period_scheduled_days: int | None = None
+    monthly_salary_proration: Literal[
+        "scheduled_workday_fraction", "monthly_divisor_per_workday"
+    ] = "scheduled_workday_fraction"
+    monthly_salary_base_eligible: bool = True
 
 
 @dataclass(frozen=True)
 class EarningsResult:
     regular: Decimal
     overtime: Decimal
+    holiday_premium: Decimal
+    rest_day_premium: Decimal
+    night_differential: Decimal
     attendance_deduction: Decimal
     short_time_deduction: Decimal
     payable_days: int
@@ -59,8 +81,10 @@ def calculate_attendance_earnings(
     ``days`` contains only configured scheduled work dates. An unmarked row
     with zero minutes is ambiguous and blocks; callers must explicitly classify
     it as absence or paid leave. Monthly salaries are prorated by the confirmed
-    divisor only for unpaid absence. Effective salary changes are represented
-    as separate daily inputs, so each date uses its own rate.
+    divisor only for unpaid absence. Monthly base pay is apportioned across the
+    scheduled workdays in the pay period, then prorated by the configured
+    period fraction. Effective salary changes are represented as separate
+    daily inputs, so each date uses its own rate.
     """
     if monthly_divisor <= 0:
         raise CalculationBlocker("A positive confirmed monthly divisor is required")
@@ -78,6 +102,9 @@ def calculate_attendance_earnings(
 
     regular = Decimal("0")
     overtime = Decimal("0")
+    holiday_premium = Decimal("0")
+    rest_day_premium = Decimal("0")
+    night_differential = Decimal("0")
     deduction = Decimal("0")
     short_time_deduction = Decimal("0")
     payable_days = 0
@@ -101,12 +128,38 @@ def calculate_attendance_earnings(
             raise CalculationBlocker(f"Invalid eligible overtime minutes on {day.work_date}")
         if day.raw_late_minutes < 0 or day.grace_minutes < 0:
             raise CalculationBlocker(f"Invalid lateness/grace minutes on {day.work_date}")
+        if day.night_regular_minutes < 0 or day.night_overtime_minutes < 0:
+            raise CalculationBlocker(f"Invalid night-work minutes on {day.work_date}")
+        if day.night_regular_minutes + day.night_overtime_minutes > day.worked_minutes:
+            raise CalculationBlocker(f"Night-work minutes exceed attendance on {day.work_date}")
+        if day.night_regular_minutes or day.night_overtime_minutes:
+            if day.night_differential_rate is None or day.night_differential_rate < Decimal("0.10"):
+                raise CalculationBlocker(
+                    f"Night differential must be configured at no less than 10% on {day.work_date}"
+                )
         if day.overtime_eligible_minutes and day.overtime_approved_minutes is None:
             raise CalculationBlocker(f"Overtime decision is pending on {day.work_date}")
         approved = day.overtime_approved_minutes or 0
         if approved < 0 or approved > day.overtime_eligible_minutes:
             raise CalculationBlocker(f"Approved overtime exceeds eligible minutes on {day.work_date}")
+        for label, factor in (
+            ("regular", day.holiday_regular_multiplier),
+            ("overtime", day.holiday_overtime_multiplier),
+        ):
+            if factor is not None and factor < 1:
+                raise CalculationBlocker(
+                    f"Holiday {label} multiplier must be at least 1 on {day.work_date}"
+                )
+        for label, factor, minimum in (
+            ("regular", day.rest_day_regular_multiplier, Decimal("1.30")),
+            ("overtime", day.rest_day_overtime_multiplier, Decimal("1.69")),
+        ):
+            if factor is not None and (not factor.is_finite() or factor < minimum):
+                raise CalculationBlocker(
+                    f"Rest-day {label} multiplier must be at least {minimum} on {day.work_date}"
+                )
 
+        regular_before = regular
         if day.pay_type == "hourly":
             # The overtime line is paid separately below. Cap regular hourly
             # earnings at the scheduled shift so approved overtime is not also
@@ -127,6 +180,15 @@ def calculate_attendance_earnings(
                 # Daily workers earn only for payable days; the day is already
                 # absent from gross earnings, so an extra deduction would double-count it.
                 pass
+            elif day.rest_day_regular_multiplier is not None:
+                # Rest-day work is paid by actual hours, even if the normal
+                # scheduled-day partial-work rule pays only a full shift.
+                regular += (
+                    day.basic_rate
+                    * Decimal(min(day.worked_minutes, day.scheduled_minutes))
+                    / Decimal(day.scheduled_minutes)
+                )
+                payable_days += 1
             elif daily_partial_work == "full_day":
                 if day.worked_minutes >= day.scheduled_minutes:
                     regular += day.basic_rate
@@ -139,14 +201,44 @@ def calculate_attendance_earnings(
                 payable_days += 1
         elif day.pay_type == "monthly":
             daily_rate = day.basic_rate / monthly_divisor
-            # Accrue the scheduled-period base first; deduct unpaid absences
-            # separately so an absent day is not subtracted twice.
-            regular += daily_rate
-            if day.absence:
-                deduction += daily_rate
+            if not day.monthly_salary_base_eligible:
+                pass
+            elif day.monthly_salary_proration == "scheduled_workday_fraction":
+                if (
+                    day.monthly_period_fraction is None
+                    or day.monthly_period_fraction <= 0
+                    or day.monthly_period_fraction > 1
+                    or day.monthly_period_scheduled_days is None
+                    or day.monthly_period_scheduled_days <= 0
+                ):
+                    raise CalculationBlocker(
+                        f"Monthly salary period entitlement is missing or invalid on {day.work_date}"
+                    )
+                # The monthly salary base is fixed for the pay period and is
+                # apportioned over all scheduled workdays. Partial employment
+                # and effective-dated rates therefore prorate transparently.
+                regular += (
+                    day.basic_rate
+                    * day.monthly_period_fraction
+                    / Decimal(day.monthly_period_scheduled_days)
+                )
+            elif day.monthly_salary_proration == "monthly_divisor_per_workday":
+                regular += daily_rate
             else:
-                payable_days += 1
-                shortfall = max(0, day.scheduled_minutes - day.worked_minutes)
+                raise CalculationBlocker(
+                    f"Unsupported monthly salary proration on {day.work_date}"
+                )
+            if day.absence:
+                if day.monthly_salary_base_eligible:
+                    deduction += daily_rate
+            else:
+                if day.monthly_salary_base_eligible:
+                    payable_days += 1
+                shortfall = (
+                    max(0, day.scheduled_minutes - day.worked_minutes)
+                    if day.monthly_salary_base_eligible and not day.paid_absence
+                    else 0
+                )
                 if shortfall:
                     if monthly_partial_work is None:
                         raise CalculationBlocker(
@@ -165,8 +257,94 @@ def calculate_attendance_earnings(
         else:
             raise CalculationBlocker(f"Unsupported salary basis on {day.work_date}")
 
+        if (
+            day.holiday_regular_multiplier is not None
+            and day.worked_minutes > 0
+            and not day.absence
+            and not day.paid_absence
+        ):
+            premium_base = (
+                day.holiday_regular_base
+                if day.holiday_regular_base is not None
+                else regular - regular_before
+            )
+            if premium_base < 0:
+                raise CalculationBlocker(
+                    f"Holiday regular base cannot be negative on {day.work_date}"
+                )
+            holiday_premium += premium_base * (
+                day.holiday_regular_multiplier - Decimal("1")
+            )
+
+        if (
+            day.rest_day_regular_multiplier is not None
+            and day.worked_minutes > 0
+            and not day.absence
+            and not day.paid_absence
+        ):
+            rest_day_base = (
+                day.rest_day_regular_base
+                if day.rest_day_regular_base is not None
+                else regular - regular_before
+            )
+            if rest_day_base < 0:
+                raise CalculationBlocker(
+                    f"Rest-day regular base cannot be negative on {day.work_date}"
+                )
+            rest_day_premium += rest_day_base * (
+                day.rest_day_regular_multiplier - Decimal("1")
+            )
+
         total_worked += day.worked_minutes
-        overtime += day.overtime_rate * Decimal(approved) / Decimal(60) * overtime_multiplier
+        effective_overtime_multiplier = (
+            day.holiday_overtime_multiplier
+            if day.holiday_overtime_multiplier is not None
+            else (
+                day.rest_day_overtime_multiplier
+                if day.rest_day_overtime_multiplier is not None
+                else overtime_multiplier
+            )
+        )
+        overtime += (
+            day.overtime_rate
+            * Decimal(approved)
+            / Decimal(60)
+            * effective_overtime_multiplier
+        )
+        if day.night_regular_minutes or day.night_overtime_minutes:
+            assert day.night_differential_rate is not None
+            if day.pay_type == "hourly":
+                hourly_rate = day.basic_rate
+            elif day.pay_type == "daily":
+                hourly_rate = (
+                    day.basic_rate * Decimal(60) / Decimal(day.scheduled_minutes)
+                )
+            else:
+                hourly_rate = (
+                    day.basic_rate
+                    / monthly_divisor
+                    * Decimal(60)
+                    / Decimal(day.scheduled_minutes)
+                )
+            regular_factor = (
+                day.holiday_regular_multiplier
+                or day.rest_day_regular_multiplier
+                or Decimal("1")
+            )
+            night_differential += (
+                hourly_rate
+                * Decimal(day.night_regular_minutes)
+                / Decimal(60)
+                * day.night_differential_rate
+                * regular_factor
+            )
+            night_differential += (
+                day.overtime_rate
+                * Decimal(day.night_overtime_minutes)
+                / Decimal(60)
+                * day.night_differential_rate
+                * effective_overtime_multiplier
+            )
 
     def quantize(amount: Decimal) -> Decimal:
         return amount.quantize(CENT, rounding=rounding_mode)
@@ -174,6 +352,9 @@ def calculate_attendance_earnings(
     return EarningsResult(
         regular=quantize(regular),
         overtime=quantize(overtime),
+        holiday_premium=quantize(holiday_premium),
+        rest_day_premium=quantize(rest_day_premium),
+        night_differential=quantize(night_differential),
         attendance_deduction=quantize(deduction),
         short_time_deduction=quantize(short_time_deduction),
         payable_days=payable_days,

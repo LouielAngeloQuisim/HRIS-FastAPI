@@ -300,6 +300,10 @@ class EmployeeTaxYearDeclaration(SQLModel, table=True):
         CheckConstraint("tax_classification IN ('ordinary', 'minimum_wage_earner')", name="ck_employee_tax_classification"),
         CheckConstraint("taxable_compensation_ytd >= 0 AND tax_withheld_ytd >= 0", name="ck_employee_tax_ytd_nonnegative"),
         CheckConstraint(
+            "opening_benefits_exempt_ytd >= 0 AND opening_benefits_exempt_ytd <= 90000",
+            name="ck_employee_tax_opening_benefits_nonnegative",
+        ),
+        CheckConstraint(
             "opening_pay_period_count >= 0 AND opening_pay_period_count <= 366",
             name="ck_employee_tax_opening_period_count",
         ),
@@ -320,12 +324,92 @@ class EmployeeTaxYearDeclaration(SQLModel, table=True):
     opening_pay_period_count: int = Field(default=0, ge=0)
     opening_pay_period_type: str | None = Field(default=None, max_length=16)
     previous_employer_included: bool = Field(default=False)
+    opening_benefits_exempt_ytd: Decimal = Field(
+        default=Decimal("0.00"), sa_column=Numeric(14, 2)  # type: ignore
+    )
+    opening_benefits_reconciled: bool = Field(default=False)
+    opening_de_minimis_annual_ytd: dict[str, str] = Field(default_factory=dict, sa_type=JSON)
+    opening_de_minimis_monthly_ytd: dict[str, str] = Field(default_factory=dict, sa_type=JSON)
     is_verified: bool = Field(default=False)
     source_reference: str | None = Field(default=None, max_length=512)
     verified_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
     verified_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
     created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
     updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+
+
+class EmployeeTaxBenefit(SQLModel, table=True):
+    """Immutable paid benefits that use BIR's shared annual exemption ceiling."""
+
+    __tablename__ = "employee_tax_benefit"
+    __table_args__ = (
+        CheckConstraint("tax_year >= 2000 AND tax_year <= 2200", name="ck_employee_tax_benefit_year"),
+        CheckConstraint(
+            "(correction_of_id IS NULL AND gross_amount > 0 AND correction_reason IS NULL) OR "
+            "(correction_of_id IS NOT NULL AND gross_amount < 0 AND length(trim(correction_reason)) > 0)",
+            name="ck_employee_tax_benefit_correction_shape",
+        ),
+        CheckConstraint(
+            "(benefit_type IN ('thirteenth_month', 'other_benefit') AND de_minimis_category IS NULL) OR "
+            "(benefit_type = 'de_minimis' AND de_minimis_category IN "
+            "('medical_cash_dependents', 'rice_subsidy', 'uniform_clothing', "
+            "'actual_medical_assistance', 'laundry_allowance', 'achievement_award', "
+            "'christmas_anniversary_gift', 'cba_productivity_incentive'))",
+            name="ck_employee_tax_benefit_classification",
+        ),
+        Index("ix_employee_tax_benefit_employee_year_date", "employee_id", "tax_year", "paid_on"),
+        UniqueConstraint("correction_of_id", name="uq_employee_tax_benefit_correction_of"),
+        UniqueConstraint(
+            "employee_id",
+            "tax_year",
+            "benefit_type",
+            "source_reference",
+            name="uq_employee_tax_benefit_source_reference",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    employee_id: uuid.UUID = Field(foreign_key="employee_records.id", ondelete="CASCADE")
+    tax_year: int
+    paid_on: date
+    benefit_type: str = Field(max_length=32)
+    de_minimis_category: str | None = Field(default=None, max_length=40)
+    eligibility_evidence: list[str] = Field(default_factory=list, sa_type=JSON)
+    gross_amount: Decimal = Field(sa_column=Numeric(14, 2))  # type: ignore
+    source_reference: str = Field(max_length=512)
+    correction_of_id: uuid.UUID | None = Field(
+        default=None, foreign_key="employee_tax_benefit.id", ondelete="RESTRICT"
+    )
+    correction_reason: str | None = Field(default=None, max_length=512)
+    created_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+
+
+class PayrollEmployerProfile(SQLModel, table=True):
+    """Employer identity required for statutory payroll certificates."""
+
+    __tablename__ = "payroll_employer_profile"
+    __table_args__ = (
+        CheckConstraint("id = 'default'", name="ck_payroll_employer_profile_singleton"),
+    )
+
+    id: str = Field(default="default", primary_key=True, max_length=16)
+    tin_number: str | None = Field(default=None, max_length=32)
+    registered_name: str | None = Field(default=None, max_length=255)
+    registered_address: str | None = Field(default=None, max_length=512)
+    postal_code: str | None = Field(default=None, max_length=10)
+    rdo_code: str | None = Field(default=None, max_length=8)
+    employer_type: str | None = Field(default=None, max_length=16)
+    signatory_name: str | None = Field(default=None, max_length=255)
+    signatory_title: str | None = Field(default=None, max_length=128)
+    source_reference: str | None = Field(default=None, max_length=512)
+    is_verified: bool = Field(default=False)
+    verified_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    verified_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    updated_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
 
 
 class PayrollPayGroup(SQLModel, table=True):

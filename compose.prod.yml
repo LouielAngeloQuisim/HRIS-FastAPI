@@ -139,6 +139,16 @@ services:
     image: ghcr.io/louielangeloquisim/hris-fastapi/backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: ["python", "-m", "app.payroll.delivery_worker"]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - from app.payroll.delivery_worker import heartbeat_is_fresh; raise SystemExit(0 if heartbeat_is_fresh() else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     depends_on:
       db:
         condition: service_healthy

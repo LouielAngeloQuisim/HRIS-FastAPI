@@ -55,6 +55,8 @@ describe('Holidays ResourceForm', () => {
       observe_weekend_as: null,
       multiplier_regular: null,
       multiplier_overtime: null,
+      multiplier_regular_rest_day: null,
+      multiplier_overtime_rest_day: null,
       is_recurring: true,
       is_active: true,
       is_deleted: false,
@@ -93,6 +95,22 @@ describe('Holidays ResourceForm', () => {
       screen.getByTestId('holiday-month-day-input'),
       '12-25'
     )
+    await userEvent.type(
+      screen.getByTestId('holiday-regular-factor-input'),
+      '2'
+    )
+    await userEvent.type(
+      screen.getByTestId('holiday-overtime-factor-input'),
+      '2.6'
+    )
+    await userEvent.type(
+      screen.getByTestId('holiday-rest-day-factor-input'),
+      '2.6'
+    )
+    await userEvent.type(
+      screen.getByTestId('holiday-rest-day-overtime-factor-input'),
+      '3.38'
+    )
 
     await userEvent.click(screen.getByTestId('holiday-submit-button'))
 
@@ -101,6 +119,10 @@ describe('Holidays ResourceForm', () => {
     expect(payload.code).toBe('XMAS')
     expect(payload.name).toBe('Christmas Day')
     expect(payload.month_day).toBe('12-25')
+    expect(payload.multiplier_regular).toBe(2)
+    expect(payload.multiplier_overtime).toBe(2.6)
+    expect(payload.multiplier_regular_rest_day).toBe(2.6)
+    expect(payload.multiplier_overtime_rest_day).toBe(3.38)
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -118,6 +140,8 @@ describe('Holidays ResourceForm', () => {
       observe_weekend_as: null,
       multiplier_regular: null,
       multiplier_overtime: null,
+      multiplier_regular_rest_day: null,
+      multiplier_overtime_rest_day: null,
       is_recurring: true,
       is_active: true,
       is_deleted: false,

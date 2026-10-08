@@ -4,6 +4,7 @@ import calendar
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from sqlmodel import Session, delete, select
 
 from app.attendance.models import (
     DailyTimeRecord,
+    DtrAttendanceInterval,
     EmployeeShiftAssignment,
     Shift,
 )
@@ -18,9 +20,11 @@ from app.audit.models import AuditLog
 from app.common.security import get_password_hash
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords, EmployeeStatus
+from app.leave.models import HolidayConfig, HolidayInstance
 from app.payroll.models import (
     EmployeePayGroupAssignment,
     EmployeeSalary,
+    EmployeeTaxBenefit,
     EmployeeTaxYearDeclaration,
     PagIBIGBracket,
     PayrollContributionLedger,
@@ -38,6 +42,611 @@ from app.user.models import User
 from tests.utils.user import user_authentication_headers
 
 API = f"{settings.API_V1_STR}/payroll"
+
+
+def test_attendance_preview_applies_configured_holiday_multipliers(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    employee = EmployeeRecords(
+        employee_code=f"HOL-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Holiday",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2020, 1, 1),
+    )
+    group = PayrollPayGroup(
+        code=f"HOL-{uuid.uuid4().hex[:8]}",
+        name="Holiday multiplier QA",
+        cadence="semi_monthly",
+        first_period_end_day=15,
+        second_period_end_day=31,
+        weekend_rule="next_business_day",
+    )
+    shift = Shift(
+        code=f"HOL-{uuid.uuid4().hex[:8]}",
+        name="Holiday QA weekday shift",
+        start_time="08:00",
+        end_time="17:00",
+        lunch_break_duration=60,
+        total_hours_minus_lunch=480,
+    )
+    db.add_all([employee, group, shift])
+    db.flush()
+    holiday = HolidayConfig(
+        code=f"HOL-{uuid.uuid4().hex[:8]}",
+        name="QA regular holiday",
+        month_day="10-05",
+        type="regular",
+        multiplier_regular=Decimal("2"),
+        multiplier_overtime=Decimal("2.6"),
+        is_recurring=False,
+    )
+    payroll_policy = PayrollPolicyVersion(
+        version=980_000 + int(uuid.uuid4().hex[:6], 16),
+        effective_from=date(2032, 10, 1),
+        effective_to=date(2032, 10, 31),
+        policy={
+            "timezone": "Asia/Manila",
+            "monthly_divisor": "22",
+            "monthly_salary_proration": "scheduled_workday_fraction",
+            "monthly_holiday_pay_divisor": "22",
+            "daily_partial_work": "pro_rated",
+            "paid_leave": False,
+            "paid_holidays": False,
+            "grace_minutes": 0,
+            "overtime_rule": {"multiplier": "1.25"},
+            "rounding_mode": "half_up",
+        },
+        confirmed=True,
+    )
+    db.add_all(
+        [
+            EmployeeSalary(
+                employee_id=employee.id,
+                basic_rate=Decimal("120"),
+                overtime_rate=Decimal("120"),
+                effective_date=date(2032, 10, 1),
+                pay_type=PayType.HOURLY,
+            ),
+            EmployeePayGroupAssignment(
+                employee_id=employee.id,
+                pay_group_id=group.id,
+                effective_from=date(2032, 10, 1),
+            ),
+            EmployeeShiftAssignment(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                effective_from=date(2032, 10, 1),
+            ),
+            holiday,
+            payroll_policy,
+        ]
+    )
+    db.flush()
+    db.add(
+        HolidayInstance(
+            config_id=holiday.id,
+            observed_date=date(2032, 10, 5),
+            raw_date=date(2032, 10, 5),
+            leave_year=2032,
+        )
+    )
+    for day in range(1, 16):
+        work_date = date(2032, 10, day)
+        if work_date.weekday() >= 5:
+            continue
+        is_holiday = work_date == date(2032, 10, 5)
+        login = datetime(2032, 10, day, tzinfo=timezone.utc)
+        db.add(
+            DailyTimeRecord(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                login_date=login,
+                logout_date=login + timedelta(hours=9 if is_holiday else 8),
+                work_date=work_date,
+                rendered_minutes=540 if is_holiday else 480,
+                overtime_minutes=60 if is_holiday else 0,
+                overtime_approved=True if is_holiday else None,
+                overtime_approved_minutes=60 if is_holiday else None,
+                is_absent=False,
+                is_time_calculated=True,
+            )
+        )
+    db.commit()
+
+    response = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 200, response.text
+    entry = next(
+        row for row in response.json()["entries"] if row["employee_id"] == str(employee.id)
+    )
+    assert not entry["blockers"], entry["blockers"]
+    assert entry["regular_earnings"] == "10560.00"
+    assert entry["holiday_premium"] == "960.00"
+    assert entry["approved_overtime"] == "312.00"
+    assert entry["gross_before_statutory"] == "11832.00"
+    assert any("regular factor 2.000" in line for line in entry["formula"])
+    assert any(f"holiday:{holiday.id}:regular:2032-10-05" == ref for ref in entry["source_references"])
+
+    second_regular_holiday = HolidayConfig(
+        code=f"HOL-{uuid.uuid4().hex[:8]}",
+        name="QA second regular holiday",
+        month_day="10-05",
+        type="regular",
+        multiplier_regular=Decimal("2"),
+        multiplier_overtime=Decimal("2.6"),
+        is_recurring=False,
+    )
+    db.add(second_regular_holiday)
+    db.flush()
+    second_holiday_instance = HolidayInstance(
+        config_id=second_regular_holiday.id,
+        observed_date=date(2032, 10, 5),
+        raw_date=date(2032, 10, 5),
+        leave_year=2032,
+    )
+    db.add(second_holiday_instance)
+    db.commit()
+    double_regular_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert double_regular_preview.status_code == 200, double_regular_preview.text
+    double_entry = next(
+        row
+        for row in double_regular_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert not double_entry["blockers"], double_entry["blockers"]
+    assert double_entry["holiday_premium"] == "1920.00"
+    assert double_entry["approved_overtime"] == "468.00"
+    assert double_entry["gross_before_statutory"] == "12948.00"
+    assert any("2 regular holiday(s), statutory-safe premium" in line for line in double_entry["formula"])
+    assert any(
+        f"holiday:{second_regular_holiday.id}:regular:2032-10-05" == ref
+        for ref in double_entry["source_references"]
+    )
+    holiday_dtr = db.exec(
+        select(DailyTimeRecord).where(
+            DailyTimeRecord.employee_id == employee.id,
+            DailyTimeRecord.work_date == date(2032, 10, 5),
+        )
+    ).one()
+    worked_state = (
+        holiday_dtr.login_date,
+        holiday_dtr.logout_date,
+        holiday_dtr.rendered_minutes,
+        holiday_dtr.overtime_minutes,
+        holiday_dtr.overtime_approved,
+        holiday_dtr.overtime_approved_minutes,
+        holiday_dtr.is_absent,
+    )
+    holiday_dtr.login_date = None
+    holiday_dtr.logout_date = None
+    holiday_dtr.rendered_minutes = 0
+    holiday_dtr.overtime_minutes = 0
+    holiday_dtr.overtime_approved = None
+    holiday_dtr.overtime_approved_minutes = None
+    holiday_dtr.is_absent = True
+    db.add(holiday_dtr)
+    db.commit()
+    unworked_double_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert unworked_double_preview.status_code == 200, unworked_double_preview.text
+    unworked_entry = next(
+        row
+        for row in unworked_double_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert any(
+        blocker["code"] == "double_holiday_unworked_unresolved"
+        for blocker in unworked_entry["blockers"]
+    )
+    (
+        holiday_dtr.login_date,
+        holiday_dtr.logout_date,
+        holiday_dtr.rendered_minutes,
+        holiday_dtr.overtime_minutes,
+        holiday_dtr.overtime_approved,
+        holiday_dtr.overtime_approved_minutes,
+        holiday_dtr.is_absent,
+    ) = worked_state
+    db.add(holiday_dtr)
+    second_holiday_instance.is_active = False
+    db.add_all([holiday_dtr, second_holiday_instance])
+    db.commit()
+
+    prepared = client.post(
+        f"{API}/runs/prepare-attendance-draft",
+        json={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert prepared.status_code == 201, prepared.text
+    prepared_entry_data = next(
+        row
+        for row in prepared.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    prepared_entry = db.get(PayrollEntry, uuid.UUID(prepared_entry_data["id"]))
+    assert prepared_entry is not None
+    assert prepared_entry.gross_pay == Decimal("11832.00")
+    assert prepared_entry.earnings["holiday_premium"] == "960.00"
+    assert prepared_entry.input_snapshot["holiday_config_revisions"][0][
+        "multiplier_regular"
+    ] == "2.000"
+    assert _payroll_entry_inputs_are_current(db, prepared_entry)
+
+    holiday.multiplier_regular = Decimal("2.5")
+    db.add(holiday)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, prepared_entry)
+
+    holiday.multiplier_regular = None
+    db.add(holiday)
+    db.commit()
+    missing_factor = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert missing_factor.status_code == 200, missing_factor.text
+    missing_entry = next(
+        row
+        for row in missing_factor.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert any(
+        blocker["code"] == "holiday_multiplier_incomplete"
+        for blocker in missing_entry["blockers"]
+    )
+
+    holiday.multiplier_regular = Decimal("2")
+    holiday.region_code = "NCR"
+    db.add(holiday)
+    db.commit()
+    regional = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert regional.status_code == 200, regional.text
+    regional_entry = next(
+        row for row in regional.json()["entries"] if row["employee_id"] == str(employee.id)
+    )
+    assert any(
+        blocker["code"] == "holiday_region_unresolved"
+        for blocker in regional_entry["blockers"]
+    )
+
+    holiday.region_code = None
+    holiday.multiplier_regular = None
+    holiday.multiplier_overtime = None
+    no_work_holiday = db.exec(
+        select(DailyTimeRecord).where(
+            DailyTimeRecord.employee_id == employee.id,
+            DailyTimeRecord.work_date == date(2032, 10, 5),
+        )
+    ).one()
+    no_work_holiday.login_date = None
+    no_work_holiday.logout_date = None
+    no_work_holiday.rendered_minutes = None
+    no_work_holiday.overtime_minutes = 0
+    no_work_holiday.overtime_approved = None
+    no_work_holiday.overtime_approved_minutes = None
+    no_work_holiday.is_absent = True
+    db.add_all([holiday, no_work_holiday])
+    db.commit()
+    eligible_no_work_holiday = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert eligible_no_work_holiday.status_code == 200, eligible_no_work_holiday.text
+    eligible_entry = next(
+        row
+        for row in eligible_no_work_holiday.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert not eligible_entry["blockers"], eligible_entry["blockers"]
+    assert eligible_entry["regular_earnings"] == "10560.00"
+    assert any(
+        "prior scheduled workday eligibility met" in line
+        for line in eligible_entry["formula"]
+    )
+
+    employee.date_separated = date(2032, 10, 4)
+    db.add(employee)
+    db.commit()
+    separated_before_holiday = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert separated_before_holiday.status_code == 200, separated_before_holiday.text
+    separated_entry = next(
+        row
+        for row in separated_before_holiday.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert not separated_entry["blockers"], separated_entry["blockers"]
+    assert separated_entry["regular_earnings"] == "1920.00"
+    assert not any(
+        reference.startswith("holiday:")
+        for reference in separated_entry["source_references"]
+    )
+    employee.date_separated = None
+    employee.date_hired = date(2032, 10, 5)
+    db.add(employee)
+    db.commit()
+    hired_on_holiday = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert hired_on_holiday.status_code == 200, hired_on_holiday.text
+    hired_entry = next(
+        row
+        for row in hired_on_holiday.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert not hired_entry["blockers"], hired_entry["blockers"]
+    assert hired_entry["regular_earnings"] == "7680.00"
+    assert any(
+        "prior scheduled workday eligibility not met" in line
+        for line in hired_entry["formula"]
+    )
+    employee.date_hired = date(2020, 1, 1)
+    db.add(employee)
+    db.commit()
+
+    prior_workday = db.exec(
+        select(DailyTimeRecord).where(
+            DailyTimeRecord.employee_id == employee.id,
+            DailyTimeRecord.work_date == date(2032, 10, 4),
+        )
+    ).one()
+    prior_workday.login_date = None
+    prior_workday.logout_date = None
+    prior_workday.rendered_minutes = None
+    prior_workday.is_absent = True
+    db.add(prior_workday)
+    db.commit()
+    ineligible_no_work_holiday = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert ineligible_no_work_holiday.status_code == 200, ineligible_no_work_holiday.text
+    ineligible_entry = next(
+        row
+        for row in ineligible_no_work_holiday.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert not ineligible_entry["blockers"], ineligible_entry["blockers"]
+    assert ineligible_entry["regular_earnings"] == "8640.00"
+    assert any(
+        "prior scheduled workday eligibility not met" in line
+        for line in ineligible_entry["formula"]
+    )
+    prior_workday.login_date = datetime(2032, 10, 4, tzinfo=timezone.utc)
+    prior_workday.logout_date = prior_workday.login_date + timedelta(hours=8)
+    prior_workday.rendered_minutes = 480
+    prior_workday.is_absent = False
+    db.add(prior_workday)
+    holiday.multiplier_regular = Decimal("2")
+    holiday.multiplier_overtime = Decimal("2.6")
+    no_work_holiday.login_date = datetime(2032, 10, 5, tzinfo=timezone.utc)
+    no_work_holiday.logout_date = no_work_holiday.login_date + timedelta(hours=9)
+    no_work_holiday.rendered_minutes = 540
+    no_work_holiday.overtime_minutes = 60
+    no_work_holiday.overtime_approved = True
+    no_work_holiday.overtime_approved_minutes = 60
+    no_work_holiday.is_absent = False
+    db.add_all([holiday, no_work_holiday])
+    db.commit()
+
+    rest_day_holiday = HolidayConfig(
+        code=f"HOL-{uuid.uuid4().hex[:8]}",
+        name="QA holiday on rest day",
+        month_day="10-02",
+        type="regular",
+        multiplier_regular_rest_day=Decimal("2.6"),
+        multiplier_overtime_rest_day=Decimal("3.38"),
+        is_recurring=False,
+    )
+    db.add(rest_day_holiday)
+    db.flush()
+    db.add(
+        HolidayInstance(
+            config_id=rest_day_holiday.id,
+            observed_date=date(2032, 10, 2),
+            raw_date=date(2032, 10, 2),
+            leave_year=2032,
+        )
+    )
+    rest_day_login = datetime(2032, 10, 2, 0, tzinfo=timezone.utc)
+    db.add(
+        DailyTimeRecord(
+            employee_id=employee.id,
+            shift_id=shift.id,
+            login_date=rest_day_login,
+            logout_date=rest_day_login + timedelta(hours=9),
+            work_date=date(2032, 10, 2),
+            rendered_minutes=540,
+            overtime_minutes=60,
+            overtime_approved=True,
+            overtime_approved_minutes=60,
+            is_absent=False,
+            is_time_calculated=True,
+        )
+    )
+    db.commit()
+    rest_day_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert rest_day_preview.status_code == 200, rest_day_preview.text
+    rest_day_entry = next(
+        row
+        for row in rest_day_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert not rest_day_entry["blockers"], rest_day_entry["blockers"]
+    assert rest_day_entry["regular_earnings"] == "11520.00"
+    assert rest_day_entry["holiday_premium"] == "2496.00"
+    assert rest_day_entry["approved_overtime"] == "717.60"
+    assert rest_day_entry["gross_before_statutory"] == "14733.60"
+    assert any(
+        "1 regular holiday(s), statutory-safe premium on rest day; regular factor 2.600"
+        in line
+        for line in rest_day_entry["formula"]
+    )
+
+    salary_record = db.exec(
+        select(EmployeeSalary).where(EmployeeSalary.employee_id == employee.id)
+    ).one()
+    salary_record.pay_type = PayType.MONTHLY
+    db.add(salary_record)
+    db.commit()
+    monthly_rest_day_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert monthly_rest_day_preview.status_code == 200, monthly_rest_day_preview.text
+    monthly_rest_day_entry = next(
+        row
+        for row in monthly_rest_day_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert not monthly_rest_day_entry["blockers"], monthly_rest_day_entry["blockers"]
+    assert monthly_rest_day_entry["regular_earnings"] == "60.00"
+    assert monthly_rest_day_entry["holiday_premium"] == "14.18"
+    assert monthly_rest_day_entry["approved_overtime"] == "717.60"
+    assert monthly_rest_day_entry["gross_before_statutory"] == "791.78"
+    payroll_policy.policy = {
+        key: value
+        for key, value in payroll_policy.policy.items()
+        if key != "monthly_holiday_pay_divisor"
+    }
+    db.add(payroll_policy)
+    db.commit()
+    missing_monthly_holiday_basis = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert missing_monthly_holiday_basis.status_code == 200
+    monthly_blocked = next(
+        row
+        for row in missing_monthly_holiday_basis.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert "monthly_holiday_basis_unconfirmed" in {
+        blocker["code"] for blocker in monthly_blocked["blockers"]
+    }
+    payroll_policy.policy = {
+        **payroll_policy.policy,
+        "monthly_holiday_pay_divisor": "22",
+        "premium_rules": {
+            "rest_day_regular_multiplier": "1.30",
+            "rest_day_overtime_multiplier": "1.69",
+        },
+    }
+    db.add(payroll_policy)
+    db.commit()
+    salary_record.pay_type = PayType.HOURLY
+    rest_day_instance = db.exec(
+        select(HolidayInstance).where(
+            HolidayInstance.config_id == rest_day_holiday.id
+        )
+    ).one()
+    rest_day_instance.is_active = False
+    db.add_all([salary_record, rest_day_instance])
+    db.commit()
+    ordinary_rest_day_preview = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2032-10-01",
+            "date_to": "2032-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert ordinary_rest_day_preview.status_code == 200, ordinary_rest_day_preview.text
+    ordinary_rest_day_entry = next(
+        row
+        for row in ordinary_rest_day_preview.json()["entries"]
+        if row["employee_id"] == str(employee.id)
+    )
+    assert not ordinary_rest_day_entry["blockers"], ordinary_rest_day_entry["blockers"]
+    assert ordinary_rest_day_entry["rest_day_premium"] == "288.00"
+    assert any(
+        "ordinary rest-day work" in line
+        for line in ordinary_rest_day_entry["formula"]
+    )
 
 
 def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
@@ -135,6 +744,7 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         policy={
             "timezone": "Asia/Manila",
             "monthly_divisor": "22",
+            "monthly_salary_proration": "scheduled_workday_fraction",
             "daily_partial_work": "pro_rated",
             "monthly_partial_work": "deduct_after_grace",
             "paid_leave": False,
@@ -320,6 +930,48 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     db.commit()
     assert _payroll_entry_inputs_are_current(db, payroll_entry)
 
+    # A shift definition can change while the employee's assignment row stays
+    # identical. It still changes scheduled hours and must invalidate review.
+    shift_revision = payroll_entry.input_snapshot["shift_revisions"][0]
+    payroll_shift = db.get(Shift, uuid.UUID(shift_revision["id"]))
+    assert payroll_shift is not None
+    original_shift_minutes = payroll_shift.total_hours_minus_lunch
+    payroll_shift.total_hours_minus_lunch += 30
+    db.add(payroll_shift)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_shift.total_hours_minus_lunch = original_shift_minutes
+    db.add(payroll_shift)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
+    # Every salary input that feeds payroll must be frozen directly, not only
+    # by a mutable update timestamp and the base rate.
+    salary_revision = payroll_entry.input_snapshot["salary_versions"][0]
+    payroll_salary = db.get(EmployeeSalary, uuid.UUID(salary_revision["id"]))
+    assert payroll_salary is not None
+    original_overtime_rate = payroll_salary.overtime_rate
+    payroll_salary.overtime_rate += Decimal("0.125")
+    db.add(payroll_salary)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_salary.overtime_rate = original_overtime_rate
+    db.add(payroll_salary)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
+    # Name, code and email are frozen inputs to the reviewed payslip/outbox
+    # recipient, so an identity change requires renewed review.
+    original_email = payroll_employee.email
+    payroll_employee.email = "revised-recipient@example.com"
+    db.add(payroll_employee)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_employee.email = original_email
+    db.add(payroll_employee)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
     # An in-place edit must invalidate the frozen draft even when its row ID
     # and effective date remain unchanged.
     for scheme, model, field, increment in (
@@ -371,6 +1023,38 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
         client=client, email=finalizer.email, password=password
     )
     monkeypatch.setattr(settings, "PAYROLL_FINALIZATION_ENABLED", True)
+    late_member = EmployeeRecords(
+        employee_code=f"LATE-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Late Roster Member",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2020, 1, 1),
+    )
+    db.add(late_member)
+    db.flush()
+    late_assignment = EmployeePayGroupAssignment(
+        employee_id=late_member.id,
+        pay_group_id=payroll_entry.input_snapshot["pay_group_assignments"][0]["pay_group_id"],
+        effective_from=date(2026, 10, 1),
+    )
+    db.add(late_assignment)
+    db.commit()
+    stale_roster = client.post(f"{API}/runs/{run_id}/finalize", headers=finalizer_headers)
+    assert stale_roster.status_code == 409
+    assert "employee roster changed" in stale_roster.json()["detail"]
+    other_group = PayrollPayGroup(
+        code=f"OTHER-{uuid.uuid4().hex[:8]}",
+        name="QA other pay group",
+        cadence="semi_monthly",
+        first_period_end_day=15,
+        second_period_end_day=31,
+        weekend_rule="next_business_day",
+    )
+    db.add(other_group)
+    db.flush()
+    late_assignment.pay_group_id = other_group.id
+    db.add(late_assignment)
+    db.commit()
     finalized = client.post(f"{API}/runs/{run_id}/finalize", headers=finalizer_headers)
     assert finalized.status_code == 200, finalized.text
     assert finalized.json()["workflow_status"] == "finalized"
@@ -405,8 +1089,8 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
 @pytest.mark.parametrize(
     ("period_start", "period_end", "opening_as_of", "separation_date", "employee_status", "trigger", "expected_taxable", "expected_tax_due", "expected_withholding"),
     [
-        (date(2026, 12, 16), date(2026, 12, 31), date(2026, 12, 15), None, EmployeeStatus.ACTIVE, "year_end", Decimal("314181.82"), Decimal("9627.27"), Decimal("5627.27")),
-        (date(2026, 6, 1), date(2026, 6, 15), date(2026, 5, 31), date(2026, 6, 15), EmployeeStatus.RESIGNED, "termination_final_pay", Decimal("313000.00"), Decimal("9450.00"), Decimal("5450.00")),
+        (date(2026, 12, 16), date(2026, 12, 31), date(2026, 12, 15), None, EmployeeStatus.ACTIVE, "year_end", Decimal("323000.00"), Decimal("10950.00"), Decimal("6950.00")),
+        (date(2026, 6, 1), date(2026, 6, 15), date(2026, 5, 31), date(2026, 6, 15), EmployeeStatus.RESIGNED, "termination_final_pay", Decimal("323000.00"), Decimal("10950.00"), Decimal("6950.00")),
     ],
 )
 def test_final_pay_period_uses_annualized_tax_and_opening_balance(
@@ -476,8 +1160,30 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
                 taxable_compensation_ytd="300000.00",
                 tax_withheld_ytd="4000.00",
                 previous_employer_included=True,
+                opening_benefits_exempt_ytd="70000.00",
+                opening_benefits_reconciled=True,
+                opening_de_minimis_annual_ytd={
+                    "uniform_clothing": "0.00",
+                    "actual_medical_assistance": "0.00",
+                    "achievement_award": "0.00",
+                    "christmas_anniversary_gift": "0.00",
+                    "cba_productivity_incentive": "0.00",
+                },
+                opening_de_minimis_monthly_ytd={
+                    "medical_cash_dependents": "0.00",
+                    "rice_subsidy": "0.00",
+                    "laundry_allowance": "0.00",
+                },
                 source_reference="QA verified opening YTD example",
                 is_verified=True,
+            ),
+            EmployeeTaxBenefit(
+                employee_id=employee.id,
+                tax_year=2026,
+                paid_on=period_start + timedelta(days=1),
+                benefit_type="thirteenth_month",
+                gross_amount="30000.00",
+                source_reference="QA verified 13th-month payment record",
             ),
             PayrollPolicyVersion(
                 version=910_000 + int(uuid.uuid4().hex[:6], 16),
@@ -486,6 +1192,7 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
                 policy={
                     "timezone": "Asia/Manila",
                     "monthly_divisor": "22",
+                    "monthly_salary_proration": "scheduled_workday_fraction",
                     "daily_partial_work": "pro_rated",
                     "monthly_partial_work": "deduct_after_grace",
                     "paid_leave": False,
@@ -562,7 +1269,31 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
     )
     assert entry["input_snapshot"]["bir_calculation"]["annualization_trigger"] == trigger
     blocker_codes = {blocker["code"] for blocker in entry["blockers"]}
-    assert "bir_annual_benefits_unavailable" in blocker_codes
+    assert "bir_annual_benefits_unavailable" not in blocker_codes
+    benefit_reconciliation = entry["input_snapshot"]["bir_benefit_reconciliation"]
+    assert {
+        key: benefit_reconciliation[key]
+        for key in (
+            "exemption_cap",
+            "opening_exempt_benefits",
+            "opening_reconciled",
+            "current_employer_benefits_gross",
+            "current_employer_benefits_exempt",
+            "current_employer_benefits_taxable_excess",
+        )
+    } == {
+        "exemption_cap": "90000.00",
+        "opening_exempt_benefits": "70000.00",
+        "opening_reconciled": True,
+        "current_employer_benefits_gross": "30000.00",
+        "current_employer_benefits_exempt": "20000.00",
+        "current_employer_benefits_taxable_excess": "10000.00",
+    }
+    benefit_row = benefit_reconciliation["current_employer_benefit_payments"][0]
+    assert benefit_row["paid_on"] == (period_start + timedelta(days=1)).isoformat()
+    assert benefit_row["benefit_type"] == "thirteenth_month"
+    assert benefit_row["gross_amount"] == "30000.00"
+    assert benefit_row["taxable_other_benefit_amount"] == "30000.00"
     assert entry["input_snapshot"].get("monthly_contributions") is None
     if trigger == "termination_final_pay":
         assert "termination_monthly_contribution_timing_unavailable" in blocker_codes
@@ -588,6 +1319,22 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
     assert annual_tax_due == expected_tax_due
     assert prior_withheld == Decimal("4000.00")
     assert withholding_adjustment == expected_withholding
+    prepared_entry = db.exec(
+        select(PayrollEntry).where(PayrollEntry.id == uuid.UUID(entry["id"]))
+    ).one()
+    assert _payroll_entry_inputs_are_current(db, prepared_entry)
+    db.add(
+        EmployeeTaxBenefit(
+            employee_id=employee.id,
+            tax_year=2026,
+            paid_on=period_start + timedelta(days=2),
+            benefit_type="other_benefit",
+            gross_amount="100.00",
+            source_reference="QA additional benefit payment",
+        )
+    )
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, prepared_entry)
 
 
 @pytest.mark.parametrize(
@@ -643,6 +1390,7 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
         policy={
             "timezone": "Asia/Manila",
             "monthly_divisor": "22",
+            "monthly_salary_proration": "scheduled_workday_fraction",
             "daily_partial_work": "pro_rated",
             "monthly_partial_work": "deduct_after_grace",
             "paid_leave": False,
@@ -693,6 +1441,18 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
                 opening_pay_period_count=6,
                 opening_pay_period_type="semi_monthly",
                 previous_employer_included=True,
+                opening_de_minimis_annual_ytd={
+                    "uniform_clothing": "0.00",
+                    "actual_medical_assistance": "0.00",
+                    "achievement_award": "0.00",
+                    "christmas_anniversary_gift": "0.00",
+                    "cba_productivity_incentive": "0.00",
+                },
+                opening_de_minimis_monthly_ytd={
+                    "medical_cash_dependents": "0.00",
+                    "rice_subsidy": "0.00",
+                    "laundry_allowance": "0.00",
+                },
                 source_reference=source_reference,
                 is_verified=True,
             ),
@@ -745,11 +1505,11 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
         trace = entry["input_snapshot"]["bir_calculation"]
         if tax_classification == "ordinary":
             assert trace["method"] == "cumulative_average_rr_11_2018"
-            # November 1–15, 2025 has 10 weekdays. Monthly proration uses the
-            # configured 22-day divisor, so current taxable pay is 35,000 * 10 / 22.
-            assert trace["cumulative_taxable_compensation"] == "195909.09"
+            # A semi-monthly monthly-salary base is half the monthly salary,
+            # independent of how many weekdays fall in the cutoff.
+            assert trace["cumulative_taxable_compensation"] == "197500.00"
             assert trace["cumulative_period_count"] == 7
-            assert trace["average_period_compensation"] == "27987.01"
+            assert trace["average_period_compensation"] == "28214.29"
             assert trace["prior_tax_withheld"] == "11000.40"
         else:
             assert trace["method"] == "mwe_exemption_rr_8_2018"
@@ -852,6 +1612,7 @@ def test_daily_and_hourly_pay_bases_are_calculated_for_nonfinal_periods(
                 policy={
                     "timezone": "Asia/Manila",
                     "monthly_divisor": "22",
+                    "monthly_salary_proration": "scheduled_workday_fraction",
                     "daily_partial_work": "pro_rated",
                     "monthly_partial_work": "deduct_after_grace",
                     "paid_leave": False,
@@ -1008,6 +1769,7 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
                 policy={
                     "timezone": "Asia/Manila",
                     "monthly_divisor": "22",
+                    "monthly_salary_proration": "scheduled_workday_fraction",
                     "daily_partial_work": "pro_rated",
                     "monthly_partial_work": "deduct_after_grace",
                     "paid_leave": False,
@@ -1103,7 +1865,9 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
     days_after_change = period_days
     partial_day_reduction = daily_basis_after_change * Decimal(15) / Decimal(480)
     expected_period_gross = daily_basis_after_change * Decimal(days_after_change)
-    if pay_type != PayType.MONTHLY:
+    if pay_type == PayType.MONTHLY:
+        expected_period_gross = updated_rate / Decimal("2")
+    else:
         expected_period_gross -= partial_day_reduction
     assert Decimal(entry["gross_pay"]) == expected_period_gross, entry
     if pay_type == PayType.MONTHLY:
@@ -1122,11 +1886,19 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
         for blocker in entry["blockers"]
     ), entry["blockers"]
     bases = entry["input_snapshot"]["monthly_contributions"]["schemes"]
-    expected_actual = (
-        daily_basis_before_change * Decimal(days_before_change)
-        + daily_basis_after_change * Decimal(days_after_change)
-        - partial_day_reduction
-    ).quantize(Decimal("0.01"))
+    if pay_type == PayType.MONTHLY:
+        expected_actual = (
+            base_rate / Decimal("2")
+            + updated_rate / Decimal("2")
+            - base_rate / divisor
+            - partial_day_reduction
+        ).quantize(Decimal("0.01"))
+    else:
+        expected_actual = (
+            daily_basis_before_change * Decimal(days_before_change)
+            + daily_basis_after_change * Decimal(days_after_change)
+            - partial_day_reduction
+        ).quantize(Decimal("0.01"))
     monthly_equivalent_before_change = (
         base_rate if pay_type == PayType.MONTHLY else base_rate * hours_per_shift * divisor
     )
@@ -1184,3 +1956,270 @@ def test_resigned_or_terminated_employee_needs_separation_date_for_payroll(
     assert "employment_end_date_missing" in {
         blocker["code"] for blocker in entry["blockers"]
     }
+
+
+def test_attendance_preview_calculates_night_differential_from_current_intervals(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    employee = EmployeeRecords(
+        employee_code=f"NIGHT-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Night Worker",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2020, 1, 1),
+    )
+    group = PayrollPayGroup(
+        code=f"NIGHT-{uuid.uuid4().hex[:8]}",
+        name="QA night shift pay group",
+        cadence="semi_monthly",
+        first_period_end_day=15,
+        second_period_end_day=31,
+        weekend_rule="next_business_day",
+    )
+    shift = Shift(
+        code=f"NIGHT-{uuid.uuid4().hex[:8]}",
+        name="QA 10pm to 6am shift",
+        start_time="22:00",
+        end_time="06:00",
+        lunch_break_duration=0,
+        total_hours_minus_lunch=480,
+    )
+    db.add_all([employee, group, shift])
+    db.flush()
+    assignment = EmployeeShiftAssignment(
+        employee_id=employee.id,
+        shift_id=shift.id,
+        effective_from=date(2092, 10, 1),
+    )
+    pay_assignment = EmployeePayGroupAssignment(
+        employee_id=employee.id,
+        pay_group_id=group.id,
+        effective_from=date(2092, 10, 1),
+    )
+    salary = EmployeeSalary(
+        employee_id=employee.id,
+        basic_rate=Decimal("120"),
+        overtime_rate=Decimal("120"),
+        effective_date=date(2092, 10, 1),
+        pay_type=PayType.HOURLY,
+    )
+    policy = PayrollPolicyVersion(
+        version=990_000 + int(uuid.uuid4().hex[:6], 16),
+        effective_from=date(2092, 10, 1),
+        effective_to=date(2092, 10, 31),
+        confirmed=True,
+        policy={
+            "timezone": "Asia/Manila",
+            "monthly_divisor": "22",
+            "monthly_salary_proration": "scheduled_workday_fraction",
+            "monthly_holiday_pay_divisor": "22",
+            "daily_partial_work": "pro_rated",
+            "monthly_partial_work": "deduct_after_grace",
+            "paid_leave": False,
+            "paid_holidays": False,
+            "break_minutes": 0,
+            "grace_minutes": 0,
+            "overtime_rule": {"multiplier": "1.25"},
+            "premium_rules": {"night_differential_rate": "0.10"},
+            "allowance_tax_treatment": {"configured": False},
+            "rounding_mode": "half_up",
+            "contribution_collection": {
+                "frequency": "once_monthly",
+                "collection_period": "last_period",
+            },
+            "statutory_sources_reviewed": ["QA fixture only"],
+        },
+    )
+    db.add_all([assignment, pay_assignment, salary, policy])
+    db.flush()
+
+    zone = ZoneInfo("Asia/Manila")
+    for day in range(1, 16):
+        work_date = date(2092, 10, day)
+        if work_date.weekday() >= 5:
+            continue
+        local_start = datetime.combine(work_date, datetime.min.time(), tzinfo=zone).replace(
+            hour=22
+        )
+        local_end = local_start + timedelta(hours=8)
+        start_utc = local_start.astimezone(timezone.utc)
+        end_utc = local_end.astimezone(timezone.utc)
+        dtr = DailyTimeRecord(
+            employee_id=employee.id,
+            shift_id=shift.id,
+            login_date=start_utc,
+            logout_date=end_utc,
+            work_date=work_date,
+            rendered_minutes=480,
+            overtime_minutes=0,
+            is_absent=False,
+            is_time_calculated=True,
+            interval_revision=1,
+        )
+        db.add(dtr)
+        db.flush()
+        db.add(
+            DtrAttendanceInterval(
+                daily_time_record_id=dtr.id,
+                revision=1,
+                sequence=0,
+                start_at=start_utc,
+                end_at=end_utc,
+            )
+        )
+    db.commit()
+
+    response = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2092-10-01",
+            "date_to": "2092-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 200, response.text
+    entry = next(
+        row for row in response.json()["entries"] if row["employee_id"] == str(employee.id)
+    )
+    assert not entry["blockers"], entry["blockers"]
+    assert entry["regular_earnings"] == "10560.00"
+    assert entry["night_differential"] == "1056.00"
+    assert entry["gross_before_statutory"] == "11616.00"
+    assert any("480 regular and 0 approved overtime night minutes" in line for line in entry["formula"])
+
+
+def test_attendance_preview_calculates_ordinary_rest_day_premium(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    employee = EmployeeRecords(
+        employee_code=f"REST-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Rest Day Worker",
+        birthdate=date(1990, 1, 1),
+        date_hired=date(2020, 1, 1),
+    )
+    group = PayrollPayGroup(
+        code=f"REST-{uuid.uuid4().hex[:8]}",
+        name="QA rest day pay group",
+        cadence="semi_monthly",
+        first_period_end_day=15,
+        second_period_end_day=31,
+        weekend_rule="next_business_day",
+    )
+    shift = Shift(
+        code=f"REST-{uuid.uuid4().hex[:8]}",
+        name="QA Monday to Saturday shift",
+        start_time="08:00",
+        end_time="16:00",
+        lunch_break_duration=0,
+        total_hours_minus_lunch=480,
+        days_of_week=["1", "2", "3", "4", "5", "6"],
+    )
+    db.add_all([employee, group, shift])
+    db.flush()
+    db.add_all(
+        [
+            EmployeeShiftAssignment(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                effective_from=date(2090, 10, 1),
+            ),
+            EmployeePayGroupAssignment(
+                employee_id=employee.id,
+                pay_group_id=group.id,
+                effective_from=date(2090, 10, 1),
+            ),
+            EmployeeSalary(
+                employee_id=employee.id,
+                basic_rate=Decimal("960"),
+                overtime_rate=Decimal("120"),
+                effective_date=date(2090, 10, 1),
+                pay_type=PayType.DAILY,
+            ),
+            PayrollPolicyVersion(
+                version=991_000 + int(uuid.uuid4().hex[:6], 16),
+                effective_from=date(2090, 10, 1),
+                effective_to=date(2090, 10, 31),
+                confirmed=True,
+                policy={
+                    "timezone": "Asia/Manila",
+                    "monthly_divisor": "22",
+                    "monthly_salary_proration": "scheduled_workday_fraction",
+                    "monthly_holiday_pay_divisor": "22",
+                    "daily_partial_work": "pro_rated",
+                    "monthly_partial_work": "deduct_after_grace",
+                    "paid_leave": False,
+                    "paid_holidays": False,
+                    "break_minutes": 0,
+                    "grace_minutes": 0,
+                    "overtime_rule": {"multiplier": "1.25"},
+                    "premium_rules": {
+                        "rest_day_regular_multiplier": "1.30",
+                        "rest_day_overtime_multiplier": "1.69",
+                    },
+                    "allowance_tax_treatment": {"configured": False},
+                    "rounding_mode": "half_up",
+                    "contribution_collection": {
+                        "frequency": "once_monthly",
+                        "collection_period": "last_period",
+                    },
+                    "statutory_sources_reviewed": ["QA fixture only"],
+                },
+            ),
+        ]
+    )
+    db.flush()
+    zone = ZoneInfo("Asia/Manila")
+    for day in range(1, 16):
+        work_date = date(2090, 10, day)
+        if work_date.weekday() < 6:
+            start_local = datetime.combine(work_date, datetime.min.time(), tzinfo=zone).replace(
+                hour=8
+            )
+            worked_minutes = 480
+        elif work_date == date(2090, 10, 8):
+            start_local = datetime.combine(work_date, datetime.min.time(), tzinfo=zone).replace(
+                hour=8
+            )
+            worked_minutes = 480
+        else:
+            continue
+        start_utc = start_local.astimezone(timezone.utc)
+        db.add(
+            DailyTimeRecord(
+                employee_id=employee.id,
+                shift_id=shift.id,
+                login_date=start_utc,
+                logout_date=start_utc + timedelta(minutes=worked_minutes),
+                work_date=work_date,
+                rendered_minutes=worked_minutes,
+                overtime_minutes=0,
+                is_absent=False,
+                is_time_calculated=True,
+            )
+        )
+    db.commit()
+
+    response = client.get(
+        f"{API}/runs/attendance-calculation-preview",
+        params={
+            "pay_group_id": str(group.id),
+            "date_from": "2090-10-01",
+            "date_to": "2090-10-15",
+        },
+        headers=superuser_token_headers,
+    )
+    assert response.status_code == 200, response.text
+    entry = next(
+        row for row in response.json()["entries"] if row["employee_id"] == str(employee.id)
+    )
+    assert not entry["blockers"], entry["blockers"]
+    assert entry["regular_earnings"] == "12480.00"
+    assert entry["rest_day_premium"] == "288.00"
+    assert entry["gross_before_statutory"] == "12768.00"
+    assert any("ordinary rest-day work" in line for line in entry["formula"])

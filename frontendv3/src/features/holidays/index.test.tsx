@@ -42,6 +42,8 @@ const HOLIDAYS = {
       observe_weekend_as: null,
       multiplier_regular: null,
       multiplier_overtime: null,
+      multiplier_regular_rest_day: null,
+      multiplier_overtime_rest_day: null,
       is_recurring: true,
       is_active: true,
       is_deleted: false,

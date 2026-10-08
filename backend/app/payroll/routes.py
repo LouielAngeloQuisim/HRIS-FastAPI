@@ -22,7 +22,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from app.attendance.adjustment_models import DtrAdjustment
-from app.attendance.models import DailyTimeRecord, EmployeeShiftAssignment, Shift
+from app.attendance.models import (
+    DailyTimeRecord,
+    DtrAttendanceInterval,
+    EmployeeShiftAssignment,
+    Shift,
+)
 from app.audit.models import AuditLog
 from app.common.dependencies import CurrentUser, SessionDep
 from app.common.schemas import Message
@@ -55,18 +60,26 @@ from app.payroll.fact_tables import (
     PhilHealthBracket,
     SSSBracket,
 )
+from app.payroll.holiday_rates import HolidayRateError, resolve_holiday_factors
 from app.payroll.models import (
     CutoffType,
     EmployeePayGroupAssignment,
     EmployeePayGroupBulkBatch,
     EmployeeSalaryBulkBatch,
+    EmployeeTaxBenefit,
     EmployeeTaxYearDeclaration,
     PayrollContributionLedger,
     PayrollDeliveryOutbox,
+    PayrollEmployerProfile,
     PayrollEntry,
     PayrollPayGroup,
     PayrollPolicyVersion,
     PayrollRunStatus,
+    PayType,
+)
+from app.payroll.night_differential import (
+    NightDifferentialInputError,
+    allocate_night_work_minutes,
 )
 from app.payroll.payroll_tables import (
     EmployeeSalary,
@@ -76,6 +89,7 @@ from app.payroll.payroll_tables import (
     LoanAmortization,
     PayrollRun,
 )
+from app.payroll.roster_lock import lock_payroll_roster
 from app.payroll.schemas import (
     BIRBracketCreate,
     BIRBracketRead,
@@ -93,6 +107,8 @@ from app.payroll.schemas import (
     EmployeeSalaryCreate,
     EmployeeSalaryRead,
     EmployeeSalaryUpdate,
+    EmployeeTaxBenefitCreate,
+    EmployeeTaxBenefitPublic,
     EmployeeTaxYearDeclarationPublic,
     EmployeeTaxYearDeclarationUpdate,
     FleetIntegrationConfigRead,
@@ -113,6 +129,8 @@ from app.payroll.schemas import (
     PayrollDeliveryResendRequest,
     PayrollDeliveryStatusPublic,
     PayrollDraftRebuildRequest,
+    PayrollEmployerProfilePublic,
+    PayrollEmployerProfileUpdate,
     PayrollEntryRead,
     PayrollEntryReviewRequest,
     PayrollGenerateRequest,
@@ -143,6 +161,123 @@ from app.payroll.selectors import (
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/payroll", tags=["payroll"])
+
+# RR 11-2018 §2.78.1(B)(11); taxable excess is included at annualization.
+BIR_13TH_MONTH_AND_OTHER_BENEFITS_EXEMPTION_CAP = Decimal("90000.00")
+
+
+def _confirmed_rest_day_factors(policy: dict[str, Any]) -> tuple[Decimal, Decimal]:
+    """Read employer-confirmed ordinary rest-day total-pay factors."""
+    premium_rules = policy.get("premium_rules")
+    if not isinstance(premium_rules, dict):
+        raise ValueError("premium_rules must configure ordinary rest-day factors")
+    try:
+        regular = Decimal(str(premium_rules["rest_day_regular_multiplier"]))
+        overtime = Decimal(str(premium_rules["rest_day_overtime_multiplier"]))
+    except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(
+            "Configure rest_day_regular_multiplier and rest_day_overtime_multiplier"
+        ) from exc
+    if (
+        not regular.is_finite()
+        or not overtime.is_finite()
+        or regular < Decimal("1.30")
+        or overtime < Decimal("1.69")
+    ):
+        raise ValueError(
+            "Ordinary rest-day factors must be at least 1.30 regular and 1.69 overtime"
+        )
+    return regular, overtime
+
+
+@router.get(
+    "/employer-profile",
+    response_model=PayrollEmployerProfilePublic,
+    dependencies=[Depends(require_permission("payroll", "view"))],
+)
+def get_payroll_employer_profile(*, session: SessionDep) -> PayrollEmployerProfilePublic:
+    """Return the employer identity used on statutory payroll certificates."""
+    profile = session.get(PayrollEmployerProfile, "default")
+    if profile is None:
+        return PayrollEmployerProfilePublic(id="default")
+    return PayrollEmployerProfilePublic.model_validate(profile)
+
+
+@router.put(
+    "/employer-profile",
+    response_model=PayrollEmployerProfilePublic,
+    dependencies=[Depends(require_permission("payroll", "edit"))],
+)
+def save_payroll_employer_profile(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    obj_in: PayrollEmployerProfileUpdate,
+) -> PayrollEmployerProfilePublic:
+    """Save the singleton employer identity profile; empty strings clear fields."""
+    profile = session.get(PayrollEmployerProfile, "default")
+    if profile is None:
+        profile = PayrollEmployerProfile(id="default")
+    changes = obj_in.model_dump(exclude_unset=True)
+    changed = any(
+        getattr(profile, field) != (value.strip() or None if isinstance(value, str) else value)
+        for field, value in changes.items()
+    )
+    for field, value in changes.items():
+        setattr(profile, field, value.strip() or None if isinstance(value, str) else value)
+    if changed:
+        profile.is_verified = False
+        profile.verified_by = None
+        profile.verified_at = None
+    profile.updated_by = current_user.id
+    profile.updated_at = datetime.now(timezone.utc)
+    session.add(profile)
+    session.commit()
+    session.refresh(profile)
+    return PayrollEmployerProfilePublic.model_validate(profile)
+
+
+@router.post(
+    "/employer-profile/verify",
+    response_model=PayrollEmployerProfilePublic,
+    dependencies=[Depends(require_permission("payroll", "approve"))],
+)
+def verify_payroll_employer_profile(
+    *, session: SessionDep, current_user: CurrentUser
+) -> PayrollEmployerProfilePublic:
+    """Record independent verification of all required employer certificate fields."""
+    profile = session.get(PayrollEmployerProfile, "default", with_for_update=True)
+    if profile is None:
+        raise HTTPException(status_code=409, detail="Save employer certificate details first")
+    required_fields = (
+        "tin_number",
+        "registered_name",
+        "registered_address",
+        "postal_code",
+        "rdo_code",
+        "employer_type",
+        "signatory_name",
+        "signatory_title",
+        "source_reference",
+    )
+    missing = [field for field in required_fields if not (getattr(profile, field) or "").strip()]
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Complete the employer profile and add a source note before verification. "
+                f"Missing fields: {', '.join(missing)}."
+            ),
+        )
+    profile.is_verified = True
+    profile.verified_by = current_user.id
+    profile.verified_at = datetime.now(timezone.utc)
+    profile.updated_by = current_user.id
+    profile.updated_at = profile.verified_at
+    session.add(profile)
+    session.commit()
+    session.refresh(profile)
+    return PayrollEmployerProfilePublic.model_validate(profile)
 
 
 def _payroll_review_counts(session: Session, run_id: uuid.UUID) -> tuple[int, int, int]:
@@ -803,6 +938,101 @@ def _bir_finalized_history(
     return history, taxable_total, withheld_total, complete
 
 
+def _bir_tax_benefit_rows(
+    session: Session,
+    employee_id: uuid.UUID,
+    tax_year: int,
+    opening_as_of: date | None,
+    through: date,
+    opening_de_minimis_annual_ytd: dict[str, str] | None = None,
+    opening_de_minimis_monthly_ytd: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    start = opening_as_of or date(tax_year, 1, 1) - timedelta(days=1)
+    rows = session.exec(
+        select(EmployeeTaxBenefit)
+        .where(
+            EmployeeTaxBenefit.employee_id == employee_id,
+            EmployeeTaxBenefit.tax_year == tax_year,
+            EmployeeTaxBenefit.paid_on > start,
+            EmployeeTaxBenefit.paid_on <= through,
+        )
+        .order_by(
+            col(EmployeeTaxBenefit.paid_on),
+            col(EmployeeTaxBenefit.created_at),
+            col(EmployeeTaxBenefit.id),
+        )
+    ).all()
+    reversed_ids = {
+        row.correction_of_id for row in rows if row.correction_of_id is not None
+    }
+    active_rows = [
+        row
+        for row in rows
+        if row.correction_of_id is None and row.id not in reversed_ids
+    ]
+    monthly_paid: dict[tuple[int, int, str], Decimal] = {
+        (opening_as_of.year, opening_as_of.month, category): Decimal(amount)
+        for category, amount in (opening_de_minimis_monthly_ytd or {}).items()
+        if opening_as_of is not None
+    }
+    annual_paid: dict[str, Decimal] = {
+        category: Decimal(amount)
+        for category, amount in (opening_de_minimis_annual_ytd or {}).items()
+    }
+    result: list[dict[str, str]] = []
+    from app.payroll.de_minimis import calculate_de_minimis_allocation
+
+    for row in active_rows:
+        gross = Decimal(row.gross_amount)
+        category_excess = Decimal("0.00")
+        category_exempt = Decimal("0.00")
+        taxable_other_benefit = (
+            gross if row.benefit_type in {"thirteenth_month", "other_benefit"}
+            else Decimal("0.00")
+        )
+        if row.benefit_type == "de_minimis":
+            category = row.de_minimis_category
+            if category is None:
+                raise ValueError("A de minimis record is missing its category")
+            month_key = (row.paid_on.year, row.paid_on.month, category)
+            allocation = calculate_de_minimis_allocation(
+                paid_on=row.paid_on,
+                current_paid={category: gross},
+                month_to_date_paid={
+                    category: monthly_paid.get(month_key, Decimal("0.00"))
+                },
+                year_to_date_paid={
+                    category: annual_paid.get(category, Decimal("0.00"))
+                },
+                other_benefits_exempt_remaining=Decimal("90000.00"),
+                evidence=set(row.eligibility_evidence or []),
+            )
+            category_excess = allocation.category_excess[category]
+            category_exempt = allocation.eligible_exempt[category]
+            taxable_other_benefit = category_excess
+            monthly_paid[month_key] = monthly_paid.get(
+                month_key, Decimal("0.00")
+            ) + gross
+            annual_paid[category] = annual_paid.get(
+                category, Decimal("0.00")
+            ) + gross
+        result.append(
+            {
+                "id": str(row.id),
+                "paid_on": row.paid_on.isoformat(),
+                "benefit_type": row.benefit_type,
+                "de_minimis_category": row.de_minimis_category or "",
+                "eligibility_evidence": ",".join(sorted(row.eligibility_evidence or [])),
+                "gross_amount": str(gross),
+                "category_exempt_amount": str(category_exempt),
+                "category_excess_amount": str(category_excess),
+                "taxable_other_benefit_amount": str(taxable_other_benefit),
+                "source_reference": row.source_reference,
+            }
+        )
+    return result
+
+
 def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> bool:
     snapshot = entry.input_snapshot
     try:
@@ -825,6 +1055,10 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
             return False
         current_employee_reference = {
             "id": str(employee_record.id),
+            "employee_code": employee_record.employee_code,
+            "first_name": employee_record.first_name,
+            "last_name": employee_record.last_name,
+            "email": employee_record.email,
             "is_deleted": employee_record.is_deleted,
             "employee_status": str(
                 getattr(employee_record.employee_status, "value", employee_record.employee_status)
@@ -855,6 +1089,24 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
                 != tax_reference.get("updated_at")
                 or tax_declaration.is_verified != tax_reference.get("verified")
             ):
+                return False
+
+        benefit_reference = snapshot.get("bir_tax_benefit_ledger")
+        if isinstance(benefit_reference, list):
+            current_benefits = _bir_tax_benefit_rows(
+                session,
+                employee_id,
+                period_to.year,
+                tax_declaration.opening_as_of if tax_declaration else None,
+                period_to,
+                tax_declaration.opening_de_minimis_annual_ytd
+                if tax_declaration
+                else None,
+                tax_declaration.opening_de_minimis_monthly_ytd
+                if tax_declaration
+                else None,
+            )
+            if current_benefits != benefit_reference:
                 return False
 
         if "bir_schedule" in snapshot:
@@ -1009,6 +1261,29 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
             uuid.UUID(str(row["id"])) for row in snapshot["shift_assignments"]
         }:
             return False
+        expected_shift_ids = {
+            uuid.UUID(str(row["shift_id"])) for row in snapshot["shift_assignments"]
+        }
+        current_shifts = session.exec(
+            select(Shift).where(col(Shift.id).in_(expected_shift_ids))
+        ).all()
+        current_shift_revisions = [
+            {
+                "id": str(row.id),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "code": row.code,
+                "name": row.name,
+                "start_time": row.start_time,
+                "end_time": row.end_time,
+                "lunch_break_duration": row.lunch_break_duration,
+                "total_hours_minus_lunch": row.total_hours_minus_lunch,
+                "days_of_week": list(row.days_of_week),
+                "is_deleted": row.is_deleted,
+            }
+            for row in sorted(current_shifts, key=lambda item: str(item.id))
+        ]
+        if current_shift_revisions != snapshot.get("shift_revisions"):
+            return False
         pay_group_assignment_ids = set(
             session.exec(
                 select(EmployeePayGroupAssignment.id).where(
@@ -1051,6 +1326,50 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
             uuid.UUID(str(row["id"])) for row in snapshot["holiday_revisions"]
         }:
             return False
+        holiday_config_rows = session.exec(
+            select(HolidayConfig).join(
+                HolidayInstance,
+                col(HolidayInstance.config_id) == col(HolidayConfig.id),
+            ).where(
+                HolidayInstance.observed_date >= period_from,
+                HolidayInstance.observed_date <= period_to,
+                col(HolidayInstance.is_active).is_(True),
+                col(HolidayInstance.is_deleted).is_(False),
+                col(HolidayConfig.is_active).is_(True),
+                col(HolidayConfig.is_deleted).is_(False),
+            )
+        ).all()
+        if {row.id for row in holiday_config_rows} != {
+            uuid.UUID(str(row["id"]))
+            for row in snapshot.get("holiday_config_revisions", [])
+        }:
+            return False
+        for reference in snapshot.get("holiday_config_revisions", []):
+            holiday_config = session.get(
+                HolidayConfig, uuid.UUID(str(reference["id"]))
+            )
+            if holiday_config is None or not holiday_config.is_active or holiday_config.is_deleted:
+                return False
+            if (
+                str(getattr(holiday_config.type, "value", holiday_config.type))
+                != reference["type"]
+                or str(holiday_config.multiplier_regular)
+                != reference["multiplier_regular"]
+                or str(holiday_config.multiplier_overtime)
+                != reference["multiplier_overtime"]
+                or str(holiday_config.multiplier_regular_rest_day)
+                != reference.get("multiplier_regular_rest_day")
+                or str(holiday_config.multiplier_overtime_rest_day)
+                != reference.get("multiplier_overtime_rest_day")
+                or holiday_config.region_code != reference["region_code"]
+                or (
+                    holiday_config.updated_at.isoformat()
+                    if holiday_config.updated_at
+                    else None
+                )
+                != reference["updated_at"]
+            ):
+                return False
         policy_versions = set(
             session.exec(
                 select(PayrollPolicyVersion.id).where(
@@ -1084,11 +1403,23 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
             salary = session.get(EmployeeSalary, uuid.UUID(str(reference["id"])))
             if salary is None or salary.is_deleted or not salary.is_active:
                 return False
-            if (
-                salary.updated_at.isoformat() if salary.updated_at else None
-            ) != reference["updated_at"] or str(salary.basic_rate) != reference[
-                "basic_rate"
-            ]:
+            current_salary_reference = {
+                "id": str(salary.id),
+                "updated_at": salary.updated_at.isoformat() if salary.updated_at else None,
+                "basic_rate": str(salary.basic_rate),
+                "currency": salary.currency,
+                "effective_date": salary.effective_date.isoformat(),
+                "pay_type": str(getattr(salary.pay_type, "value", salary.pay_type)),
+                "overtime_rate": str(salary.overtime_rate),
+                "absent_penalty_rate": str(salary.absent_penalty_rate),
+                "non_taxable_allowance": str(salary.non_taxable_allowance),
+                "de_minimis_monthly": salary.de_minimis_monthly,
+                "thirteenth_month_exempt_portion": str(
+                    salary.thirteenth_month_exempt_portion
+                ),
+                "is_active": salary.is_active,
+            }
+            if current_salary_reference != reference:
                 return False
         for reference in snapshot.get("shift_assignments", []):
             assignment = session.get(
@@ -1137,6 +1468,26 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
     except (KeyError, TypeError, ValueError):
         return False
     return True
+
+
+def _run_roster_matches_current_membership(
+    *, session: Session, run: PayrollRun, entries: Sequence[PayrollEntry]
+) -> bool:
+    if run.pay_group_id is None:
+        return False
+    roster = preflight_payroll_run(
+        session=session,
+        pay_group_id=run.pay_group_id,
+        date_from=run.date_from,
+        date_to=run.date_to,
+        skip=0,
+        limit=201,
+    )
+    if roster.has_more or roster.count > 200:
+        return False
+    prepared_ids = {entry.employee_id for entry in entries}
+    expected_ids = {row.employee_id for row in roster.entries}
+    return len(entries) == roster.count and prepared_ids == expected_ids
 
 
 @router.post(
@@ -1340,6 +1691,9 @@ def finalize_payroll_run(
             status_code=409,
             detail="Every payroll entry must be reviewed or explicitly excluded first",
         )
+    if run.pay_group_id is None:
+        raise HTTPException(status_code=409, detail="Payroll run has no pay group")
+    lock_payroll_roster(session)
     if run.created_by is None or run.created_by == current_user.id:
         raise HTTPException(
             status_code=409, detail="The final approver must differ from the preparer"
@@ -1354,6 +1708,13 @@ def finalize_payroll_run(
     ).all()
     if not entries:
         raise HTTPException(status_code=409, detail="Payroll run has no entries")
+    if not _run_roster_matches_current_membership(
+        session=session, run=run, entries=entries
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Expected pay-group employee roster changed; rebuild and review the draft again",
+        )
     for entry in entries:
         if (
             entry.review_state not in {"reviewed", "excluded"}
@@ -1380,6 +1741,7 @@ def finalize_payroll_run(
             "attendance_revisions",
             "salary_versions",
             "shift_assignments",
+            "shift_revisions",
             "pay_group_assignments",
             "leave_revisions",
             "holiday_revisions",
@@ -2093,7 +2455,7 @@ def preflight_payroll_run(
             leave_days.add((leave.employee_id, cursor))
             cursor += timedelta(days=1)
     holiday_rows = session.exec(
-        select(col(HolidayInstance.observed_date), col(HolidayConfig.type))
+        select(col(HolidayInstance.observed_date), HolidayConfig)
         .join(HolidayConfig, col(HolidayInstance.config_id) == col(HolidayConfig.id))
         .where(
             HolidayInstance.observed_date >= date_from,
@@ -2104,11 +2466,11 @@ def preflight_payroll_run(
             col(HolidayConfig.is_deleted).is_(False),
         )
     ).all()
-    holiday_days = {
-        day
-        for day, kind in holiday_rows
-        if str(getattr(kind, "value", kind)) != "special_working"
-    }
+    holiday_configs_by_day: dict[date, list[HolidayConfig]] = {}
+    for day, holiday_config in holiday_rows:
+        if str(getattr(holiday_config.type, "value", holiday_config.type)) != "special_working":
+            holiday_configs_by_day.setdefault(day, []).append(holiday_config)
+    holiday_days = set(holiday_configs_by_day)
     cursor_dates: list[date] = []
     cursor = date_from
     while cursor <= date_to:
@@ -2295,13 +2657,51 @@ def preflight_payroll_run(
                     employee_dtrs += 1
                     eligible_ot += dtr.overtime_minutes or 0
                     approved_ot += dtr.overtime_approved_minutes or 0
-                    blockers.append(
-                        PayrollPreflightBlocker(
-                            code="unscheduled_attendance",
-                            message="Attendance on a non-scheduled date needs an explicit premium/exception rule before calculation.",
-                            work_date=work_day,
-                        )
+                    dtr_worked = (
+                        not dtr.is_absent and int(dtr.rendered_minutes or 0) > 0
                     )
+                    day_holidays = holiday_configs_by_day.get(work_day, [])
+                    if dtr_worked and not day_holidays:
+                        try:
+                            if len(day_policies) != 1 or not day_policies[0].confirmed:
+                                raise ValueError("A confirmed policy is required")
+                            _confirmed_rest_day_factors(day_policies[0].policy)
+                        except ValueError as exc:
+                            blockers.append(
+                                PayrollPreflightBlocker(
+                                    code="rest_day_policy_unconfirmed",
+                                    message=f"Ordinary rest-day work cannot be calculated: {exc}.",
+                                    work_date=work_day,
+                                )
+                            )
+                    elif dtr_worked and len(day_holidays) > 1 and not (
+                        len(day_holidays) == 2
+                        and str(getattr(day_holidays[0].type, "value", day_holidays[0].type))
+                        in {"regular", "special_non_working"}
+                        and all(
+                            str(getattr(item.type, "value", item.type))
+                            == str(getattr(day_holidays[0].type, "value", day_holidays[0].type))
+                            for item in day_holidays
+                        )
+                    ):
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="holiday_configuration_ambiguous",
+                                message="Mixed or unsupported overlapping holidays apply to this rest day; resolve the holiday configuration before payroll.",
+                                work_date=work_day,
+                            )
+                        )
+                    elif dtr_worked and (
+                        day_holidays[0].multiplier_regular_rest_day is None
+                        or day_holidays[0].multiplier_overtime_rest_day is None
+                    ):
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="holiday_multiplier_incomplete",
+                                message="Worked holiday on a rest day needs configured regular and overtime total factors.",
+                                work_date=work_day,
+                            )
+                        )
                 continue
             if not day_records:
                 blockers.append(
@@ -2402,6 +2802,13 @@ def attendance_calculation_preview(
         skip=skip,
         limit=limit,
     )
+    pay_group = session.get(PayrollPayGroup, pay_group_id)
+    if pay_group is None:
+        raise HTTPException(status_code=404, detail="Active pay group not found")
+    monthly_period_fraction = {
+        CutoffType.MONTHLY: Decimal("1"),
+        CutoffType.SEMI_MONTHLY: Decimal("0.5"),
+    }.get(pay_group.cadence)
     employee_ids = [entry.employee_id for entry in roster.entries]
     if not employee_ids:
         return PayrollAttendanceCalculationPreview(
@@ -2434,13 +2841,14 @@ def attendance_calculation_preview(
         if salary.employee_id:
             salaries_by_employee.setdefault(salary.employee_id, []).append(salary)
 
+    eligibility_start = date_from - timedelta(days=min(7, (date_from - date.min).days))
     assignments = session.exec(
         select(EmployeeShiftAssignment).where(
             col(EmployeeShiftAssignment.employee_id).in_(employee_ids),
             col(EmployeeShiftAssignment.is_deleted).is_(False),
             EmployeeShiftAssignment.effective_from <= date_to,
             (col(EmployeeShiftAssignment.effective_to).is_(None))
-            | (col(EmployeeShiftAssignment.effective_to) >= date_from),
+            | (col(EmployeeShiftAssignment.effective_to) >= eligibility_start),
         )
     ).all()
     assignments_by_employee: dict[uuid.UUID, list[EmployeeShiftAssignment]] = {}
@@ -2472,11 +2880,44 @@ def attendance_calculation_preview(
     dtrs_by_key = {
         (dtr.employee_id, dtr.work_date): dtr for dtr in dtrs if dtr.work_date
     }
+    dtr_ids = [dtr.id for dtr in dtrs]
+    interval_rows = (
+        session.exec(
+            select(DtrAttendanceInterval)
+            .where(col(DtrAttendanceInterval.daily_time_record_id).in_(dtr_ids))
+            .order_by(
+                col(DtrAttendanceInterval.daily_time_record_id),
+                col(DtrAttendanceInterval.sequence),
+            )
+        ).all()
+        if dtr_ids
+        else []
+    )
+    dtr_intervals: dict[uuid.UUID, list[DtrAttendanceInterval]] = {}
+    dtr_by_id = {dtr.id: dtr for dtr in dtrs}
+    for interval in interval_rows:
+        dtr = dtr_by_id.get(interval.daily_time_record_id)
+        if dtr is not None and interval.revision == dtr.interval_revision:
+            dtr_intervals.setdefault(interval.daily_time_record_id, []).append(interval)
+    previous_dtrs = session.exec(
+        select(DailyTimeRecord).where(
+            col(DailyTimeRecord.employee_id).in_(employee_ids),
+            col(DailyTimeRecord.work_date) >= eligibility_start,
+            col(DailyTimeRecord.work_date) < date_from,
+            col(DailyTimeRecord.is_deleted).is_(False),
+        )
+    ).all()
+    previous_dtrs_by_key: dict[tuple[uuid.UUID, date], list[DailyTimeRecord]] = {}
+    for prior_dtr in previous_dtrs:
+        if prior_dtr.work_date is not None:
+            previous_dtrs_by_key.setdefault(
+                (prior_dtr.employee_id, prior_dtr.work_date), []
+            ).append(prior_dtr)
     policies = session.exec(
         select(PayrollPolicyVersion).where(
             PayrollPolicyVersion.effective_from <= date_to,
             (col(PayrollPolicyVersion.effective_to).is_(None))
-            | (col(PayrollPolicyVersion.effective_to) >= date_from),
+            | (col(PayrollPolicyVersion.effective_to) >= eligibility_start),
             col(PayrollPolicyVersion.confirmed).is_(True),
         )
     ).all()
@@ -2486,7 +2927,7 @@ def attendance_calculation_preview(
             LeaveRequest.status == "approved",
             col(LeaveRequest.is_deleted).is_(False),
             LeaveRequest.date_start <= date_to,
-            LeaveRequest.date_end >= date_from,
+            LeaveRequest.date_end >= eligibility_start,
             col(LeaveRequest.requested_hours).is_(None),
         )
     ).all()
@@ -2494,16 +2935,16 @@ def attendance_calculation_preview(
     for leave in leave_rows:
         if leave.employee_id is None:
             continue
-        cursor = max(date_from, leave.date_start)
+        cursor = max(eligibility_start, leave.date_start)
         end = min(date_to, leave.date_end)
         while cursor <= end:
             paid_leave_days.add((leave.employee_id, cursor))
             cursor += timedelta(days=1)
     holiday_rows = session.exec(
-        select(col(HolidayInstance.observed_date), col(HolidayConfig.type))
+        select(HolidayInstance, HolidayConfig)
         .join(HolidayConfig, col(HolidayInstance.config_id) == col(HolidayConfig.id))
         .where(
-            HolidayInstance.observed_date >= date_from,
+            HolidayInstance.observed_date >= eligibility_start,
             HolidayInstance.observed_date <= date_to,
             col(HolidayInstance.is_active).is_(True),
             col(HolidayInstance.is_deleted).is_(False),
@@ -2511,12 +2952,36 @@ def attendance_calculation_preview(
             col(HolidayConfig.is_deleted).is_(False),
         )
     ).all()
-    holiday_days = {
-        holiday_day
-        for holiday_day, kind in holiday_rows
-        if str(getattr(kind, "value", kind)) != "special_working"
-    }
-
+    holidays_by_day: dict[
+        date,
+        list[
+            tuple[
+                str,
+                Decimal | None,
+                Decimal | None,
+                Decimal | None,
+                Decimal | None,
+                str | None,
+                uuid.UUID,
+            ]
+        ],
+    ] = {}
+    for holiday_instance, holiday_config in holiday_rows:
+        holiday_day = holiday_instance.observed_date
+        kind = holiday_config.type
+        if str(getattr(kind, "value", kind)) == "special_working":
+            continue
+        holidays_by_day.setdefault(holiday_day, []).append(
+            (
+                str(getattr(kind, "value", kind)),
+                holiday_config.multiplier_regular,
+                holiday_config.multiplier_overtime,
+                holiday_config.multiplier_regular_rest_day,
+                holiday_config.multiplier_overtime_rest_day,
+                holiday_config.region_code,
+                holiday_config.id,
+            )
+        )
     previews: list[PayrollAttendanceCalculationEntry] = []
     for employee_entry in roster.entries:
         blockers = list(employee_entry.blockers)
@@ -2528,6 +2993,137 @@ def attendance_calculation_preview(
         results = []
         employee = employees.get(employee_entry.employee_id)
         employee_salaries = salaries_by_employee.get(employee_entry.employee_id, [])
+        employee_assignments = assignments_by_employee.get(employee_entry.employee_id, [])
+
+        # The divisor is based on the full configured pay period, not merely
+        # the dates an employee happened to work. For a mid-period hire or
+        # separation, use the nearest effective shift to define the schedule
+        # outside active employment; those dates contribute to the denominator
+        # but never to the employee's payable numerator.
+        monthly_period_scheduled_days = 0
+        period_day = date_from
+        while period_day <= date_to:
+            assignment_for_denominator = next(
+                (
+                    item
+                    for item in employee_assignments
+                    if item.effective_from <= period_day
+                    and (item.effective_to is None or item.effective_to >= period_day)
+                ),
+                None,
+            )
+            if assignment_for_denominator is None and employee_assignments:
+                assignment_for_denominator = min(
+                    employee_assignments,
+                    key=lambda item: (
+                        abs((item.effective_from - period_day).days),
+                        item.effective_from,
+                        str(item.id),
+                    ),
+                )
+            denominator_shift = (
+                shifts.get(assignment_for_denominator.shift_id)
+                if assignment_for_denominator is not None
+                else None
+            )
+            if denominator_shift is not None:
+                try:
+                    denominator_weekdays = {
+                        int(value) for value in denominator_shift.days_of_week
+                    }
+                except (TypeError, ValueError):
+                    denominator_weekdays = set()
+                if period_day.isoweekday() in denominator_weekdays:
+                    monthly_period_scheduled_days += 1
+            period_day += timedelta(days=1)
+        def preceding_workday_eligibility(
+            holiday_date: date, employee_record: EmployeeRecords | None,
+        ) -> tuple[bool, str | None, DailyTimeRecord | None]:
+            if employee_record is None:
+                return False, "Employee record is unavailable for holiday eligibility.", None
+            if employee_record.date_hired is not None and employee_record.date_hired >= holiday_date:
+                return False, None, None
+            if (
+                employee_record.date_separated is not None
+                and employee_record.date_separated < holiday_date
+            ):
+                return False, None, None
+            candidate = holiday_date - timedelta(days=1)
+            for _ in range(7):
+                if employee_record.date_hired is not None and candidate < employee_record.date_hired:
+                    return False, None, None
+                assignment = next(
+                    (
+                        item
+                        for item in assignments_by_employee.get(employee_record.id, [])
+                        if item.effective_from <= candidate
+                        and (item.effective_to is None or item.effective_to >= candidate)
+                    ),
+                    None,
+                )
+                if assignment is None:
+                    return False, "Prior scheduled workday cannot be determined because no effective shift is recorded.", None
+                prior_shift = shifts.get(assignment.shift_id)
+                if prior_shift is None:
+                    return False, "Prior scheduled workday cannot be determined because its shift is unavailable.", None
+                try:
+                    prior_scheduled_days = {int(value) for value in prior_shift.days_of_week}
+                except (TypeError, ValueError):
+                    return False, "Prior shift has an invalid weekday schedule.", None
+                if candidate.isoweekday() not in prior_scheduled_days:
+                    candidate -= timedelta(days=1)
+                    continue
+
+                prior_leave = (employee_record.id, candidate) in paid_leave_days
+                if prior_leave:
+                    leave_policies = [
+                        row
+                        for row in policies
+                        if row.effective_from <= candidate
+                        and (row.effective_to is None or row.effective_to >= candidate)
+                    ]
+                    if len(leave_policies) != 1 or not leave_policies[0].confirmed:
+                        return False, "Prior approved leave has no single confirmed policy for paid-leave eligibility.", None
+                    if bool(leave_policies[0].policy.get("paid_leave")):
+                        return True, None, None
+                    if candidate in holidays_by_day:
+                        candidate -= timedelta(days=1)
+                        continue
+                    return False, None, None
+
+                prior_records = previous_dtrs_by_key.get((employee_record.id, candidate), [])
+                if candidate >= date_from:
+                    current_record = dtrs_by_key.get((employee_record.id, candidate))
+                    if current_record is not None:
+                        prior_records = [current_record]
+                if len(prior_records) > 1:
+                    return False, "Prior scheduled workday has duplicate attendance records.", None
+                if prior_records:
+                    prior_dtr = prior_records[0]
+                    if prior_dtr.is_absent:
+                        if candidate in holidays_by_day:
+                            candidate -= timedelta(days=1)
+                            continue
+                        return False, None, prior_dtr
+                    if (
+                        prior_dtr.login_date is None
+                        or prior_dtr.logout_date is None
+                        or prior_dtr.rendered_minutes is None
+                    ):
+                        return False, "Prior scheduled workday attendance is incomplete.", prior_dtr
+                    if prior_dtr.rendered_minutes > 0:
+                        return True, None, prior_dtr
+                    if candidate in holidays_by_day:
+                        candidate -= timedelta(days=1)
+                        continue
+                    return False, None, prior_dtr
+
+                if candidate in holidays_by_day:
+                    candidate -= timedelta(days=1)
+                    continue
+                return False, "Prior scheduled workday has no attendance or approved leave resolution.", None
+            return False, "Could not identify a prior scheduled workday within seven days.", None
+
         if employee is None:
             blockers.append(
                 PayrollPreflightBlocker(
@@ -2591,7 +3187,17 @@ def attendance_calculation_preview(
                 )
                 break
             shift = shifts[effective_assignment.shift_id]
-            if cursor.isoweekday() not in {int(value) for value in shift.days_of_week}:
+            scheduled_weekdays = {int(value) for value in shift.days_of_week}
+            is_rest_day = cursor.isoweekday() not in scheduled_weekdays
+            dtr = dtrs_by_key.get((employee_entry.employee_id, cursor))
+            holiday_configs = holidays_by_day.get(cursor, [])
+            worked_on_rest_day = bool(
+                is_rest_day
+                and dtr is not None
+                and not dtr.is_absent
+                and int(dtr.rendered_minutes or 0) > 0
+            )
+            if is_rest_day and not holiday_configs and not worked_on_rest_day:
                 cursor += timedelta(days=1)
                 continue
             day_policies = [
@@ -2610,11 +3216,188 @@ def attendance_calculation_preview(
                 )
                 break
             policy = day_policies[0]
-            dtr = dtrs_by_key.get((employee_entry.employee_id, cursor))
             paid_leave_record = (employee_entry.employee_id, cursor) in paid_leave_days
             paid_leave = paid_leave_record and bool(policy.policy.get("paid_leave"))
-            holiday = cursor in holiday_days
-            paid_holiday = holiday and bool(policy.policy.get("paid_holidays"))
+            holiday_kind_for_date = holiday_configs[0][0] if holiday_configs else None
+            if len(holiday_configs) > 1 and not (
+                len(holiday_configs) == 2
+                and holiday_kind_for_date in {"regular", "special_non_working"}
+                and all(item[0] == holiday_kind_for_date for item in holiday_configs)
+            ):
+                blockers.append(
+                    PayrollPreflightBlocker(
+                        code="holiday_configuration_ambiguous",
+                        message="Mixed or unsupported overlapping holidays apply to this work date; resolve the holiday configuration before payroll.",
+                        work_date=cursor,
+                    )
+                )
+                break
+            holiday = bool(holiday_configs)
+            holiday_regular_multiplier: Decimal | None = None
+            holiday_overtime_multiplier: Decimal | None = None
+            holiday_regular_base: Decimal | None = None
+            paid_holiday = False
+            if holiday:
+                holiday_kind = holiday_configs[0][0]
+                if any(item[5] for item in holiday_configs):
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="holiday_region_unresolved",
+                            message="This regional holiday cannot be applied until the employee work location is mapped to the holiday region.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                if holiday_kind == "regular" and (dtr is None or dtr.is_absent):
+                    paid_holiday, eligibility_error, eligibility_dtr = preceding_workday_eligibility(cursor, employee)
+                    if eligibility_error:
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="regular_holiday_eligibility_unresolved",
+                                message=eligibility_error,
+                                work_date=cursor,
+                            )
+                        )
+                        break
+                    if eligibility_dtr is not None:
+                        refs.append(
+                            f"attendance:{eligibility_dtr.id}:revision:{eligibility_dtr.interval_revision}"
+                        )
+                    formulas.append(
+                        f"{cursor}: unworked regular holiday; prior scheduled workday eligibility {'met' if paid_holiday else 'not met'}"
+                    )
+                elif holiday_kind != "regular":
+                    paid_holiday = bool(policy.policy.get("paid_holidays"))
+                holiday_worked = bool(
+                    dtr is not None
+                    and not dtr.is_absent
+                    and int(dtr.rendered_minutes or 0) > 0
+                )
+                if len(holiday_configs) == 2 and paid_holiday and not holiday_worked:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="double_holiday_unworked_unresolved",
+                            message="Paid unworked double-holiday treatment is not configured; confirm the applicable monthly/daily entitlement before calculation.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                refs.extend(
+                    f"holiday:{item[6]}:{item[0]}:{cursor}" for item in holiday_configs
+                )
+                if dtr is not None and not dtr.is_absent and int(dtr.rendered_minutes or 0) > 0:
+                    configured_regular = [
+                        item[3] if is_rest_day else item[1] for item in holiday_configs
+                    ]
+                    configured_overtime = [
+                        item[4] if is_rest_day else item[2] for item in holiday_configs
+                    ]
+                    try:
+                        if any(item[0] != holiday_kind for item in holiday_configs):
+                            raise HolidayRateError(
+                                "Mixed holiday types on the same date require an explicitly reviewed stacking rule."
+                            )
+                        applicable_regular_factor, applicable_overtime_factor = (
+                            resolve_holiday_factors(
+                                holiday_kind,
+                                len(holiday_configs),
+                                rest_day=is_rest_day,
+                                configured_regular=configured_regular,
+                                configured_overtime=configured_overtime,
+                            )
+                        )
+                    except HolidayRateError as exc:
+                        error_message = str(exc)
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code=(
+                                    "holiday_multiplier_incomplete"
+                                    if "configuration is incomplete" in error_message
+                                    else "holiday_rate_unresolved"
+                                ),
+                                message=error_message,
+                                work_date=cursor,
+                            )
+                        )
+                        break
+                    holiday_regular_multiplier = applicable_regular_factor
+                    holiday_overtime_multiplier = applicable_overtime_factor
+                    if effective_salary.pay_type == PayType.MONTHLY:
+                        try:
+                            holiday_divisor = Decimal(
+                                str(policy.policy["monthly_holiday_pay_divisor"])
+                            )
+                        except (KeyError, InvalidOperation, TypeError, ValueError):
+                            holiday_divisor = Decimal("0")
+                        if holiday_divisor <= 0:
+                            blockers.append(
+                                PayrollPreflightBlocker(
+                                    code="monthly_holiday_basis_unconfirmed",
+                                    message="Confirm a positive monthly_holiday_pay_divisor before calculating a worked holiday premium for monthly-paid employees.",
+                                    work_date=cursor,
+                                )
+                            )
+                            break
+                        holiday_regular_base = (
+                            effective_salary.basic_rate / holiday_divisor
+                        )
+                    formulas.append(
+                        f"{cursor}: {len(holiday_configs)} {holiday_kind} holiday(s), statutory-safe premium"
+                        f"{' on rest day' if is_rest_day else ''}; regular factor {applicable_regular_factor}; "
+                        f"overtime factor {applicable_overtime_factor}"
+                    )
+            rest_day_regular_multiplier: Decimal | None = None
+            rest_day_overtime_multiplier: Decimal | None = None
+            rest_day_regular_base: Decimal | None = None
+            if is_rest_day and not holiday and worked_on_rest_day:
+                try:
+                    (
+                        rest_day_regular_multiplier,
+                        rest_day_overtime_multiplier,
+                    ) = _confirmed_rest_day_factors(policy.policy)
+                    if effective_salary.pay_type == PayType.MONTHLY:
+                        rest_day_divisor = Decimal(
+                            str(policy.policy["monthly_divisor"])
+                        )
+                        if rest_day_divisor <= 0:
+                            raise ValueError("monthly_divisor must be positive")
+                        rest_day_regular_base = (
+                            effective_salary.basic_rate
+                            / rest_day_divisor
+                            * Decimal(
+                                min(
+                                    int(dtr.rendered_minutes or 0)
+                                    if dtr is not None
+                                    else 0,
+                                    shift.total_hours_minus_lunch,
+                                )
+                            )
+                            / Decimal(shift.total_hours_minus_lunch)
+                        )
+                except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code="rest_day_policy_unconfirmed",
+                            message=f"Ordinary rest-day work cannot be calculated: {exc}.",
+                            work_date=cursor,
+                        )
+                    )
+                    break
+                formulas.append(
+                    f"{cursor}: ordinary rest-day work; total factors "
+                    f"{rest_day_regular_multiplier} regular and "
+                    f"{rest_day_overtime_multiplier} overtime"
+                )
+            if (
+                is_rest_day
+                and effective_salary.pay_type == PayType.MONTHLY
+                and not worked_on_rest_day
+            ):
+                # A monthly-paid employee's ordinary monthly base already
+                # includes unworked rest days and holidays; do not add a
+                # scheduled-day fraction for an unscheduled date.
+                cursor += timedelta(days=1)
+                continue
             resolved_no_punch_day = paid_leave_record or holiday
             if dtr is None and not resolved_no_punch_day:
                 blockers.append(
@@ -2664,10 +3447,120 @@ def attendance_calculation_preview(
                     if dtr and dtr.overtime_approved
                     else 0
                 )
+                night_regular_minutes = 0
+                night_overtime_minutes = 0
+                if dtr is not None and worked_minutes > 0:
+                    interval_records = dtr_intervals.get(dtr.id, [])
+                    if interval_records:
+                        actual_intervals = [
+                            (item.start_at, item.end_at) for item in interval_records
+                        ]
+                    elif dtr.interval_revision > 0:
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="night_differential_interval_history_missing",
+                                message="Current attendance interval revision is missing; repair attendance history before calculating night work.",
+                                work_date=cursor,
+                            )
+                        )
+                        break
+                    elif dtr.login_date is not None and dtr.logout_date is not None:
+                        actual_intervals = [(dtr.login_date, dtr.logout_date)]
+                    else:
+                        actual_intervals = []
+                    if actual_intervals:
+                        try:
+                            night_regular_minutes, night_overtime_minutes = (
+                                allocate_night_work_minutes(
+                                    actual_intervals,
+                                    scheduled_minutes=shift.total_hours_minus_lunch,
+                                    expected_worked_minutes=worked_minutes,
+                                    approved_overtime_minutes=approved_ot,
+                                    unpaid_break_minutes=(
+                                        shift.lunch_break_duration
+                                        if len(actual_intervals) == 1
+                                        else 0
+                                    ),
+                                    zone=ZoneInfo(
+                                        str(policy.policy.get("timezone", "Asia/Manila"))
+                                    ),
+                                )
+                            )
+                        except (NightDifferentialInputError, ZoneInfoNotFoundError) as exc:
+                            blockers.append(
+                                PayrollPreflightBlocker(
+                                    code="night_differential_attendance_unresolved",
+                                    message=str(exc),
+                                    work_date=cursor,
+                                )
+                            )
+                            break
+                night_differential_rate: Decimal | None = None
+                if night_regular_minutes or night_overtime_minutes:
+                    premium_rules = policy.policy.get("premium_rules")
+                    configured_night_rate = (
+                        premium_rules.get("night_differential_rate")
+                        if isinstance(premium_rules, dict)
+                        else None
+                    )
+                    try:
+                        night_differential_rate = Decimal(str(configured_night_rate))
+                    except (InvalidOperation, TypeError, ValueError):
+                        night_differential_rate = None
+                    if (
+                        night_differential_rate is None
+                        or night_differential_rate < Decimal("0.10")
+                    ):
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="night_differential_policy_unconfirmed",
+                                message="Confirmed payroll policy must set premium_rules.night_differential_rate to at least 0.10 for work between 22:00 and 06:00.",
+                                work_date=cursor,
+                            )
+                        )
+                        break
                 rounding = str(policy.policy["rounding_mode"])
                 monthly_partial_rule = policy.policy.get("monthly_partial_work")
                 if monthly_partial_rule is not None:
                     monthly_partial_rule = str(monthly_partial_rule)
+                if effective_salary.pay_type == PayType.MONTHLY:
+                    monthly_proration = policy.policy.get("monthly_salary_proration")
+                    if monthly_proration not in {
+                        "scheduled_workday_fraction",
+                        "monthly_divisor_per_workday",
+                    }:
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="monthly_salary_proration_unconfirmed",
+                                message="Confirm monthly salary proration as a fixed pay-period fraction or monthly-divisor amount per scheduled workday.",
+                                work_date=cursor,
+                            )
+                        )
+                        break
+                    if (
+                        monthly_proration == "scheduled_workday_fraction"
+                        and monthly_period_fraction is None
+                    ):
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="monthly_salary_group_incompatible",
+                                message="Monthly-paid employees must use a monthly or twice-monthly pay group.",
+                                work_date=cursor,
+                            )
+                        )
+                        break
+                    if (
+                        monthly_proration == "scheduled_workday_fraction"
+                        and monthly_period_scheduled_days <= 0
+                    ):
+                        blockers.append(
+                            PayrollPreflightBlocker(
+                                code="monthly_salary_schedule_unavailable",
+                                message="The full pay-period shift schedule is unavailable for monthly salary proration.",
+                                work_date=cursor,
+                            )
+                        )
+                        break
                 grace_minutes = int(policy.policy["grace_minutes"])
                 raw_late_minutes = 0
                 if dtr is not None and dtr.login_date is not None:
@@ -2715,17 +3608,36 @@ def attendance_calculation_preview(
                         worked_minutes=worked_minutes,
                         overtime_eligible_minutes=eligible_ot,
                         overtime_approved_minutes=approved_ot,
+                        holiday_regular_multiplier=holiday_regular_multiplier,
+                        holiday_overtime_multiplier=holiday_overtime_multiplier,
+                        holiday_regular_base=holiday_regular_base,
+                        rest_day_regular_multiplier=rest_day_regular_multiplier,
+                        rest_day_overtime_multiplier=rest_day_overtime_multiplier,
+                        rest_day_regular_base=rest_day_regular_base,
+                        night_regular_minutes=night_regular_minutes,
+                        night_overtime_minutes=night_overtime_minutes,
+                        night_differential_rate=night_differential_rate,
                         raw_late_minutes=raw_late_minutes,
                         grace_minutes=grace_minutes,
-                        paid_absence=(paid_leave or paid_holiday) and dtr is None,
+                        paid_absence=(paid_leave or paid_holiday)
+                        and (dtr is None or dtr.is_absent),
                         absence=bool(
-                            (dtr and dtr.is_absent)
+                            (dtr and dtr.is_absent and not (paid_leave or paid_holiday))
                             or (
                                 dtr is None
                                 and resolved_no_punch_day
                                 and not (paid_leave or paid_holiday)
                             )
                         ),
+                        monthly_period_fraction=monthly_period_fraction,
+                        monthly_period_scheduled_days=monthly_period_scheduled_days,
+                        monthly_salary_proration=str(
+                            policy.policy.get(
+                                "monthly_salary_proration",
+                                "scheduled_workday_fraction",
+                            )
+                        ),  # type: ignore[arg-type]
+                        monthly_salary_base_eligible=not is_rest_day,
                     )
                 )
             except (
@@ -2745,6 +3657,12 @@ def attendance_calculation_preview(
                 break
             if dtr:
                 refs.append(f"attendance:{dtr.id}:revision:{dtr.interval_revision}")
+            if night_regular_minutes or night_overtime_minutes:
+                formulas.append(
+                    f"{cursor}: {night_regular_minutes} regular and "
+                    f"{night_overtime_minutes} approved overtime night minutes at "
+                    f"{night_differential_rate} night differential rate"
+                )
             refs.append(
                 f"salary:{effective_salary.id}:effective:{effective_salary.effective_date}"
             )
@@ -2786,6 +3704,15 @@ def attendance_calculation_preview(
 
         regular = sum((result.regular for result in results), Decimal("0.00"))
         overtime = sum((result.overtime for result in results), Decimal("0.00"))
+        holiday_premium = sum(
+            (result.holiday_premium for result in results), Decimal("0.00")
+        )
+        rest_day_premium = sum(
+            (result.rest_day_premium for result in results), Decimal("0.00")
+        )
+        night_differential = sum(
+            (result.night_differential for result in results), Decimal("0.00")
+        )
         attendance_deduction = sum(
             (result.attendance_deduction for result in results), Decimal("0.00")
         )
@@ -2799,9 +3726,20 @@ def attendance_calculation_preview(
                 employee_name=employee_entry.employee_name,
                 regular_earnings=regular if not blockers else None,
                 approved_overtime=overtime if not blockers else None,
+                holiday_premium=holiday_premium if not blockers else None,
+                rest_day_premium=rest_day_premium if not blockers else None,
+                night_differential=night_differential if not blockers else None,
                 attendance_deduction=attendance_deduction if not blockers else None,
                 short_time_deduction=short_time_deduction if not blockers else None,
-                gross_before_statutory=regular + overtime if not blockers else None,
+                gross_before_statutory=(
+                    regular
+                    + overtime
+                    + holiday_premium
+                    + rest_day_premium
+                    + night_differential
+                    if not blockers
+                    else None
+                ),
                 blockers=blockers,
                 formula=formulas,
                 source_references=sorted(set(refs)),
@@ -2850,6 +3788,7 @@ def prepare_attendance_payroll_draft(
         signed=True,
     )
     session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+    lock_payroll_roster(session)
     existing = session.exec(
         select(PayrollRun)
         .where(
@@ -2985,6 +3924,24 @@ def prepare_attendance_payroll_draft(
                         and entry.approved_overtime is not None
                         else None
                     ),
+                    holiday_premium=(
+                        previous.holiday_premium + entry.holiday_premium
+                        if previous.holiday_premium is not None
+                        and entry.holiday_premium is not None
+                        else None
+                    ),
+                    rest_day_premium=(
+                        previous.rest_day_premium + entry.rest_day_premium
+                        if previous.rest_day_premium is not None
+                        and entry.rest_day_premium is not None
+                        else None
+                    ),
+                    night_differential=(
+                        previous.night_differential + entry.night_differential
+                        if previous.night_differential is not None
+                        and entry.night_differential is not None
+                        else None
+                    ),
                     attendance_deduction=(
                         previous.attendance_deduction + entry.attendance_deduction
                         if previous.attendance_deduction is not None
@@ -3076,6 +4033,17 @@ def prepare_attendance_payroll_draft(
                 if salary.updated_at
                 else None,
                 "basic_rate": str(salary.basic_rate),
+                "currency": salary.currency,
+                "effective_date": salary.effective_date.isoformat(),
+                "pay_type": str(getattr(salary.pay_type, "value", salary.pay_type)),
+                "overtime_rate": str(salary.overtime_rate),
+                "absent_penalty_rate": str(salary.absent_penalty_rate),
+                "non_taxable_allowance": str(salary.non_taxable_allowance),
+                "de_minimis_monthly": salary.de_minimis_monthly,
+                "thirteenth_month_exempt_portion": str(
+                    salary.thirteenth_month_exempt_portion
+                ),
+                "is_active": salary.is_active,
             }
             for salary in employee_salaries
         ]
@@ -3263,6 +4231,27 @@ def prepare_attendance_payroll_draft(
             }
             for row in shift_rows
         ]
+        shift_ids = {row.shift_id for row in shift_rows}
+        shift_model_rows = (
+            session.exec(select(Shift).where(col(Shift.id).in_(shift_ids))).all()
+            if shift_ids
+            else []
+        )
+        shift_references = [
+            {
+                "id": str(row.id),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "code": row.code,
+                "name": row.name,
+                "start_time": row.start_time,
+                "end_time": row.end_time,
+                "lunch_break_duration": row.lunch_break_duration,
+                "total_hours_minus_lunch": row.total_hours_minus_lunch,
+                "days_of_week": list(row.days_of_week),
+                "is_deleted": row.is_deleted,
+            }
+            for row in sorted(shift_model_rows, key=lambda item: str(item.id))
+        ]
         group_rows = session.exec(
             select(EmployeePayGroupAssignment).where(
                 EmployeePayGroupAssignment.employee_id == roster_entry.employee_id,
@@ -3310,18 +4299,53 @@ def prepare_attendance_payroll_draft(
             }
             for row in holiday_rows
         ]
+        holiday_config_rows = session.exec(
+            select(HolidayConfig)
+            .join(
+                HolidayInstance,
+                col(HolidayInstance.config_id) == col(HolidayConfig.id),
+            )
+            .where(
+                HolidayInstance.observed_date >= obj_in.date_from,
+                HolidayInstance.observed_date <= obj_in.date_to,
+                col(HolidayInstance.is_active).is_(True),
+                col(HolidayInstance.is_deleted).is_(False),
+                col(HolidayConfig.is_active).is_(True),
+                col(HolidayConfig.is_deleted).is_(False),
+            )
+            .distinct()
+        ).all()
+        holiday_config_refs = [
+            {
+                "id": str(row.id),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "type": str(getattr(row.type, "value", row.type)),
+                "multiplier_regular": str(row.multiplier_regular),
+                "multiplier_overtime": str(row.multiplier_overtime),
+                "multiplier_regular_rest_day": str(row.multiplier_regular_rest_day),
+                "multiplier_overtime_rest_day": str(row.multiplier_overtime_rest_day),
+                "region_code": row.region_code,
+            }
+            for row in holiday_config_rows
+        ]
         snapshot: dict[str, Any] = {
             "attendance_revisions": attendance_refs,
             "salary_versions": salary_refs,
             "shift_assignments": shift_refs,
+            "shift_revisions": shift_references,
             "pay_group_assignments": group_refs,
             "leave_revisions": leave_refs,
             "holiday_revisions": holiday_refs,
+            "holiday_config_revisions": holiday_config_refs,
             "policy_versions": [{"id": str(policy.id), "version": policy.version}],
             "employee_id": str(roster_entry.employee_id),
             "employee_record": (
                 {
                     "id": str(employee_record.id),
+                    "employee_code": employee_record.employee_code,
+                    "first_name": employee_record.first_name,
+                    "last_name": employee_record.last_name,
+                    "email": employee_record.email,
                     "is_deleted": employee_record.is_deleted,
                     "employee_status": str(
                         getattr(employee_record.employee_status, "value", employee_record.employee_status)
@@ -3358,8 +4382,55 @@ def prepare_attendance_payroll_draft(
                 "opening_pay_period_type": tax_declaration.opening_pay_period_type,
                 "previous_employer_included": tax_declaration.previous_employer_included,
                 "source_reference": tax_declaration.source_reference,
+                "opening_benefits_exempt_ytd": str(tax_declaration.opening_benefits_exempt_ytd),
+                "opening_benefits_reconciled": tax_declaration.opening_benefits_reconciled,
+                "opening_de_minimis_annual_ytd": tax_declaration.opening_de_minimis_annual_ytd,
+                "opening_de_minimis_monthly_ytd": tax_declaration.opening_de_minimis_monthly_ytd,
                 "verified": tax_declaration.is_verified,
             }
+            snapshot["bir_tax_benefit_ledger"] = _bir_tax_benefit_rows(
+                session,
+                roster_entry.employee_id,
+                obj_in.date_to.year,
+                tax_declaration.opening_as_of,
+                obj_in.date_to,
+                tax_declaration.opening_de_minimis_annual_ytd,
+                tax_declaration.opening_de_minimis_monthly_ytd,
+            )
+        benefit_rows = snapshot.get("bir_tax_benefit_ledger", [])
+        benefits_subject_to_shared_cap = sum(
+            (
+                Decimal(row["taxable_other_benefit_amount"])
+                for row in benefit_rows
+            ),
+            Decimal("0.00"),
+        )
+        benefits_exempt_remaining = max(
+            Decimal("0.00"),
+            BIR_13TH_MONTH_AND_OTHER_BENEFITS_EXEMPTION_CAP
+            - (
+                tax_declaration.opening_benefits_exempt_ytd
+                if tax_declaration is not None
+                else Decimal("0.00")
+            ),
+        )
+        benefits_taxable_excess = max(
+            Decimal("0.00"),
+            benefits_subject_to_shared_cap - benefits_exempt_remaining,
+        )
+        if (
+            benefits_taxable_excess > 0
+            and tax_declaration is not None
+            and not tax_declaration.opening_benefits_reconciled
+        ):
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="bir_benefit_opening_unreconciled",
+                    message=(
+                        "Taxable benefit excess requires a verified opening balance for the shared annual benefit exemption."
+                    ),
+                )
+            )
         bir_period = group.cadence
         effective_bir_rows = session.exec(
             select(BIRBracket).where(
@@ -3404,7 +4475,24 @@ def prepare_attendance_payroll_draft(
             if preview and preview.short_time_deduction is not None
             else Decimal("0.00")
         )
-        gross = regular + overtime
+        holiday_premium = (
+            preview.holiday_premium
+            if preview and preview.holiday_premium is not None
+            else Decimal("0.00")
+        )
+        rest_day_premium = (
+            preview.rest_day_premium
+            if preview and preview.rest_day_premium is not None
+            else Decimal("0.00")
+        )
+        night_differential = (
+            preview.night_differential
+            if preview and preview.night_differential is not None
+            else Decimal("0.00")
+        )
+        gross = (
+            regular + overtime + holiday_premium + rest_day_premium + night_differential
+        )
         employee_statutory = {
             scheme: Decimal(str(values["employee"]))
             for scheme, values in monthly_contributions["schemes"].items()
@@ -3437,6 +4525,15 @@ def prepare_attendance_payroll_draft(
         has_mwe_evidence = bool(
             tax_declaration and (tax_declaration.source_reference or "").strip()
         )
+        if is_minimum_wage_earner and benefits_taxable_excess > 0:
+            blockers.append(
+                PayrollPreflightBlocker(
+                    code="bir_mwe_taxable_benefit_classification_unavailable",
+                    message=(
+                        "A minimum-wage-earner with benefits above the shared annual exemption needs a reviewed tax classification before withholding can be calculated."
+                    ),
+                )
+            )
         if (
             tax_declaration is not None
             and tax_declaration.is_verified
@@ -3482,15 +4579,15 @@ def prepare_attendance_payroll_draft(
                         else None
                     )
                     if annualization_trigger is not None:
-                        blockers.append(
-                            PayrollPreflightBlocker(
-                                code="bir_annual_benefits_unavailable",
-                                message=(
-                                    "Annualized BIR withholding cannot finalize until year-to-date 13th-month pay and other benefits "
-                                    "are reconciled against the shared ₱90,000 exemption ceiling."
-                                ),
+                        if not tax_declaration.opening_benefits_reconciled:
+                            blockers.append(
+                                PayrollPreflightBlocker(
+                                    code="bir_annual_benefits_unavailable",
+                                    message=(
+                                        "Annualized BIR withholding requires a verified opening 13th-month/other-benefit exemption balance and all benefit payments after that date."
+                                    ),
+                                )
                             )
-                        )
                         if annualization_trigger == "termination_final_pay":
                             blockers.append(
                                 PayrollPreflightBlocker(
@@ -3554,7 +4651,20 @@ def prepare_attendance_payroll_draft(
                             prior_withheld = (
                                 tax_declaration.tax_withheld_ytd + history_withheld
                             )
-                            annual_taxable = prior_taxable + bir_taxable_pay
+                            benefit_rows = _bir_tax_benefit_rows(
+                                session,
+                                roster_entry.employee_id,
+                                obj_in.date_to.year,
+                                opening_as_of,
+                                obj_in.date_to,
+                            )
+                            benefits_gross = benefits_subject_to_shared_cap
+                            benefits_exempt_current = min(
+                                benefits_gross, benefits_exempt_remaining
+                            )
+                            annual_taxable = (
+                                prior_taxable + bir_taxable_pay + benefits_taxable_excess
+                            )
                             annual_tax_due = calculate_annualized_compensation_tax(
                                 annual_taxable
                             )
@@ -3573,11 +4683,33 @@ def prepare_attendance_payroll_draft(
                                 "finalized_tax_withheld": str(history_withheld),
                                 "complete": history_complete,
                             }
+                            snapshot["bir_benefit_reconciliation"] = {
+                                "exemption_cap": str(BIR_13TH_MONTH_AND_OTHER_BENEFITS_EXEMPTION_CAP),
+                                "opening_exempt_benefits": str(
+                                    tax_declaration.opening_benefits_exempt_ytd
+                                ),
+                                "opening_reconciled": tax_declaration.opening_benefits_reconciled,
+                                "current_employer_benefit_payments": benefit_rows,
+                                "current_employer_benefits_gross": str(
+                                    sum(
+                                        (Decimal(row["gross_amount"]) for row in benefit_rows),
+                                        Decimal("0.00"),
+                                    )
+                                ),
+                                "current_employer_benefits_subject_to_shared_cap": str(
+                                    benefits_gross
+                                ),
+                                "current_employer_benefits_exempt": str(benefits_exempt_current),
+                                "current_employer_benefits_taxable_excess": str(
+                                    benefits_taxable_excess
+                                ),
+                            }
                             snapshot["bir_calculation"] = {
                                 "method": "annualized_rr_11_2018_2023_onward",
                                 "annualization_trigger": annualization_trigger,
                                 "taxable_compensation": str(bir_taxable_pay),
                                 "annual_taxable_compensation": str(annual_taxable),
+                                "taxable_benefit_excess": str(benefits_taxable_excess),
                                 "annual_tax_due": str(annual_tax_due),
                                 "prior_tax_withheld": str(prior_withheld),
                                 "withholding": str(bir_withholding),
@@ -3599,17 +4731,29 @@ def prepare_attendance_payroll_draft(
                         }
                     else:
                         declaration = tax_declaration
-                        if declaration is not None and (
+                        has_opening_tax_history = bool(
                             declaration.previous_employer_included
                             or declaration.taxable_compensation_ytd > 0
                             or declaration.tax_withheld_ytd > 0
+                        )
+                        if (
+                            declaration.previous_employer_included
+                            or declaration.taxable_compensation_ytd > 0
+                            or declaration.tax_withheld_ytd > 0
+                            or benefits_taxable_excess > 0
                         ):
                             if (
                                 declaration.opening_as_of is None
                                 or declaration.opening_as_of.year != obj_in.date_to.year
                                 or declaration.opening_as_of >= obj_in.date_from
-                                or declaration.opening_pay_period_count <= 0
-                                or declaration.opening_pay_period_type != group.cadence.value
+                                or (
+                                    has_opening_tax_history
+                                    and declaration.opening_pay_period_count <= 0
+                                )
+                                or (
+                                    declaration.opening_pay_period_type is not None
+                                    and declaration.opening_pay_period_type != group.cadence.value
+                                )
                             ):
                                 blockers.append(
                                     PayrollPreflightBlocker(
@@ -3674,6 +4818,7 @@ def prepare_attendance_payroll_draft(
                                         declaration.taxable_compensation_ytd
                                         + history_taxable
                                         + bir_taxable_pay
+                                        + benefits_taxable_excess
                                     )
                                     prior_withheld = declaration.tax_withheld_ytd + history_withheld
                                     average_compensation = (
@@ -3710,6 +4855,9 @@ def prepare_attendance_payroll_draft(
                                         "method": "cumulative_average_rr_11_2018",
                                         "period_type": group.cadence.value,
                                         "taxable_compensation": str(bir_taxable_pay),
+                                        "taxable_benefit_excess": str(
+                                            benefits_taxable_excess
+                                        ),
                                         "cumulative_taxable_compensation": str(cumulative_taxable),
                                         "cumulative_period_count": cumulative_period_count,
                                         "average_period_compensation": str(average_compensation),
@@ -3773,6 +4921,9 @@ def prepare_attendance_payroll_draft(
                 earnings={
                     "regular": str(regular),
                     "approved_overtime": str(overtime),
+                    "holiday_premium": str(holiday_premium),
+                    "rest_day_premium": str(rest_day_premium),
+                    "night_differential": str(night_differential),
                     "provisional": True,
                 },
                 deductions=deductions,
@@ -4220,6 +5371,7 @@ def commit_pay_group_bulk(
     fingerprint = _pay_group_bulk_fingerprint(request)
     lock_key = int.from_bytes(request.batch_id.bytes[:8], "big", signed=True)
     session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+    lock_payroll_roster(session)
     existing_batch = session.get(EmployeePayGroupBulkBatch, request.batch_id)
     if existing_batch is not None:
         if (
@@ -4343,6 +5495,7 @@ def create_pay_group_assignment(
     current_user: CurrentUser,
     obj_in: EmployeePayGroupAssignmentCreate,
 ) -> EmployeePayGroupAssignmentPublic:
+    lock_payroll_roster(session)
     if obj_in.effective_to is not None and obj_in.effective_to < obj_in.effective_from:
         raise HTTPException(
             status_code=422, detail="effective_to must be on or after effective_from"
@@ -4396,6 +5549,7 @@ def close_pay_group_assignment(
     existing = session.get(EmployeePayGroupAssignment, assignment_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Pay group assignment not found")
+    lock_payroll_roster(session)
     employee = session.exec(
         select(EmployeeRecords)
         .where(EmployeeRecords.id == existing.employee_id)
@@ -4511,6 +5665,8 @@ def confirm_payroll_policy(
         "monthly_divisor",
         "daily_partial_work",
         "monthly_partial_work",
+        "monthly_salary_proration",
+        "monthly_holiday_pay_divisor",
         "paid_leave",
         "paid_holidays",
         "break_minutes",
@@ -4596,6 +5752,30 @@ def confirm_payroll_policy(
             detail=(
                 "monthly_partial_work must be deduct_after_grace or no_deduction"
             ),
+        )
+    if row.policy["monthly_salary_proration"] not in {
+        "scheduled_workday_fraction",
+        "monthly_divisor_per_workday",
+    }:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "monthly_salary_proration must be scheduled_workday_fraction or monthly_divisor_per_workday"
+            ),
+        )
+    try:
+        monthly_holiday_divisor = Decimal(
+            str(row.policy["monthly_holiday_pay_divisor"])
+        )
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="monthly_holiday_pay_divisor must be a positive number",
+        ) from exc
+    if monthly_holiday_divisor <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="monthly_holiday_pay_divisor must be a positive number",
         )
     if row.policy["rounding_mode"] not in {"half_up", "half_even", "down"}:
         raise HTTPException(
@@ -5244,6 +6424,152 @@ async def get_payroll_status_counts(
 
 
 @router.get(
+    "/employees/{employee_id}/tax-year-benefits/{tax_year}",
+    response_model=list[EmployeeTaxBenefitPublic],
+    dependencies=[Depends(require_permission("payroll", "view"))],
+)
+def list_employee_tax_year_benefits(
+    *,
+    session: SessionDep,
+    employee_id: uuid.UUID,
+    tax_year: int,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
+) -> list[EmployeeTaxBenefitPublic]:
+    if tax_year < 2000 or tax_year > 2200:
+        raise HTTPException(status_code=422, detail="tax_year must be between 2000 and 2200")
+    rows = session.exec(
+        select(EmployeeTaxBenefit)
+        .where(
+            EmployeeTaxBenefit.employee_id == employee_id,
+            EmployeeTaxBenefit.tax_year == tax_year,
+        )
+        .order_by(
+            col(EmployeeTaxBenefit.paid_on),
+            col(EmployeeTaxBenefit.created_at),
+            col(EmployeeTaxBenefit.id),
+        )
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    return [EmployeeTaxBenefitPublic.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/employees/{employee_id}/tax-year-benefits/{tax_year}",
+    response_model=EmployeeTaxBenefitPublic,
+    status_code=201,
+    dependencies=[Depends(require_permission("payroll", "approve"))],
+)
+def record_employee_tax_year_benefit(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    employee_id: uuid.UUID,
+    tax_year: int,
+    obj_in: EmployeeTaxBenefitCreate,
+) -> EmployeeTaxBenefitPublic:
+    """Record a paid benefit against the shared RR 11-2018 annual ceiling."""
+    if tax_year < 2000 or tax_year > 2200 or obj_in.paid_on.year != tax_year:
+        raise HTTPException(status_code=422, detail="paid_on must be within the declared tax year")
+    if not obj_in.source_reference.strip():
+        raise HTTPException(status_code=422, detail="A nonblank source reference is required")
+    employee = session.exec(
+        select(EmployeeRecords)
+        .where(EmployeeRecords.id == employee_id, col(EmployeeRecords.is_deleted).is_(False))
+        .with_for_update()
+    ).first()
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if obj_in.correction_of_id is None:
+        if obj_in.gross_amount <= 0 or obj_in.correction_reason is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="A new benefit payment must be positive and cannot include correction fields.",
+            )
+    else:
+        if obj_in.gross_amount >= 0 or not (obj_in.correction_reason or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="A correction must be a negative full reversal with a reason.",
+            )
+        original = session.exec(
+            select(EmployeeTaxBenefit)
+            .where(
+                EmployeeTaxBenefit.id == obj_in.correction_of_id,
+                EmployeeTaxBenefit.employee_id == employee_id,
+                EmployeeTaxBenefit.tax_year == tax_year,
+            )
+            .with_for_update()
+        ).first()
+        if (
+            original is None
+            or original.correction_of_id is not None
+            or original.gross_amount <= 0
+            or original.benefit_type != obj_in.benefit_type
+            or original.de_minimis_category != obj_in.de_minimis_category
+            or original.eligibility_evidence != obj_in.eligibility_evidence
+            or obj_in.gross_amount != -original.gross_amount
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Only the original benefit record can be reversed, for its full amount and same benefit type.",
+            )
+        correction_exists = session.exec(
+            select(EmployeeTaxBenefit.id).where(
+                EmployeeTaxBenefit.correction_of_id == original.id
+            )
+        ).first()
+        if correction_exists:
+            raise HTTPException(status_code=409, detail="This benefit record was already reversed.")
+    finalized_snapshots = session.exec(
+        select(PayrollEntry.input_snapshot)
+        .join(PayrollRun, col(PayrollEntry.payroll_run_id) == col(PayrollRun.id))
+        .where(
+            PayrollEntry.employee_id == employee_id,
+            PayrollRun.date_to >= date(tax_year, 1, 1),
+            PayrollRun.date_to < date(tax_year + 1, 1, 1),
+            PayrollRun.workflow_status == "finalized",
+            col(PayrollRun.is_deleted).is_(False),
+            col(PayrollEntry.is_deleted).is_(False),
+        )
+        .limit(366)
+    ).all()
+    if any(
+        isinstance(snapshot, dict) and "bir_benefit_reconciliation" in snapshot
+        for snapshot in finalized_snapshots
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Tax-year benefits are locked after payroll finalization; use the reasoned tax correction workflow.",
+        )
+    row = EmployeeTaxBenefit(
+        employee_id=employee_id,
+        tax_year=tax_year,
+        paid_on=obj_in.paid_on,
+        benefit_type=obj_in.benefit_type,
+        de_minimis_category=obj_in.de_minimis_category,
+        eligibility_evidence=obj_in.eligibility_evidence,
+        gross_amount=obj_in.gross_amount,
+        source_reference=obj_in.source_reference.strip(),
+        correction_of_id=obj_in.correction_of_id,
+        correction_reason=(obj_in.correction_reason.strip() if obj_in.correction_reason else None),
+        created_by=current_user.id,
+    )
+    session.add(row)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A benefit record with this employee, year, type and source reference already exists.",
+        ) from exc
+    session.refresh(row)
+    return EmployeeTaxBenefitPublic.model_validate(row)
+
+
+@router.get(
     "/employees/{employee_id}/tax-year-declarations/{tax_year}",
     response_model=EmployeeTaxYearDeclarationPublic,
     dependencies=[Depends(require_permission("payroll", "view"))],
@@ -5296,6 +6622,7 @@ def upsert_employee_tax_year_declaration(
         obj_in.previous_employer_included
         or obj_in.taxable_compensation_ytd > 0
         or obj_in.tax_withheld_ytd > 0
+        or obj_in.opening_benefits_exempt_ytd > 0
     )
     if opening_history_included and (
         obj_in.opening_pay_period_count < 1
@@ -5312,6 +6639,11 @@ def upsert_employee_tax_year_declaration(
         raise HTTPException(
             status_code=422,
             detail="Previous-employer period inputs must be empty when previous-employer figures are not included.",
+        )
+    if obj_in.opening_benefits_reconciled and not (obj_in.source_reference or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Benefit reconciliation requires a source note for the opening date and benefit records.",
         )
     employee = session.exec(
         select(EmployeeRecords)

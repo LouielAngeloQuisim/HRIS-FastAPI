@@ -7,10 +7,10 @@ Naming follows the leave-domain convention (``*Public``/``*Create``/``*Update``/
 
 import uuid
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
-from pydantic import ConfigDict, EmailStr, Field
+from pydantic import ConfigDict, EmailStr, Field, model_validator
 from sqlmodel import SQLModel
 
 from app.payroll.models import (
@@ -249,8 +249,50 @@ class EmployeeTaxYearDeclarationUpdate(SQLModel):
     opening_pay_period_count: int = Field(default=0, ge=0, le=366)
     opening_pay_period_type: Literal["daily", "weekly", "semi_monthly", "monthly"] | None = None
     previous_employer_included: bool = False
+    opening_benefits_exempt_ytd: Decimal = Field(default=Decimal("0.00"), ge=0, le=90000, max_digits=14, decimal_places=2)
+    opening_benefits_reconciled: bool = False
+    opening_de_minimis_annual_ytd: dict[str, str] = Field(default_factory=dict)
+    opening_de_minimis_monthly_ytd: dict[str, str] = Field(default_factory=dict)
     source_reference: str | None = Field(default=None, max_length=512)
     is_verified: bool = False
+
+    @model_validator(mode="after")
+    def validate_opening_de_minimis(self) -> "EmployeeTaxYearDeclarationUpdate":
+        annual_categories = {
+            "uniform_clothing",
+            "actual_medical_assistance",
+            "achievement_award",
+            "christmas_anniversary_gift",
+            "cba_productivity_incentive",
+        }
+        monthly_categories = {
+            "medical_cash_dependents",
+            "rice_subsidy",
+            "laundry_allowance",
+        }
+        for field_name, balances, categories in (
+            ("opening_de_minimis_annual_ytd", self.opening_de_minimis_annual_ytd, annual_categories),
+            ("opening_de_minimis_monthly_ytd", self.opening_de_minimis_monthly_ytd, monthly_categories),
+        ):
+            for category, raw_amount in balances.items():
+                if category not in categories:
+                    raise ValueError(f"{field_name} contains an unsupported category: {category}")
+                try:
+                    amount = Decimal(raw_amount)
+                except (InvalidOperation, TypeError, ValueError) as exc:
+                    raise ValueError(f"{field_name}.{category} must be a decimal amount") from exc
+                if not amount.is_finite() or amount < 0:
+                    raise ValueError(f"{field_name}.{category} must be finite and non-negative")
+        if (self.opening_de_minimis_annual_ytd or self.opening_de_minimis_monthly_ytd) and not self.opening_benefits_reconciled:
+            raise ValueError("Opening de minimis amounts require benefit reconciliation")
+        if self.previous_employer_included or self.opening_benefits_exempt_ytd > 0:
+            if set(self.opening_de_minimis_annual_ytd) != annual_categories or set(
+                self.opening_de_minimis_monthly_ytd
+            ) != monthly_categories:
+                raise ValueError(
+                    "A reconciled previous-employer or benefit opening requires explicit annual and monthly balances for every de minimis category, including zeros"
+                )
+        return self
 
 
 class EmployeeTaxYearDeclarationPublic(EmployeeTaxYearDeclarationUpdate):
@@ -260,6 +302,77 @@ class EmployeeTaxYearDeclarationPublic(EmployeeTaxYearDeclarationUpdate):
     verified_by: uuid.UUID | None = None
     verified_at: datetime | None = None
     created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class EmployeeTaxBenefitCreate(SQLModel):
+    paid_on: date
+    benefit_type: Literal["thirteenth_month", "other_benefit", "de_minimis"]
+    de_minimis_category: Literal[
+        "medical_cash_dependents",
+        "rice_subsidy",
+        "uniform_clothing",
+        "actual_medical_assistance",
+        "laundry_allowance",
+        "achievement_award",
+        "christmas_anniversary_gift",
+        "cba_productivity_incentive",
+    ] | None = None
+    eligibility_evidence: list[Literal[
+        "actual_medical_documentation",
+        "written_non_discriminatory_award_plan",
+        "cba_or_productivity_incentive_evidence",
+    ]] = Field(default_factory=list)
+    gross_amount: Decimal = Field(max_digits=14, decimal_places=2)
+    source_reference: str = Field(min_length=3, max_length=512)
+    correction_of_id: uuid.UUID | None = None
+    correction_reason: str | None = Field(default=None, max_length=512)
+
+    @model_validator(mode="after")
+    def validate_benefit_category(self) -> "EmployeeTaxBenefitCreate":
+        if (self.benefit_type == "de_minimis") != (self.de_minimis_category is not None):
+            raise ValueError("de_minimis_category is required only for de_minimis records")
+        conditional_evidence = {
+            "actual_medical_assistance": "actual_medical_documentation",
+            "achievement_award": "written_non_discriminatory_award_plan",
+            "cba_productivity_incentive": "cba_or_productivity_incentive_evidence",
+        }
+        required_evidence = conditional_evidence.get(self.de_minimis_category or "")
+        if required_evidence and required_evidence not in self.eligibility_evidence:
+            raise ValueError(
+                f"{self.de_minimis_category} requires eligibility evidence {required_evidence}"
+            )
+        if self.benefit_type != "de_minimis" and self.eligibility_evidence:
+            raise ValueError("eligibility_evidence applies only to de minimis records")
+        return self
+
+
+class EmployeeTaxBenefitPublic(EmployeeTaxBenefitCreate):
+    id: uuid.UUID
+    employee_id: uuid.UUID
+    tax_year: int
+    created_by: uuid.UUID | None = None
+    created_at: datetime | None = None
+
+
+class PayrollEmployerProfileUpdate(SQLModel):
+    tin_number: str | None = Field(default=None, max_length=32)
+    registered_name: str | None = Field(default=None, max_length=255)
+    registered_address: str | None = Field(default=None, max_length=512)
+    postal_code: str | None = Field(default=None, max_length=10)
+    rdo_code: str | None = Field(default=None, max_length=8)
+    employer_type: Literal["main", "secondary"] | None = None
+    signatory_name: str | None = Field(default=None, max_length=255)
+    signatory_title: str | None = Field(default=None, max_length=128)
+    source_reference: str | None = Field(default=None, max_length=512)
+
+
+class PayrollEmployerProfilePublic(PayrollEmployerProfileUpdate):
+    id: str
+    is_verified: bool = False
+    verified_by: uuid.UUID | None = None
+    verified_at: datetime | None = None
+    updated_by: uuid.UUID | None = None
     updated_at: datetime | None = None
 
 
@@ -313,6 +426,9 @@ class PayrollAttendanceCalculationEntry(SQLModel):
     employee_name: str
     regular_earnings: Decimal | None = None
     approved_overtime: Decimal | None = None
+    holiday_premium: Decimal | None = None
+    rest_day_premium: Decimal | None = None
+    night_differential: Decimal | None = None
     attendance_deduction: Decimal | None = None
     short_time_deduction: Decimal | None = None
     gross_before_statutory: Decimal | None = None

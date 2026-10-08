@@ -25,6 +25,8 @@ def _policy(frequency: str, collection_period: str) -> dict[str, object]:
         "monthly_divisor": "22",
         "daily_partial_work": "pro_rated",
         "monthly_partial_work": "deduct_after_grace",
+        "monthly_salary_proration": "scheduled_workday_fraction",
+        "monthly_holiday_pay_divisor": "22",
         "paid_leave": False,
         "paid_holidays": False,
         "break_minutes": 60,
@@ -73,6 +75,56 @@ def test_policy_confirmation_requires_supported_monthly_partial_work_rule(
         policy = db.get(PayrollPolicyVersion, policy_id)
         assert policy is not None
         db.delete(policy)
+    db.commit()
+
+
+def test_policy_confirmation_rejects_unknown_monthly_salary_proration(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    payload = _policy("once_monthly", "last_period")
+    payload["monthly_salary_proration"] = "guess_from_attendance"
+    created = client.post(
+        f"{API}/policies",
+        json={"effective_from": "2101-01-01", "policy": payload},
+        headers=superuser_token_headers,
+    )
+    assert created.status_code == 201, created.text
+    rejected = client.post(
+        f"{API}/policies/{created.json()['id']}/confirm",
+        headers=superuser_token_headers,
+    )
+    assert rejected.status_code == 422
+    assert "monthly_salary_proration" in rejected.json()["detail"]
+    row = db.get(PayrollPolicyVersion, UUID(created.json()["id"]))
+    assert row is not None
+    db.delete(row)
+    db.commit()
+
+
+def test_policy_confirmation_requires_a_monthly_holiday_divisor(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    payload = _policy("once_monthly", "last_period")
+    payload["monthly_holiday_pay_divisor"] = None
+    created = client.post(
+        f"{API}/policies",
+        json={"effective_from": "2102-01-01", "policy": payload},
+        headers=superuser_token_headers,
+    )
+    assert created.status_code == 201, created.text
+    rejected = client.post(
+        f"{API}/policies/{created.json()['id']}/confirm",
+        headers=superuser_token_headers,
+    )
+    assert rejected.status_code == 422
+    assert "monthly_holiday_pay_divisor" in rejected.json()["detail"]
+    row = db.get(PayrollPolicyVersion, UUID(created.json()["id"]))
+    assert row is not None
+    db.delete(row)
     db.commit()
 
 

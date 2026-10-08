@@ -38,6 +38,10 @@ const formSchema = z.object({
   month_day: z.string().min(1, 'Month/Day is required'),
   type: z.enum(['regular', 'special_non_working', 'special_working', 'company']).default('regular'),
   region_code: z.string().optional(),
+  multiplier_regular: z.string().refine((value) => !value || Number(value) >= 1, 'Enter a factor of 1 or higher').optional(),
+  multiplier_overtime: z.string().refine((value) => !value || Number(value) >= 1, 'Enter a factor of 1 or higher').optional(),
+  multiplier_regular_rest_day: z.string().refine((value) => !value || Number(value) >= 1, 'Enter a factor of 1 or higher').optional(),
+  multiplier_overtime_rest_day: z.string().refine((value) => !value || Number(value) >= 1, 'Enter a factor of 1 or higher').optional(),
   is_recurring: z.boolean().default(true),
 })
 
@@ -60,16 +64,35 @@ export function ResourceForm({ item, open, onClose }: Props) {
       month_day: item?.month_day ?? '',
       type: formSchema.shape.type.parse(item?.type ?? 'regular'),
       region_code: item?.region_code ?? '',
+      multiplier_regular: item?.multiplier_regular?.toString() ?? '',
+      multiplier_overtime: item?.multiplier_overtime?.toString() ?? '',
+      multiplier_regular_rest_day: item?.multiplier_regular_rest_day?.toString() ?? '',
+      multiplier_overtime_rest_day: item?.multiplier_overtime_rest_day?.toString() ?? '',
       is_recurring: item?.is_recurring ?? true,
     },
   })
 
   const onSubmit = async (data: z.output<typeof formSchema>) => {
     try {
+      const payload = {
+        ...data,
+        multiplier_regular: data.multiplier_regular
+          ? Number(data.multiplier_regular)
+          : null,
+        multiplier_overtime: data.multiplier_overtime
+          ? Number(data.multiplier_overtime)
+          : null,
+        multiplier_regular_rest_day: data.multiplier_regular_rest_day
+          ? Number(data.multiplier_regular_rest_day)
+          : null,
+        multiplier_overtime_rest_day: data.multiplier_overtime_rest_day
+          ? Number(data.multiplier_overtime_rest_day)
+          : null,
+      }
       if (isEdit && item?.id) {
-        await updateMutation.mutateAsync({ id: item.id, data: data as unknown as HolidayConfigUpdate })
+        await updateMutation.mutateAsync({ id: item.id, data: payload as unknown as HolidayConfigUpdate })
       } else {
-        await createMutation.mutateAsync(data as unknown as HolidayConfigCreate)
+        await createMutation.mutateAsync(payload as unknown as HolidayConfigCreate)
       }
       onClose()
     } catch (err) {
@@ -135,6 +158,37 @@ export function ResourceForm({ item, open, onClose }: Props) {
                 <FormItem>
                   <FormLabel>Region Code</FormLabel>
                   <FormControl><Input {...field} value={field.value ?? ''} data-testid="holiday-region-input" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <p className="text-xs text-muted-foreground">
+                Factors are total pay rates (for example, 2 means 200%). Payroll blocks worked holidays if the applicable factors are missing.
+              </p>
+              <FormField control={form.control} name="multiplier_regular" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Regular holiday total factor</FormLabel>
+                  <FormControl><Input {...field} type="number" min="1" step="0.001" value={field.value ?? ''} data-testid="holiday-regular-factor-input" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="multiplier_overtime" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Regular holiday overtime total factor</FormLabel>
+                  <FormControl><Input {...field} type="number" min="1" step="0.001" value={field.value ?? ''} data-testid="holiday-overtime-factor-input" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="multiplier_regular_rest_day" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Rest-day total factor</FormLabel>
+                  <FormControl><Input {...field} type="number" min="1" step="0.001" value={field.value ?? ''} placeholder="Set for worked holidays on rest days" data-testid="holiday-rest-day-factor-input" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="multiplier_overtime_rest_day" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Rest-day overtime total factor</FormLabel>
+                  <FormControl><Input {...field} type="number" min="1" step="0.001" value={field.value ?? ''} placeholder="Set for approved holiday overtime" data-testid="holiday-rest-day-overtime-factor-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />

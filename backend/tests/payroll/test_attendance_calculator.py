@@ -18,6 +18,8 @@ def _day(**updates: object) -> AttendancePayDay:
         "overtime_rate": Decimal("180"),
         "scheduled_minutes": 480,
         "worked_minutes": 480,
+        "monthly_period_fraction": Decimal("0.5"),
+        "monthly_period_scheduled_days": 11,
     }
     values.update(updates)
     return AttendancePayDay(**values)  # type: ignore[arg-type]
@@ -61,6 +63,139 @@ def test_hourly_overtime_minutes_are_not_paid_again_at_the_base_rate() -> None:
     assert result.regular == Decimal("960.00")
     assert result.overtime == Decimal("150.00")
     assert result.regular + result.overtime == Decimal("1110.00")
+
+
+def test_configured_holiday_factors_add_regular_premium_and_override_overtime_factor() -> None:
+    result = calculate_attendance_earnings(
+        [
+            _day(
+                worked_minutes=540,
+                overtime_eligible_minutes=60,
+                overtime_approved_minutes=60,
+                holiday_regular_multiplier=Decimal("2"),
+                holiday_overtime_multiplier=Decimal("2.6"),
+            )
+        ],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("960.00")
+    assert result.holiday_premium == Decimal("960.00")
+    assert result.overtime == Decimal("468.00")
+
+
+def test_rest_day_factors_apply_to_daily_and_approved_overtime_earnings() -> None:
+    result = calculate_attendance_earnings(
+        [
+            _day(
+                pay_type="daily",
+                basic_rate=Decimal("960"),
+                overtime_rate=Decimal("120"),
+                worked_minutes=540,
+                overtime_eligible_minutes=60,
+                overtime_approved_minutes=60,
+                rest_day_regular_multiplier=Decimal("1.30"),
+                rest_day_overtime_multiplier=Decimal("1.69"),
+            )
+        ],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("960.00")
+    assert result.rest_day_premium == Decimal("288.00")
+    assert result.overtime == Decimal("202.80")
+
+
+def test_monthly_rest_day_work_adds_only_the_premium_over_monthly_base() -> None:
+    result = calculate_attendance_earnings(
+        [
+            _day(
+                pay_type="monthly",
+                basic_rate=Decimal("26000"),
+                worked_minutes=480,
+                monthly_salary_base_eligible=False,
+                rest_day_regular_multiplier=Decimal("1.30"),
+                rest_day_overtime_multiplier=Decimal("1.69"),
+                rest_day_regular_base=Decimal("26000") / Decimal("22"),
+            )
+        ],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("0.00")
+    assert result.rest_day_premium == Decimal("354.55")
+
+
+def test_rest_day_policy_below_statutory_factors_blocks() -> None:
+    with pytest.raises(CalculationBlocker, match="at least 1.30"):
+        calculate_attendance_earnings(
+            [_day(rest_day_regular_multiplier=Decimal("1.29"))],
+            monthly_divisor=Decimal("22"),
+            daily_partial_work="pro_rated",
+            overtime_multiplier=Decimal("1.25"),
+        )
+
+
+def test_daily_rest_day_partial_work_uses_actual_worked_minutes() -> None:
+    result = calculate_attendance_earnings(
+        [
+            _day(
+                pay_type="daily",
+                basic_rate=Decimal("960"),
+                worked_minutes=240,
+                rest_day_regular_multiplier=Decimal("1.30"),
+                rest_day_overtime_multiplier=Decimal("1.69"),
+            )
+        ],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="full_day",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("480.00")
+    assert result.rest_day_premium == Decimal("144.00")
+
+
+def test_holiday_premium_uses_the_calculated_daily_base_and_not_absence_days() -> None:
+    worked = _day(
+        pay_type="daily",
+        basic_rate=Decimal("800"),
+        holiday_regular_multiplier=Decimal("2"),
+        holiday_overtime_multiplier=Decimal("2.6"),
+    )
+    absent = _day(
+        work_date=date(2026, 10, 2),
+        pay_type="daily",
+        basic_rate=Decimal("800"),
+        worked_minutes=0,
+        absence=True,
+        holiday_regular_multiplier=Decimal("2"),
+        holiday_overtime_multiplier=Decimal("2.6"),
+    )
+    result = calculate_attendance_earnings(
+        [worked, absent],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1.25"),
+    )
+    assert result.regular == Decimal("800.00")
+    assert result.holiday_premium == Decimal("800.00")
+
+
+def test_invalid_holiday_multiplier_blocks_calculation() -> None:
+    with pytest.raises(CalculationBlocker, match="Holiday regular multiplier"):
+        calculate_attendance_earnings(
+            [_day(holiday_regular_multiplier=Decimal("0.9"))],
+            monthly_divisor=Decimal("22"),
+            daily_partial_work="pro_rated",
+            overtime_multiplier=Decimal("1.25"),
+        )
 
 
 def test_pending_overtime_blocks_amount_calculation() -> None:
@@ -125,6 +260,52 @@ def test_monthly_salary_period_base_deducts_unpaid_absence_once() -> None:
     assert result.regular - result.attendance_deduction == Decimal("11818.18")
 
 
+@pytest.mark.parametrize("scheduled_days", [10, 11])
+def test_monthly_semi_monthly_base_does_not_change_with_cutoff_weekday_count(
+    scheduled_days: int,
+) -> None:
+    days = [
+        _day(
+            work_date=date(2026, 10, day),
+            pay_type="monthly",
+            basic_rate=Decimal("26000"),
+            monthly_period_fraction=Decimal("0.5"),
+            monthly_period_scheduled_days=scheduled_days,
+        )
+        for day in range(1, scheduled_days + 1)
+    ]
+
+    result = calculate_attendance_earnings(
+        days,
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("13000.00")
+
+
+def test_monthly_divisor_proration_is_an_explicit_company_rule() -> None:
+    days = [
+        _day(
+            work_date=date(2026, 10, day),
+            pay_type="monthly",
+            basic_rate=Decimal("26000"),
+            monthly_salary_proration="monthly_divisor_per_workday",
+        )
+        for day in (1, 2)
+    ]
+
+    result = calculate_attendance_earnings(
+        days,
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("2363.64")
+
+
 def test_monthly_partial_work_deducts_lateness_after_grace() -> None:
     result = calculate_attendance_earnings(
         [
@@ -187,3 +368,24 @@ def test_monthly_partial_work_without_confirmed_rule_blocks_calculation() -> Non
             daily_partial_work="pro_rated",
             overtime_multiplier=Decimal("1.25"),
         )
+
+
+def test_monthly_paid_holiday_does_not_create_short_time_deduction() -> None:
+    result = calculate_attendance_earnings(
+        [
+            _day(
+                pay_type="monthly",
+                basic_rate=Decimal("26000"),
+                worked_minutes=0,
+                paid_absence=True,
+            )
+        ],
+        monthly_divisor=Decimal("22"),
+        daily_partial_work="pro_rated",
+        monthly_partial_work="deduct_after_grace",
+        overtime_multiplier=Decimal("1.25"),
+    )
+
+    assert result.regular == Decimal("1181.82")
+    assert result.attendance_deduction == Decimal("0.00")
+    assert result.short_time_deduction == Decimal("0.00")

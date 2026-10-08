@@ -45,12 +45,35 @@ const mockEmployee: EmployeeRecordsPublic = {
   updated_at: '2020-01-01T00:00:00Z',
 }
 
-const { saveTaxInputs, salaryQuery } = vi.hoisted(() => ({
+type TaxBenefitMock = {
+  id: string
+  employee_id: string
+  tax_year: number
+  paid_on: string
+  benefit_type: 'thirteenth_month' | 'other_benefit' | 'de_minimis'
+  de_minimis_category?: string | null
+  eligibility_evidence?: string[]
+  gross_amount: string
+  source_reference: string
+  correction_of_id: string | null
+  correction_reason: string | null
+  created_by: string | null
+  created_at: string | null
+}
+
+const { saveTaxInputs, saveBenefit, salaryQuery, benefitsQuery } = vi.hoisted(() => ({
   saveTaxInputs: vi.fn(),
+  saveBenefit: vi.fn(),
   salaryQuery: vi.fn(() => ({
     data: { data: [], count: 0 },
     isPending: false,
     isError: false,
+  })),
+  benefitsQuery: vi.fn(() => ({
+    data: [] as TaxBenefitMock[],
+    isPending: false,
+    isError: false,
+    isSuccess: true,
   })),
 }))
 
@@ -81,6 +104,12 @@ vi.mock('@/lib/api/payroll', () => ({
     isPending: false,
     isError: false,
     isSuccess: false,
+  }),
+  useEmployeeTaxYearBenefits: () => benefitsQuery(),
+  useRecordEmployeeTaxYearBenefit: () => ({
+    mutate: saveBenefit,
+    isPending: false,
+    isError: false,
   }),
 }))
 
@@ -117,6 +146,12 @@ describe('EmployeeProfile', () => {
       data: { data: [], count: 0 },
       isPending: false,
       isError: false,
+    })
+    benefitsQuery.mockReturnValue({
+      data: [],
+      isPending: false,
+      isError: false,
+      isSuccess: true,
     })
   })
 
@@ -173,6 +208,9 @@ describe('EmployeeProfile', () => {
       screen.getByLabelText(/Source \/ review note/i),
       'Form 2316 reviewed'
     )
+    await userEvent.click(
+      screen.getByLabelText(/I reconciled 13th-month and other benefit payments/i)
+    )
     await userEvent.click(screen.getByLabelText(/I reviewed these figures/i))
     await userEvent.click(
       screen.getByRole('button', { name: /Save tax-year inputs/i })
@@ -187,8 +225,121 @@ describe('EmployeeProfile', () => {
         opening_pay_period_count: 6,
         opening_pay_period_type: 'monthly',
         previous_employer_included: false,
+        opening_benefits_exempt_ytd: '0.00',
+        opening_benefits_reconciled: true,
+        opening_de_minimis_annual_ytd: {
+          uniform_clothing: '0.00',
+          actual_medical_assistance: '0.00',
+          achievement_award: '0.00',
+          christmas_anniversary_gift: '0.00',
+          cba_productivity_incentive: '0.00',
+        },
+        opening_de_minimis_monthly_ytd: {
+          medical_cash_dependents: '0.00',
+          rice_subsidy: '0.00',
+          laundry_allowance: '0.00',
+        },
         is_verified: true,
       })
+    )
+  })
+
+  it('records a paid 13th-month benefit with its source reference', async () => {
+    const { useEmployee } = await import('@/lib/api/employees')
+    vi.mocked(useEmployee).mockReturnValue({
+      data: mockEmployee,
+      isPending: false,
+      isError: false,
+    } as ReturnType<typeof useEmployee>)
+    const screen = await render(<EmployeeProfile />)
+    await userEvent.fill(screen.getByLabelText('Paid date'), '2026-12-15')
+    await userEvent.fill(screen.getByLabelText('Gross amount paid'), '30000.00')
+    await userEvent.fill(screen.getByLabelText('Payment source reference'), 'Voucher PV-26-12')
+    await userEvent.click(screen.getByRole('button', { name: 'Record paid benefit' }))
+    expect(saveBenefit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paid_on: '2026-12-15',
+        benefit_type: 'thirteenth_month',
+        gross_amount: '30000.00',
+        source_reference: 'Voucher PV-26-12',
+        correction_of_id: null,
+        correction_reason: null,
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('requires and records evidence for conditional de minimis benefits', async () => {
+    const { useEmployee } = await import('@/lib/api/employees')
+    vi.mocked(useEmployee).mockReturnValue({
+      data: mockEmployee,
+      isPending: false,
+      isError: false,
+    } as ReturnType<typeof useEmployee>)
+    const screen = await render(<EmployeeProfile />)
+    await userEvent.selectOptions(screen.getByLabelText('Benefit type'), 'de_minimis')
+    await userEvent.selectOptions(screen.getByLabelText('De minimis category'), 'actual_medical_assistance')
+    await userEvent.fill(screen.getByLabelText('Paid date'), '2026-07-01')
+    await userEvent.fill(screen.getByLabelText('Gross amount paid'), '12000.00')
+    await userEvent.fill(screen.getByLabelText('Payment source reference'), 'Voucher PV-26-071')
+    const submit = screen.getByRole('button', { name: 'Record paid benefit' })
+    expect(submit).toBeDisabled()
+    await userEvent.click(screen.getByLabelText('Actual medical expense documentation verified'))
+    expect(submit).toBeEnabled()
+    await userEvent.click(submit)
+    expect(saveBenefit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        benefit_type: 'de_minimis',
+        de_minimis_category: 'actual_medical_assistance',
+        eligibility_evidence: ['actual_medical_documentation'],
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('records a reasoned full reversal for a paid benefit', async () => {
+    const { useEmployee } = await import('@/lib/api/employees')
+    vi.mocked(useEmployee).mockReturnValue({
+      data: mockEmployee,
+      isPending: false,
+      isError: false,
+    } as ReturnType<typeof useEmployee>)
+    benefitsQuery.mockReturnValue({
+      data: [
+        {
+          id: 'benefit-1',
+          employee_id: 'emp-1',
+          tax_year: 2026,
+          paid_on: '2026-12-15',
+          benefit_type: 'thirteenth_month',
+          gross_amount: '30000.00',
+          source_reference: 'Voucher PV-26-12',
+          correction_of_id: null,
+          correction_reason: null,
+          created_by: 'user-1',
+          created_at: '2026-12-15T00:00:00Z',
+        },
+      ],
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+    })
+    const screen = await render(<EmployeeProfile />)
+    await userEvent.click(screen.getByRole('button', { name: 'Reverse record' }))
+    await userEvent.fill(screen.getByLabelText('Paid date'), '2026-12-16')
+    await userEvent.fill(screen.getByLabelText('Payment source reference'), 'Correction CM-12-16')
+    await userEvent.fill(screen.getByLabelText('Reason for full reversal'), 'Duplicate payment entry')
+    await userEvent.click(screen.getByRole('button', { name: 'Record full reversal' }))
+    expect(saveBenefit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paid_on: '2026-12-16',
+        benefit_type: 'thirteenth_month',
+        gross_amount: '-30000.00',
+        source_reference: 'Correction CM-12-16',
+        correction_of_id: 'benefit-1',
+        correction_reason: 'Duplicate payment entry',
+      }),
+      expect.any(Object)
     )
   })
 

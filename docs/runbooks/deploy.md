@@ -221,7 +221,11 @@ production runs the exact commit that was built and pushed.
 
 ## Extended checks (2026-10-02)
 
-The deployment job waits for backend, frontend and Traefik healthchecks.
+The deployment job waits for backend, frontend, Traefik, and payroll-delivery
+healthchecks. The payslip worker healthcheck verifies that its polling heartbeat
+is current; it remains healthy and idle while delivery is disabled. An unhealthy
+worker fails the deployment health gate, while alerting on later health changes
+still requires an external container monitor.
 Traefik ping is internal on its unpublished port 8080. Frontend uses curl
 against local nginx. Public verification runs:
 

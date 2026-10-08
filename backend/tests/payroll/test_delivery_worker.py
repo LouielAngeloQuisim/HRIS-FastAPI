@@ -1,5 +1,6 @@
 """Payslip worker renders frozen snapshots and treats uncertain SMTP safely."""
 
+import os
 import socketserver
 import threading
 import uuid
@@ -7,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from email import policy
 from email.parser import BytesParser
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -418,11 +420,12 @@ def test_retry_limit_excludes_exhausted_job(
 
 
 def test_disabled_worker_never_claims_or_sends(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import app.payroll.delivery_worker as worker
 
     monkeypatch.setattr(settings, "PAYSLIP_DELIVERY_ENABLED", False)
+    monkeypatch.setattr(worker, "HEARTBEAT_FILE", tmp_path / "heartbeat")
     monkeypatch.setattr(
         worker, "_claim_due_jobs", lambda: pytest.fail("claimed while disabled")
     )
@@ -430,8 +433,48 @@ def test_disabled_worker_never_claims_or_sends(
     run_worker(once=True)
 
 
+def test_worker_heartbeat_health_check_requires_recent_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.payroll.delivery_worker as worker
+
+    marker = tmp_path / "worker-heartbeat"
+    monkeypatch.setattr(worker, "HEARTBEAT_FILE", marker)
+    assert worker.heartbeat_is_fresh(now=1_000_000) is False
+
+    worker._write_heartbeat()
+    assert worker.heartbeat_is_fresh(now=marker.stat().st_mtime + 60) is True
+    assert worker.heartbeat_is_fresh(now=marker.stat().st_mtime + 60.01) is False
+    assert worker.heartbeat_is_fresh(now=marker.stat().st_mtime - 1) is False
+
+
+def test_enabled_worker_refreshes_heartbeat_between_jobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.payroll.delivery_worker as worker
+
+    marker = tmp_path / "heartbeat"
+    monkeypatch.setattr(worker, "HEARTBEAT_FILE", marker)
+    monkeypatch.setattr(settings, "PAYSLIP_DELIVERY_ENABLED", True)
+    monkeypatch.setattr(worker, "_claim_due_jobs", lambda: [uuid.uuid4(), uuid.uuid4()])
+    monkeypatch.setattr(worker, "_send_job", lambda _: None)
+    write_count = 0
+    write_heartbeat = worker._write_heartbeat
+
+    def count_heartbeat() -> None:
+        nonlocal write_count
+        write_count += 1
+        write_heartbeat()
+
+    monkeypatch.setattr(worker, "_write_heartbeat", count_heartbeat)
+    run_worker(once=True)
+
+    assert write_count == 4  # startup, after each job, and after the poll cycle
+    assert worker.heartbeat_is_fresh() is True
+
+
 def test_disabled_supervised_worker_stays_idle_without_claiming(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import app.payroll.delivery_worker as worker
 
@@ -439,14 +482,24 @@ def test_disabled_supervised_worker_stays_idle_without_claiming(
         pass
 
     monkeypatch.setattr(settings, "PAYSLIP_DELIVERY_ENABLED", False)
+    heartbeat = tmp_path / "heartbeat"
+    monkeypatch.setattr(worker, "HEARTBEAT_FILE", heartbeat)
     monkeypatch.setattr(
         worker, "_claim_due_jobs", lambda: pytest.fail("claimed while disabled")
     )
 
+    sleep_calls = 0
+
     def stop_after_one_poll(seconds: int) -> None:
+        nonlocal sleep_calls
         assert seconds == worker.POLL_SECONDS
+        sleep_calls += 1
+        if sleep_calls == 1:
+            os.utime(heartbeat, (0, 0))
+            return
         raise StopIdleLoop
 
     monkeypatch.setattr(worker.time, "sleep", stop_after_one_poll)
     with pytest.raises(StopIdleLoop):
         run_worker()
+    assert worker.heartbeat_is_fresh() is True

@@ -38,6 +38,10 @@ export interface EmployeeTaxYearDeclaration {
     | 'monthly'
     | null
   previous_employer_included: boolean
+  opening_benefits_exempt_ytd: string
+  opening_benefits_reconciled: boolean
+  opening_de_minimis_annual_ytd: Record<string, string>
+  opening_de_minimis_monthly_ytd: Record<string, string>
   source_reference: string | null
   is_verified: boolean
   verified_by: string | null
@@ -55,6 +59,10 @@ export type EmployeeTaxYearDeclarationInput = Pick<
   | 'opening_pay_period_count'
   | 'opening_pay_period_type'
   | 'previous_employer_included'
+  | 'opening_benefits_exempt_ytd'
+  | 'opening_benefits_reconciled'
+  | 'opening_de_minimis_annual_ytd'
+  | 'opening_de_minimis_monthly_ytd'
   | 'source_reference'
 > & { is_verified: boolean }
 
@@ -77,6 +85,61 @@ export function useEmployeeTaxYearDeclaration(
       }
     },
     enabled: Boolean(employeeId && taxYear),
+  })
+}
+
+export interface EmployeeTaxBenefit {
+  id: string
+  employee_id: string
+  tax_year: number
+  paid_on: string
+  benefit_type: 'thirteenth_month' | 'other_benefit' | 'de_minimis'
+  de_minimis_category: string | null
+  eligibility_evidence: string[]
+  gross_amount: string
+  source_reference: string
+  correction_of_id: string | null
+  correction_reason: string | null
+  created_by: string | null
+  created_at: string | null
+}
+
+export type EmployeeTaxBenefitInput = Pick<
+  EmployeeTaxBenefit,
+  | 'paid_on'
+  | 'benefit_type'
+  | 'de_minimis_category'
+  | 'eligibility_evidence'
+  | 'gross_amount'
+  | 'source_reference'
+  | 'correction_of_id'
+  | 'correction_reason'
+>
+
+export function useEmployeeTaxYearBenefits(employeeId: string, taxYear: number) {
+  return useQuery({
+    queryKey: ['payroll-tax-year-benefits', employeeId, taxYear],
+    queryFn: async () =>
+      (await api.get<EmployeeTaxBenefit[]>(
+        `/payroll/employees/${employeeId}/tax-year-benefits/${taxYear}`,
+        { params: { offset: 0, limit: 100 } }
+      )).data,
+    enabled: Boolean(employeeId && taxYear),
+  })
+}
+
+export function useRecordEmployeeTaxYearBenefit(employeeId: string, taxYear: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: EmployeeTaxBenefitInput) =>
+      api.post<EmployeeTaxBenefit>(
+        `/payroll/employees/${employeeId}/tax-year-benefits/${taxYear}`,
+        payload
+      ).then(response => response.data),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['payroll-tax-year-benefits', employeeId, taxYear] })
+      void qc.invalidateQueries({ queryKey: ['payroll-tax-year-declaration', employeeId, taxYear] })
+    },
   })
 }
 
@@ -597,6 +660,9 @@ export interface PayrollAttendanceCalculationPreview {
     employee_name: string
     regular_earnings: string | null
     approved_overtime: string | null
+    holiday_premium: string | null
+    rest_day_premium: string | null
+    night_differential: string | null
     attendance_deduction: string | null
     gross_before_statutory: string | null
     blockers: { code: string; message: string; work_date: string | null }[]
@@ -761,6 +827,59 @@ export function usePayrollSetup() {
     createPolicy,
     confirmPolicy,
   }
+}
+
+export interface PayrollEmployerProfile {
+  id: string
+  tin_number: string | null
+  registered_name: string | null
+  registered_address: string | null
+  postal_code: string | null
+  rdo_code: string | null
+  employer_type: 'main' | 'secondary' | null
+  signatory_name: string | null
+  signatory_title: string | null
+  source_reference: string | null
+  is_verified: boolean
+  verified_by: string | null
+  verified_at: string | null
+  updated_by: string | null
+  updated_at: string | null
+}
+
+export type PayrollEmployerProfileInput = Omit<
+  PayrollEmployerProfile,
+  'id' | 'updated_by' | 'updated_at'
+>
+
+export function usePayrollEmployerProfile() {
+  const qc = useQueryClient()
+  const profile = useQuery({
+    queryKey: ['payroll-employer-profile'],
+    queryFn: () =>
+      api
+        .get<PayrollEmployerProfile>('/payroll/employer-profile')
+        .then((response) => response.data),
+  })
+  const save = useMutation({
+    mutationFn: (payload: Partial<PayrollEmployerProfileInput>) =>
+      api
+        .put<PayrollEmployerProfile>('/payroll/employer-profile', payload)
+        .then((response) => response.data),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['payroll-employer-profile'] })
+    },
+  })
+  const verify = useMutation({
+    mutationFn: () =>
+      api
+        .post<PayrollEmployerProfile>('/payroll/employer-profile/verify')
+        .then((response) => response.data),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['payroll-employer-profile'] })
+    },
+  })
+  return { profile, save, verify }
 }
 
 export function usePayGroupList() {

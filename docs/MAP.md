@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-08
-Source commit: 8f01a09f42cc712486e0ba6d813f3a9ce06af802
+Source commit: bfc05a86238cdd32363a55c7486f22d44b78c349
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 284 endpoints in 40 groups
+## Backend routes (`/api/*`): 286 endpoints in 40 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -240,7 +240,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/password-recovery-html-content/{email}`
 
-### `/api/v1/payroll` (77 routes)
+### `/api/v1/payroll` (79 routes)
 
 - `POST /api/v1/payroll/amortizations/{amortization_id}/pay`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/bir-brackets/`  `[perms: payroll:view]`
@@ -276,6 +276,8 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `POST /api/v1/payroll/pagibig/calculate`
 - `GET /api/v1/payroll/pay-group-assignments`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/pay-group-assignments`  `[perms: payroll:add]`
+- `POST /api/v1/payroll/pay-group-assignments/bulk/commit`  `[perms: payroll:add]`
+- `POST /api/v1/payroll/pay-group-assignments/bulk/preflight`  `[perms: payroll:add]`
 - `PATCH /api/v1/payroll/pay-group-assignments/{assignment_id}`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/pay-groups`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/pay-groups`  `[perms: payroll:add]`
@@ -484,7 +486,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 41 revisions, single head `c2d3e4f5a6b7`
+## Migration chain (oldest -> newest): 43 revisions, single head `f3a4b5c6d7e8`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -530,6 +532,8 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 39. `a0f1a2b3c4d5` - Seed published PhilHealth and Pag-IBIG mandatory schedules when absent.
 40. `b1c2d3e4f5a6` - Store reviewed employee tax classification and opening YTD amounts.
 41. `c2d3e4f5a6b7` - Track the date covered by opening tax-year balances.
+42. `e7f8a9b0c1d2` - Store prior-employer periods used by cumulative-average tax.
+43. `f3a4b5c6d7e8` - Add idempotency records for explicit pay-group batches.
 
 ### Migration anomalies (static findings, report-only)
 

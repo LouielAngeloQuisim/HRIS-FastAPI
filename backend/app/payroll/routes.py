@@ -1874,6 +1874,20 @@ def finalize_payroll_run(
                 status_code=409,
                 detail=f"Entry {entry.id} still has unresolved blockers",
             )
+        if entry.review_state == "reviewed" and (
+            (
+                entry.calculation_version is not None
+                and entry.calculation_version.endswith("-provisional")
+            )
+            or entry.earnings.get("provisional") is True
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Entry {entry.id} uses provisional attendance earnings; "
+                    "complete and approve the payroll calculation before finalization"
+                ),
+            )
         required_snapshot_keys = {
             "attendance_revisions",
             "salary_versions",

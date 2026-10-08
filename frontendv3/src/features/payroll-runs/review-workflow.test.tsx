@@ -276,6 +276,11 @@ describe('PayrollRunDetail review workflow', () => {
         ...entry,
         review_state: 'reviewed',
         blockers: [],
+        calculation_version: 'attendance-v1-accepted-test',
+        earnings: { regular: '26000.00', provisional: false } as {
+          regular: string
+          provisional: boolean
+        },
       }),
       isPending: false,
       isError: false,
@@ -290,6 +295,32 @@ describe('PayrollRunDetail review workflow', () => {
       screen.getByRole('button', { name: 'Finalize and schedule payslips' })
     )
     await expect.poll(() => finalizeMock).toHaveBeenCalledWith(undefined)
+  })
+
+  it('blocks finalization while a reviewed entry still has provisional earnings', async () => {
+    useCanMock.mockImplementation(
+      (_module: string, action: string) =>
+        action === 'view' || action === 'approve'
+    )
+    usePayrollRunMock.mockReturnValue({
+      data: run('ready_for_finalization', {
+        ...entry,
+        review_state: 'reviewed',
+        blockers: [],
+      }),
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+
+    const screen = await render(<PayrollRunDetail />)
+    await expect
+      .element(screen.getByText(/still use provisional earnings/i))
+      .toBeVisible()
+    await expect
+      .element(screen.getByRole('button', { name: 'Calculation not approved' }))
+      .toBeDisabled()
+    await expect.poll(() => finalizeMock).not.toHaveBeenCalled()
   })
 
   it('shows employee identity and lets payroll editors retry a failed payslip with a reason', async () => {

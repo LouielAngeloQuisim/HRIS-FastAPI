@@ -1355,6 +1355,37 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     late_assignment.pay_group_id = other_group.id
     db.add(late_assignment)
     db.commit()
+    provisional_entry = db.get(PayrollEntry, uuid.UUID(second_entry["id"]))
+    assert provisional_entry is not None
+    rejected_provisional = client.post(
+        f"{API}/runs/{run_id}/finalize", headers=finalizer_headers
+    )
+    assert rejected_provisional.status_code == 409
+    assert "uses provisional attendance earnings" in rejected_provisional.json()["detail"]
+    finalized_run = db.get(PayrollRun, uuid.UUID(run_id))
+    assert finalized_run is not None
+    db.refresh(finalized_run)
+    assert finalized_run.workflow_status == "ready_for_finalization"
+    assert finalized_run.finalized_by is None
+    assert finalized_run.frozen_snapshot is None
+    assert not db.exec(
+        select(PayrollContributionLedger).where(
+            PayrollContributionLedger.payroll_entry_id == provisional_entry.id
+        )
+    ).all()
+    assert not db.exec(
+        select(PayrollDeliveryOutbox).where(
+            PayrollDeliveryOutbox.payroll_entry_id == provisional_entry.id
+        )
+    ).all()
+
+    # Exercise the immutable finalization/outbox pipeline with an explicit
+    # accepted-version fixture. The production calculator currently emits only
+    # the provisional version above, which the API must refuse to finalize.
+    provisional_entry.calculation_version = "attendance-v1-accepted-test"
+    provisional_entry.earnings = {**provisional_entry.earnings, "provisional": False}
+    db.add(provisional_entry)
+    db.commit()
     finalized = client.post(f"{API}/runs/{run_id}/finalize", headers=finalizer_headers)
     assert finalized.status_code == 200, finalized.text
     assert finalized.json()["workflow_status"] == "finalized"

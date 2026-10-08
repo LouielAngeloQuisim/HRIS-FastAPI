@@ -57,6 +57,13 @@ export function PayrollRunDetail() {
   const navigate = useNavigate()
 
   const { data, isPending, isError, refetch } = usePayrollRun(runId)
+  const hasProvisionalReviewedEntries =
+    data?.entries.some(
+      (entry) =>
+        entry.review_state === 'reviewed' &&
+        (entry.calculation_version?.endsWith('-provisional') === true ||
+          entry.earnings?.provisional === true)
+    ) ?? false
   const approveMutation = useApprovePayrollRun()
   const voidMutation = useVoidPayrollRun()
   const startReviewMutation = useStartPayrollReview(runId)
@@ -377,14 +384,17 @@ export function PayrollRunDetail() {
                       onClick={handleFinalize}
                       disabled={
                         finalizeMutation.isPending ||
+                        hasProvisionalReviewedEntries ||
                         !data.payroll_finalization_enabled
                       }
                     >
                       {finalizeMutation.isPending
                         ? 'Finalizing…'
-                        : data.payroll_finalization_enabled
-                          ? 'Finalize and schedule payslips'
-                          : 'Finalization disabled'}
+                        : hasProvisionalReviewedEntries
+                          ? 'Calculation not approved'
+                          : data.payroll_finalization_enabled
+                            ? 'Finalize and schedule payslips'
+                            : 'Finalization disabled'}
                     </Button>
                   )}
               </div>
@@ -403,6 +413,15 @@ export function PayrollRunDetail() {
                     the preparer and every employee reviewer. Finalization
                     freezes the reviewed amounts and schedules delivery; it does
                     not confirm a bank payout.
+                  </p>
+                )}
+              {data.workflow_status === 'ready_for_finalization' &&
+                canFinalize &&
+                hasProvisionalReviewedEntries && (
+                  <p role='status' className='text-sm text-amber-700'>
+                    Finalization is blocked because one or more reviewed entries
+                    still use provisional earnings. Complete and approve the
+                    payroll calculation first.
                   </p>
                 )}
               {data.workflow_status === 'ready_for_finalization' &&

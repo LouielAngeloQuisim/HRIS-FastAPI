@@ -72,11 +72,13 @@ def test_statutory_calculators_apply_published_floors_caps_and_rates(db: Session
     assert calculate_pagibig_employer_share(db, Decimal("26000"), "2024-02-01") == Decimal("200.00")
 
 
-def test_philhealth_does_not_carry_the_2026_schedule_into_2027(
+def test_philhealth_does_not_carry_a_schedule_into_an_unconfigured_year(
     db: Session,
 ) -> None:
-    with pytest.raises(StatutoryScheduleUnavailable, match="calendar year 2027"):
-        calculate_philhealth_employee_share(db, Decimal("26000"), "2027-01-01")
+    # Other payroll tests seed synthetic future schedules in the shared DB;
+    # use a distant year outside those fixtures to isolate this guard check.
+    with pytest.raises(StatutoryScheduleUnavailable, match="calendar year 2099"):
+        calculate_philhealth_employee_share(db, Decimal("26000"), "2099-01-01")
 
-    errors = _statutory_schedule_errors(db, date(2027, 1, 1))
+    errors = _statutory_schedule_errors(db, date(2099, 1, 1))
     assert any("PhilHealth requires one active floor/ceiling schedule" in error for error in errors)

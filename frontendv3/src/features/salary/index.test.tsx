@@ -3,10 +3,18 @@ import { expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import SalaryPage from './index'
 
+type SalaryPageEmployee = {
+  id: string
+  employee_code: string
+  first_name: string
+  last_name: string
+  employee_status: string
+}
+
 const mocks = vi.hoisted(() => ({
   canView: vi.fn(),
-  employees: vi.fn((_page = 1) => ({
-    data: { data: [], count: 0 },
+  employees: vi.fn((_page: number) => ({
+    data: { data: [] as SalaryPageEmployee[], count: 0 },
     isPending: false,
   })),
   preflight: vi.fn(

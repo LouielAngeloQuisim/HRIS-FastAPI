@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.attendance.models import (
     DailyTimeRecord,
@@ -655,6 +655,7 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             )
     db.commit()
 
+    run_id: uuid.UUID | None = None
     try:
         response = client.post(
             f"{API}/runs/prepare-attendance-draft",
@@ -666,6 +667,7 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             headers=superuser_token_headers,
         )
         assert response.status_code == 201, response.text
+        run_id = uuid.UUID(response.json()["id"])
         entry = next(
             row
             for row in response.json()["entries"]
@@ -698,7 +700,12 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
         assert history["complete"] is True
     finally:
         # The module-scoped test database persists rows across test cases. This
-        # fixed-period policy must not contaminate the next parametrized case.
+        # fixed-period policy and draft must not contaminate later test cases.
+        if run_id is not None:
+            db.exec(
+                delete(PayrollEntry).where(PayrollEntry.payroll_run_id == run_id)
+            )
+            db.exec(delete(PayrollRun).where(PayrollRun.id == run_id))
         db.delete(policy)
         db.commit()
 

@@ -35,6 +35,15 @@ vi.mock('@/lib/api/payroll', () => ({
     isPending: false,
     isError: false,
   }),
+  usePayrollContributionCorrectionTargets: () => ({
+    data: [],
+    isPending: false,
+    isError: false,
+  }),
+  useCreatePayrollContributionCorrection: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
   usePayrollRunPreflight: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePayrollAttendanceCalculationPreview: () => ({
     mutateAsync: vi.fn(),

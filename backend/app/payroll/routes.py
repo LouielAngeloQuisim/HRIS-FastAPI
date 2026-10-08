@@ -42,6 +42,7 @@ from app.employee.models import EmployeeRecords
 from app.leave.models import HolidayConfig, HolidayInstance, LeavePolicy, LeaveRequest
 from app.payroll.annualized_tax import (
     calculate_annualized_compensation_tax,
+    cumulative_average_required,
     cumulative_average_withholding,
 )
 from app.payroll.attendance_calculator import (
@@ -1580,6 +1581,32 @@ def _bir_finalized_history(
     if coverage_cursor < before:
         complete = False
     return history, taxable_total, withheld_total, complete
+
+
+def _bir_cumulative_average_was_used(
+    session: Session, employee_id: uuid.UUID, tax_year: int, before: date
+) -> bool:
+    """Keep RR 11-2018 cumulative-average withholding for the rest of the year."""
+    snapshots = session.exec(
+        select(PayrollEntry.input_snapshot)
+        .join(PayrollRun, col(PayrollRun.id) == col(PayrollEntry.payroll_run_id))
+        .where(
+            PayrollEntry.employee_id == employee_id,
+            col(PayrollEntry.review_state) == "reviewed",
+            col(PayrollEntry.is_deleted).is_(False),
+            PayrollRun.workflow_status == "finalized",
+            col(PayrollRun.status).in_([PayrollRunStatus.APPROVED, PayrollRunStatus.PAID]),
+            col(PayrollRun.is_deleted).is_(False),
+            PayrollRun.date_from >= date(tax_year, 1, 1),
+            PayrollRun.date_to < before,
+        )
+    ).all()
+    return any(
+        isinstance(snapshot, dict)
+        and isinstance(calculation := snapshot.get("bir_calculation"), dict)
+        and calculation.get("method") == "cumulative_average_rr_11_2018"
+        for snapshot in snapshots
+    )
 
 
 def _bir_tax_benefit_rows(
@@ -5575,8 +5602,21 @@ def prepare_attendance_payroll_draft(
                 col(BIRBracket.is_deleted).is_(False),
             ).order_by(col(BIRBracket.bracket_min))
         ).all()
+        bir_first_taxable_regular_amount: Decimal | None = None
         if effective_bir_rows:
             latest_bir_date = max(row.effective_date for row in effective_bir_rows)
+            effective_bir_rows = [
+                row for row in effective_bir_rows if row.effective_date == latest_bir_date
+            ]
+            taxable_regular_thresholds = [
+                row.bracket_min
+                for row in effective_bir_rows
+                if row.bracket_min > 0
+                and row.base_tax == 0
+                and row.excess_rate > 0
+            ]
+            if taxable_regular_thresholds:
+                bir_first_taxable_regular_amount = min(taxable_regular_thresholds)
             snapshot["bir_schedule"] = [
                 {
                     "id": str(row.id),
@@ -5657,11 +5697,51 @@ def prepare_attendance_payroll_draft(
             - attendance_deduction
             - sum(employee_statutory.values(), Decimal("0.00"))
         )
+        employee_contributions = sum(employee_statutory.values(), Decimal("0.00"))
+        regular_compensation_before_deductions = regular + fixed_allowance
+        attendance_over_regular = max(
+            Decimal("0.00"),
+            attendance_deduction - regular_compensation_before_deductions,
+        )
+        regular_taxable_compensation = max(
+            Decimal("0.00"),
+            regular_compensation_before_deductions - attendance_deduction,
+        )
+        supplementary_taxable_compensation = max(
+            Decimal("0.00"),
+            overtime
+            + holiday_premium
+            + rest_day_premium
+            + night_differential
+            + benefits_taxable_excess
+            - attendance_over_regular,
+        )
+        contributions_against_regular = min(
+            regular_taxable_compensation, employee_contributions
+        )
+        regular_taxable_compensation -= contributions_against_regular
+        supplementary_taxable_compensation = max(
+            Decimal("0.00"),
+            supplementary_taxable_compensation
+            - (employee_contributions - contributions_against_regular),
+        )
         bir_withholding = Decimal("0.00")
         is_minimum_wage_earner = (
             tax_declaration is not None
             and tax_declaration.tax_classification == "minimum_wage_earner"
         )
+        if (
+            tax_declaration is not None
+            and tax_declaration.is_verified
+            and tax_declaration.tax_classification == "ordinary"
+        ):
+            snapshot["bir_compensation_breakdown"] = {
+                "regular_taxable_compensation": str(regular_taxable_compensation),
+                "supplementary_taxable_compensation": str(
+                    supplementary_taxable_compensation
+                ),
+                "attendance_and_employee_contributions_reduce_regular_first": True,
+            }
         mwe_has_taxable_allowance = is_minimum_wage_earner and fixed_allowance > 0
         if mwe_has_taxable_allowance:
             blockers.append(
@@ -5890,12 +5970,30 @@ def prepare_attendance_payroll_draft(
                             or declaration.taxable_compensation_ytd > 0
                             or declaration.tax_withheld_ytd > 0
                         )
-                        if (
-                            declaration.previous_employer_included
-                            or declaration.taxable_compensation_ytd > 0
-                            or declaration.tax_withheld_ytd > 0
+                        cumulative_method_previously_applied = (
+                            _bir_cumulative_average_was_used(
+                                session,
+                                roster_entry.employee_id,
+                                obj_in.date_to.year,
+                                obj_in.date_from,
+                            )
+                        )
+                        use_cumulative_average = (
+                            has_opening_tax_history
                             or benefits_taxable_excess > 0
-                        ):
+                            or cumulative_method_previously_applied
+                        )
+                        if not use_cumulative_average and supplementary_taxable_compensation > 0:
+                            if bir_first_taxable_regular_amount is None:
+                                raise StatutoryScheduleUnavailable(
+                                    "BIR schedule does not identify the first taxable regular-compensation amount needed for supplementary-pay withholding"
+                                )
+                            use_cumulative_average = cumulative_average_required(
+                                regular_compensation=regular_taxable_compensation,
+                                supplementary_compensation=supplementary_taxable_compensation,
+                                first_taxable_regular_amount=bir_first_taxable_regular_amount,
+                            )
+                        if use_cumulative_average:
                             if (
                                 declaration.opening_as_of is None
                                 or declaration.opening_as_of.year != obj_in.date_to.year
@@ -6021,6 +6119,7 @@ def prepare_attendance_payroll_draft(
                                         "withholding": str(bir_withholding),
                                         "schedule_effective_date": obj_in.date_to.isoformat(),
                                         "schedule_reference": "https://bir-cdn.bir.gov.ph/local/pdf/RR%20No.%2011-2018.pdf",
+                                        "cumulative_average_consistent_for_tax_year": True,
                                     }
                         else:
                             bir_withholding = calculate_bir_tax(
@@ -6028,11 +6127,18 @@ def prepare_attendance_payroll_draft(
                                 bir_taxable_pay,
                                 group.cadence.value,
                                 obj_in.date_to.isoformat(),
+                                regular_compensation=regular_taxable_compensation,
                             )
                             snapshot["bir_calculation"] = {
                                 "method": "periodic_annex_e",
                                 "period_type": group.cadence.value,
                                 "taxable_compensation": str(bir_taxable_pay),
+                                "regular_compensation": str(
+                                    regular_taxable_compensation
+                                ),
+                                "supplementary_compensation": str(
+                                    supplementary_taxable_compensation
+                                ),
                                 "withholding": str(bir_withholding),
                                 "schedule_effective_date": obj_in.date_to.isoformat(),
                                 "year_end_adjustment_pending": False,

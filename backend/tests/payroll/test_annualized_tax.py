@@ -8,11 +8,15 @@ from sqlmodel import Session
 from app.employee.models import EmployeeRecords
 from app.payroll.annualized_tax import (
     calculate_annualized_compensation_tax,
+    cumulative_average_required,
     cumulative_average_withholding,
 )
 from app.payroll.models import PayrollEntry, PayrollRunStatus
 from app.payroll.payroll_tables import PayrollRun as PayrollRunTable
-from app.payroll.routes import _bir_finalized_history
+from app.payroll.routes import (
+    _bir_cumulative_average_was_used,
+    _bir_finalized_history,
+)
 
 
 @pytest.mark.parametrize(
@@ -63,6 +67,37 @@ def test_cumulative_average_withholding_never_creates_negative_deduction() -> No
     assert current_withholding == Decimal("0.00")
 
 
+@pytest.mark.parametrize(
+    (
+        "regular",
+        "supplementary",
+        "first_taxable",
+        "previously_applied",
+        "expected",
+    ),
+    [
+        ("9000.00", "300.00", "10416.67", False, True),
+        ("12000.00", "12000.00", "10416.67", False, True),
+        ("12000.00", "11999.99", "10416.67", False, False),
+        ("12000.00", "0.00", "10416.67", False, False),
+        ("12000.00", "0.00", "10416.67", True, True),
+    ],
+)
+def test_cumulative_average_method_triggers_and_persists_for_tax_year(
+    regular: str,
+    supplementary: str,
+    first_taxable: str,
+    previously_applied: bool,
+    expected: bool,
+) -> None:
+    assert cumulative_average_required(
+        regular_compensation=Decimal(regular),
+        supplementary_compensation=Decimal(supplementary),
+        first_taxable_regular_amount=Decimal(first_taxable),
+        previously_applied=previously_applied,
+    ) is expected
+
+
 def test_finalized_tax_history_requires_gapless_periods_and_snapshots(db: Session) -> None:
     employee = EmployeeRecords(
         employee_code=f"YTD-{uuid.uuid4().hex[:8]}",
@@ -92,7 +127,12 @@ def test_finalized_tax_history_requires_gapless_periods_and_snapshots(db: Sessio
         total_deductions=Decimal("100"),
         net_pay=Decimal("12900"),
         taxable_income=Decimal("12900"),
-        input_snapshot={"bir_calculation": {"taxable_compensation": "10850.00"}},
+        input_snapshot={
+            "bir_calculation": {
+                "method": "cumulative_average_rr_11_2018",
+                "taxable_compensation": "10850.00",
+            }
+        },
         deductions={"bir_withholding": "64.95"},
     )
     db.add(entry)
@@ -120,6 +160,9 @@ def test_finalized_tax_history_requires_gapless_periods_and_snapshots(db: Sessio
             "pay_period_type": "unknown",
         }
     ]
+    assert _bir_cumulative_average_was_used(
+        db, employee.id, 2026, date(2026, 10, 16)
+    ) is True
 
     # If the prior period's calculation snapshot is damaged, annualization must
     # not treat that period as zero income or zero withholding.

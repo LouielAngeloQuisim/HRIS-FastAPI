@@ -1803,14 +1803,34 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
 
 
 @pytest.mark.parametrize(
-    ("tax_classification", "source_reference", "basic_rate", "pay_type"),
+    (
+        "tax_classification",
+        "source_reference",
+        "basic_rate",
+        "pay_type",
+        "supplementary_trigger",
+    ),
     [
-        ("ordinary", "QA reviewed Form 2316", "35000.00", PayType.MONTHLY),
+        (
+            "ordinary",
+            "QA reviewed Form 2316",
+            "35000.00",
+            PayType.MONTHLY,
+            False,
+        ),
         (
             "minimum_wage_earner",
             "QA DOLE wage-order evidence for assigned workplace",
             "650.00",
             PayType.DAILY,
+            False,
+        ),
+        (
+            "ordinary",
+            "QA ordinary employee with supplementary overtime",
+            "20000.00",
+            PayType.MONTHLY,
+            True,
         ),
     ],
 )
@@ -1822,6 +1842,7 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
     source_reference: str,
     basic_rate: str,
     pay_type: PayType,
+    supplementary_trigger: bool,
 ) -> None:
     employee = EmployeeRecords(
         employee_code=f"CUMULATIVE-{uuid.uuid4().hex[:8]}",
@@ -1910,11 +1931,13 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
                 tax_year=2025,
                 tax_classification=tax_classification,
                 opening_as_of=date(2025, 10, 31),
-                taxable_compensation_ytd="180000.00",
-                tax_withheld_ytd="11000.40",
-                opening_pay_period_count=6,
+                taxable_compensation_ytd=(
+                    "0.00" if supplementary_trigger else "180000.00"
+                ),
+                tax_withheld_ytd="0.00" if supplementary_trigger else "11000.40",
+                opening_pay_period_count=0 if supplementary_trigger else 6,
                 opening_pay_period_type="semi_monthly",
-                previous_employer_included=True,
+                previous_employer_included=not supplementary_trigger,
                 opening_de_minimis_annual_ytd={
                     "uniform_clothing": "0.00",
                     "actual_medical_assistance": "0.00",
@@ -1936,16 +1959,25 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
     for day in range(1, 16):
         work_date = date(2025, 11, day)
         if work_date.weekday() < 5:
+            overtime_minutes = (
+                480
+                if supplementary_trigger and work_date == date(2025, 11, 3)
+                else 0
+            )
             db.add(
                 DailyTimeRecord(
                     employee_id=employee.id,
                     shift_id=shift.id,
                     login_date=datetime(2025, 11, day, tzinfo=timezone.utc),
                     logout_date=datetime(2025, 11, day, tzinfo=timezone.utc)
-                    + timedelta(hours=9),
+                    + timedelta(hours=9, minutes=overtime_minutes),
                     work_date=work_date,
-                    rendered_minutes=480,
-                    overtime_minutes=0,
+                    rendered_minutes=480 + overtime_minutes,
+                    overtime_minutes=overtime_minutes,
+                    overtime_approved=True if overtime_minutes else None,
+                    overtime_approved_minutes=(
+                        overtime_minutes if overtime_minutes else None
+                    ),
                     is_absent=False,
                     is_time_calculated=True,
                 )
@@ -1979,12 +2011,24 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
         if tax_classification == "ordinary":
             trace = entry["input_snapshot"]["bir_calculation"]
             assert trace["method"] == "cumulative_average_rr_11_2018"
+            if supplementary_trigger:
+                assert entry["input_snapshot"]["bir_compensation_breakdown"][
+                    "supplementary_taxable_compensation"
+                ] != "0.00"
             # A semi-monthly monthly-salary base is half the monthly salary,
             # independent of how many weekdays fall in the cutoff.
-            assert trace["cumulative_taxable_compensation"] == "197500.00"
-            assert trace["cumulative_period_count"] == 7
-            assert trace["average_period_compensation"] == "28214.29"
-            assert trace["prior_tax_withheld"] == "11000.40"
+            if supplementary_trigger:
+                assert trace["cumulative_period_count"] == 1
+                assert Decimal(
+                    entry["input_snapshot"]["bir_compensation_breakdown"][
+                        "regular_taxable_compensation"
+                    ]
+                ) < Decimal("10416.67")
+            else:
+                assert trace["cumulative_taxable_compensation"] == "197500.00"
+                assert trace["cumulative_period_count"] == 7
+                assert trace["average_period_compensation"] == "28214.29"
+                assert trace["prior_tax_withheld"] == "11000.40"
             assert Decimal(trace["withholding"]) == Decimal(
                 entry["deductions"]["bir_withholding"]
             )
@@ -1995,10 +2039,13 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
                 for blocker in entry["blockers"]
             )
         declaration = entry["input_snapshot"]["tax_year_declaration"]
-        assert declaration["opening_pay_period_count"] == 6
+        assert declaration["opening_pay_period_count"] == (
+            0 if supplementary_trigger else 6
+        )
         if tax_classification == "ordinary":
             history = entry["input_snapshot"]["bir_year_to_date_history"]
-            assert history["opening_pay_period_count"] == 6
+            if not supplementary_trigger:
+                assert history["opening_pay_period_count"] == 6
             assert history["complete"] is True
     finally:
         # The module-scoped test database persists rows across test cases. This

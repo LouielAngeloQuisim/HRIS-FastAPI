@@ -220,7 +220,27 @@ def calculate_bir_tax(
     taxable_income: Decimal,
     period_type: str = "monthly",
     effective_date: str | None = None,
+    *,
+    regular_compensation: Decimal | None = None,
 ) -> Decimal:
+    """Calculate period withholding, optionally selecting by regular pay.
+
+    RR 11-2018 selects the Annex E compensation range using regular taxable
+    compensation, then applies that range's marginal rate to total taxable
+    compensation including supplementary pay. Existing calculator callers
+    that provide only ``taxable_income`` retain the legacy single-amount
+    behavior.
+    """
+    if regular_compensation is not None and (
+        not regular_compensation.is_finite() or regular_compensation < 0
+    ):
+        raise ValueError("Regular compensation must be finite and non-negative")
+    if regular_compensation is not None and (
+        not taxable_income.is_finite() or taxable_income < regular_compensation
+    ):
+        raise ValueError(
+            "Total taxable compensation must be finite and at least regular compensation"
+        )
     as_of = _effective_date(effective_date)
     stmt = (
         select(BIRBracket)
@@ -239,18 +259,19 @@ def calculate_bir_tax(
         )
     latest_effective_date = max(bracket.effective_date for bracket in brackets)
     current_brackets = [bracket for bracket in brackets if bracket.effective_date == latest_effective_date]
+    bracket_income = regular_compensation if regular_compensation is not None else taxable_income
     bracket = next(
         (
             row
             for row in current_brackets
-            if row.bracket_min <= taxable_income
-            and (row.bracket_max is None or taxable_income <= row.bracket_max)
+            if row.bracket_min <= bracket_income
+            and (row.bracket_max is None or bracket_income <= row.bracket_max)
         ),
         None,
     )
     if bracket is None:
         raise StatutoryScheduleUnavailable(
-            f"BIR {period_type} tax table has no bracket for taxable compensation {taxable_income}"
+            f"BIR {period_type} tax table has no bracket for taxable compensation {bracket_income}"
         )
     taxable_excess = max(Decimal("0"), taxable_income - bracket.bracket_min)
     return (bracket.base_tax + taxable_excess * bracket.excess_rate / Decimal("100.0")).quantize(

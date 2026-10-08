@@ -40,6 +40,37 @@ def cumulative_average_withholding(
         CENT, rounding=ROUND_HALF_UP
     )
 
+
+def cumulative_average_required(
+    *,
+    regular_compensation: Decimal,
+    supplementary_compensation: Decimal,
+    first_taxable_regular_amount: Decimal,
+    previously_applied: bool = False,
+) -> bool:
+    """Apply the RR 11-2018 cumulative-average triggers consistently.
+
+    The method starts when regular compensation is below the table's first
+    taxable regular-compensation amount and any supplementary compensation is
+    paid, or when supplementary compensation equals/exceeds regular
+    compensation. Once used in a tax year, it remains in use for that year.
+    """
+    values = (
+        regular_compensation,
+        supplementary_compensation,
+        first_taxable_regular_amount,
+    )
+    if any(not value.is_finite() or value < 0 for value in values):
+        raise ValueError("BIR compensation inputs must be finite and non-negative")
+    if previously_applied:
+        return True
+    if supplementary_compensation == 0:
+        return False
+    return (
+        regular_compensation < first_taxable_regular_amount
+        or supplementary_compensation >= regular_compensation
+    )
+
 # (lower bound, base tax, marginal rate), as prescribed for 2023 onward.
 ANNUAL_BRACKETS: tuple[tuple[Decimal, Decimal, Decimal], ...] = (
     (Decimal("0"), Decimal("0"), Decimal("0")),

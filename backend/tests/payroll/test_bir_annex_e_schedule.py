@@ -3,6 +3,7 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from sqlmodel import Session, select
 
 from app.payroll.calc import calculate_bir_tax
@@ -37,6 +38,30 @@ def test_annex_e_monthly_tax_boundaries_match_published_base_and_rates(db: Sessi
 
     # The next band starts at ₱66,667 with the published ₱8,541.80 base.
     assert calculate_bir_tax(db, Decimal("66667.00"), "monthly", "2023-01-01") == Decimal("8541.80")
+
+
+def test_annex_e_uses_regular_band_for_supplementary_compensation(db: Session) -> None:
+    # RR 11-2018 selects the band from regular pay (₱33,000), then taxes
+    # supplementary pay at that band's marginal rate. Selecting from total
+    # compensation (₱43,000) would incorrectly move the whole amount to 20%.
+    assert calculate_bir_tax(
+        db,
+        Decimal("43000.00"),
+        "monthly",
+        "2023-01-01",
+        regular_compensation=Decimal("33000.00"),
+    ) == Decimal("3325.05")
+
+
+def test_annex_e_rejects_regular_compensation_above_taxable_total(db: Session) -> None:
+    with pytest.raises(ValueError, match="at least regular compensation"):
+        calculate_bir_tax(
+            db,
+            Decimal("30000.00"),
+            "monthly",
+            "2023-01-01",
+            regular_compensation=Decimal("33000.00"),
+        )
 
 
 def test_annex_e_daily_tax_boundary_matches_published_base_and_rate(db: Session) -> None:

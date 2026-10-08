@@ -111,21 +111,26 @@ test('fictional employee payroll is reviewed, separately finalized and frozen fo
   })
   expect(shiftAssignment.status(), await shiftAssignment.text()).toBe(201)
 
-  for (let day = 1; day <= 30; day++) {
+  const attendanceRows = ['employee_code,login_date,logout_date']
+  for (let day = 16; day <= 30; day++) {
     const workDate = new Date(Date.UTC(2026, 10, day))
     if (workDate.getUTCDay() === 0 || workDate.getUTCDay() === 6) continue
     const date = workDate.toISOString().slice(0, 10)
-    const punch = await page.request.post(`${apiUrl}/daily-time-records/`, {
-      headers: await bearer(page),
-      data: {
-        employee_id: employee.id,
-        shift_id: shift.id,
-        login_date: `${date}T00:00:00Z`,
-        logout_date: `${date}T09:00:00Z`,
-      },
-    })
-    expect(punch.status(), `Create resolved attendance for ${date}`).toBe(201)
+    attendanceRows.push(`${employee.employee_code},${date}T00:00:00Z,${date}T09:00:00Z`)
   }
+  // Exercise the actual CSV import and review UI as the attendance source for
+  // the payroll run, rather than creating DTR records directly through the API.
+  await page.goto('/daily-time-records')
+  await page.getByTestId('import-dtr-csv-button').click()
+  await page.getByPlaceholder(/employee_code/).fill(attendanceRows.join('\n'))
+  const importing = page.waitForResponse(response =>
+    response.url().includes('/daily-time-records/import-batches/commit') && response.request().method() === 'POST',
+  )
+  await page.getByTestId('csv-import-submit-button').click()
+  const importResponse = await importing
+  expect(importResponse.status(), await importResponse.text()).toBe(200)
+  await expect(page.getByText(`${attendanceRows.length - 1} succeeded`)).toBeVisible()
+  await page.getByTestId('csv-import-close-button').click()
 
   const declaration = await page.request.put(
     `${apiUrl}/payroll/employees/${employee.id}/tax-year-declarations/2026`,

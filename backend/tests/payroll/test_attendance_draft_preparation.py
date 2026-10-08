@@ -1144,13 +1144,23 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
             ]["schemes"].items()
         },
     }
+    assert second_entry["gross_pay"] == "14600.00"
+    assert second_entry["earnings"]["fixed_recurring_allowance"] == "1600.00"
     assert second_entry["deductions"]["bir_withholding"] == "282.45"
     assert second_entry["deductions"]["statutory"] == {
-        "sss": "1300.00",
+        "sss": "1450.00",
         "philhealth": "650.00",
         "pagibig": "200.00",
     }, second_entry["input_snapshot"]["monthly_contributions"]
     schedule_snapshots = second_entry["input_snapshot"]["monthly_contributions"]["schemes"]
+    assert Decimal(schedule_snapshots["sss"]["basis"]) == Decimal(
+        schedule_snapshots["pagibig"]["basis"]
+    )
+    assert Decimal(schedule_snapshots["sss"]["basis"]) >= Decimal("28750.00")
+    assert Decimal(schedule_snapshots["sss"]["basis"]) <= Decimal("29249.99")
+    assert Decimal(schedule_snapshots["philhealth"]["basis"]) == Decimal(
+        "26000.00"
+    )
     for scheme in ("sss", "philhealth", "pagibig"):
         schedule_rows = schedule_snapshots[scheme]["schedule_rows"]
         assert schedule_rows

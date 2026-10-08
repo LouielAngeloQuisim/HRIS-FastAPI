@@ -42,7 +42,10 @@ const mockEmployee: EmployeeRecordsPublic = {
   updated_at: '2020-01-01T00:00:00Z',
 }
 
-const { saveTaxInputs } = vi.hoisted(() => ({ saveTaxInputs: vi.fn() }))
+const { saveTaxInputs, salaryQuery } = vi.hoisted(() => ({
+  saveTaxInputs: vi.fn(),
+  salaryQuery: vi.fn(() => ({ data: { data: [], count: 0 }, isPending: false, isError: false })),
+}))
 
 vi.mock('@/lib/api/employees', () => ({
   useEmployee: vi.fn(),
@@ -50,7 +53,7 @@ vi.mock('@/lib/api/employees', () => ({
 }))
 
 vi.mock('@/lib/api/payroll', () => ({
-  useEmployeeSalaries: () => ({ data: [], isPending: false, isError: false }),
+  useEmployeeSalaries: () => salaryQuery(),
   useEmployeePayGroupAssignments: () => ({ data: [], isPending: false, isError: false }),
   useEmployeeLatestPayroll: vi.fn(() => ({ data: null, isPending: false, isError: false })),
   useEmployeeTaxYearDeclaration: () => ({ data: null, isPending: false, isError: false }),
@@ -77,6 +80,7 @@ vi.mock('@tanstack/react-router', () => ({
 describe('EmployeeProfile', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    salaryQuery.mockReturnValue({ data: { data: [], count: 0 }, isPending: false, isError: false })
   })
 
   it('renders employee name, code and fields', async () => {
@@ -149,5 +153,25 @@ describe('EmployeeProfile', () => {
     await expect.element(screen.getByText(/Employer contributions \(not deducted from net pay\)/i)).toBeInTheDocument()
     await expect.element(screen.getByText('₱1,300.00')).toBeInTheDocument()
     await expect.element(screen.getByText('₱2,200.00')).toBeInTheDocument()
+  })
+
+  it('shows effective-dated salary history and chooses the active rate for the summary', async () => {
+    const { useEmployee } = await import('@/lib/api/employees')
+    vi.mocked(useEmployee).mockReturnValue({ data: mockEmployee, isPending: false, isError: false } as ReturnType<typeof useEmployee>)
+    salaryQuery.mockReturnValue({
+      data: { count: 2, data: [
+        { id: 'salary-new', employee_id: 'emp-1', effective_date: '2026-07-01', basic_rate: '30000.00', currency: 'PHP', pay_type: 'monthly', is_active: true, is_deleted: false, created_at: null, updated_at: null },
+        { id: 'salary-old', employee_id: 'emp-1', effective_date: '2025-01-01', basic_rate: '26000.00', currency: 'PHP', pay_type: 'monthly', is_active: false, is_deleted: false, created_at: null, updated_at: null },
+      ] },
+      isPending: false,
+      isError: false,
+    } as ReturnType<typeof salaryQuery>)
+
+    const screen = await render(<EmployeeProfile />)
+
+    await expect.element(screen.getByRole('list').getByText('PHP 30000.00')).toBeInTheDocument()
+    await expect.element(screen.getByText(/2026-07-01 · monthly · active/)).toBeInTheDocument()
+    await expect.element(screen.getByText(/2025-01-01 · monthly · inactive/)).toBeInTheDocument()
+    await expect.element(screen.getByRole('list').getByText('PHP 26000.00')).toBeInTheDocument()
   })
 })

@@ -119,7 +119,8 @@ function Compensation({ employeeId }: { employeeId: string }) {
   const canViewPayroll = useCan('payroll', 'view')
   if (!canViewPayroll) return null
   const salaryRows = salaries.data?.data ?? []
-  const latest = [...salaryRows].sort((a, b) => b.effective_date.localeCompare(a.effective_date))[0]
+  const sortedSalaryRows = [...salaryRows].sort((a, b) => b.effective_date.localeCompare(a.effective_date))
+  const latest = sortedSalaryRows.find((row) => row.is_active)
   return <Card>
     <CardHeader><CardTitle className='text-base'>Compensation and payroll setup</CardTitle></CardHeader>
     <CardContent className='space-y-3'>
@@ -130,6 +131,17 @@ function Compensation({ employeeId }: { employeeId: string }) {
           <Field label='Effective from' value={latest.effective_date} />
           <Field label='Non-taxable allowance' value={`${latest.currency} ${latest.non_taxable_allowance}`} />
         </dl>
+        <div>
+          <h3 className='text-sm font-medium'>Salary history</h3>
+          <ul className='space-y-1'>
+            {sortedSalaryRows.map((row) => (
+              <li key={row.id} className='flex flex-wrap justify-between gap-x-4 text-sm text-muted-foreground'>
+                <span>{row.effective_date} · {row.pay_type ?? 'monthly'}{row.is_active ? ' · active' : ' · inactive'}</span>
+                <span>{row.currency ?? 'PHP'} {row.basic_rate}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
         <div><h3 className='text-sm font-medium'>Pay group history</h3>{assignments.data?.length ? assignments.data.map(row => <p key={row.id} className='text-sm text-muted-foreground'>{row.effective_from}{row.effective_to ? ` through ${row.effective_to}` : ' onward'} · group {row.pay_group_id}</p>) : <p className='text-sm text-muted-foreground'>No pay group is assigned.</p>}</div>
         <p className='text-xs text-muted-foreground'>Contribution amounts and tax are calculated for each payroll period from applicable rules and employee history; this profile does not treat them as fixed salary deductions.</p>
         {latestPayroll.data ? <LatestPayrollBreakdown payroll={latestPayroll.data} /> : <p className='text-sm text-muted-foreground'>No finalized payroll statement is available yet.</p>}

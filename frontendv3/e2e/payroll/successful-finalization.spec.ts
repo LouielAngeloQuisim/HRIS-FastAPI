@@ -50,7 +50,7 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
     first_name: 'QA Fictional',
     last_name: unique,
     birthdate: '1990-01-01',
-    date_hired: '2026-01-01',
+    date_hired: '2025-01-01',
     email: null,
   })
 
@@ -64,7 +64,7 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
     weekend_rule: 'next_business_day',
   })
   const policy = await createPayrollResource(page, 'policies', {
-    effective_from: '2026-11-01',
+    effective_from: '2025-11-01',
     policy: {
       timezone: 'Asia/Manila',
       monthly_divisor: '22',
@@ -108,7 +108,7 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   await page.getByLabel(`${employee.employee_code} salary basis`).selectOption('monthly')
   await page.getByLabel(`${employee.employee_code} overtime rate`).fill('1.25')
   await page.getByLabel(`${employee.employee_code} fixed monthly allowance`).fill('1500.00')
-  await page.getByLabel('Bulk effective date').fill('2026-11-01')
+  await page.getByLabel('Bulk effective date').fill('2025-11-01')
   const salaryPreflight = page.waitForResponse(response =>
     response.url().includes('/payroll/salaries/bulk/preflight') && response.request().method() === 'POST',
   )
@@ -131,14 +131,14 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
     expect.arrayContaining([
       expect.objectContaining({
         basic_rate: '26000.00',
-        effective_date: '2026-11-01',
+        effective_date: '2025-11-01',
         pay_type: 'monthly',
       }),
     ]),
   )
   const groupAssignment = await page.request.post(`${apiUrl}/payroll/pay-group-assignments`, {
     headers: await bearer(page),
-    data: { employee_id: employee.id, pay_group_id: group.id, effective_from: '2026-11-01' },
+    data: { employee_id: employee.id, pay_group_id: group.id, effective_from: '2025-11-01' },
   })
   expect(groupAssignment.status(), await groupAssignment.text()).toBe(201)
 
@@ -161,7 +161,7 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   // Monthly SSS/PhilHealth/Pag-IBIG assessment requires the complete month,
   // even though this run covers only the second semi-monthly pay period.
   for (let day = 1; day <= 30; day++) {
-    const workDate = new Date(Date.UTC(2026, 10, day))
+    const workDate = new Date(Date.UTC(2025, 10, day))
     if (workDate.getUTCDay() === 0 || workDate.getUTCDay() === 6) continue
     const date = workDate.toISOString().slice(0, 10)
     attendanceRows.push(`${employee.employee_code},${date}T00:00:00Z,${date}T09:00:00Z`)
@@ -181,12 +181,12 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   await page.getByTestId('csv-import-close-button').click()
 
   const declaration = await page.request.put(
-    `${apiUrl}/payroll/employees/${employee.id}/tax-year-declarations/2026`,
+    `${apiUrl}/payroll/employees/${employee.id}/tax-year-declarations/2025`,
     {
       headers: await bearer(page),
       data: {
         tax_classification: 'ordinary',
-        opening_as_of: '2026-10-01',
+        opening_as_of: '2025-10-01',
         taxable_compensation_ytd: '0.00',
         tax_withheld_ytd: '0.00',
         previous_employer_included: false,
@@ -202,8 +202,8 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   await page.goto('/payroll')
   await page.getByTestId('payroll-pay-group-select').click()
   await page.getByRole('option', { name: new RegExp(`QA semi-monthly ${unique}`) }).click()
-  await page.getByTestId('payroll-period-from').fill('2026-11-16')
-  await page.getByTestId('payroll-period-to').fill('2026-11-30')
+  await page.getByTestId('payroll-period-from').fill('2025-11-16')
+  await page.getByTestId('payroll-period-to').fill('2025-11-30')
   const readiness = page.waitForResponse(response =>
     response.url().includes('/payroll/runs/preflight') && response.request().method() === 'GET',
   )
@@ -388,7 +388,7 @@ test('settles a finalized contribution through a later draft without changing th
   // reasoned correction. The prior November payslip remains frozen.
   const decemberRows = ['employee_code,login_date,logout_date']
   for (let day = 1; day <= 15; day++) {
-    const workDate = new Date(Date.UTC(2026, 11, day))
+    const workDate = new Date(Date.UTC(2025, 11, day))
     if (workDate.getUTCDay() === 0 || workDate.getUTCDay() === 6) continue
     const date = workDate.toISOString().slice(0, 10)
     decemberRows.push(`${fixture.employeeCode},${date}T00:00:00Z,${date}T09:00:00Z`)
@@ -408,8 +408,8 @@ test('settles a finalized contribution through a later draft without changing th
   await page.goto('/payroll')
   await page.getByTestId('payroll-pay-group-select').click()
   await page.getByRole('option', { name: new RegExp(`QA semi-monthly ${fixture.unique}`) }).click()
-  await page.getByTestId('payroll-period-from').fill('2026-12-01')
-  await page.getByTestId('payroll-period-to').fill('2026-12-15')
+  await page.getByTestId('payroll-period-from').fill('2025-12-01')
+  await page.getByTestId('payroll-period-to').fill('2025-12-15')
   const decemberReadiness = page.waitForResponse(response =>
     response.url().includes('/payroll/runs/preflight') && response.request().method() === 'GET',
   )
@@ -430,7 +430,7 @@ test('settles a finalized contribution through a later draft without changing th
   expect(decemberEntry.blockers, JSON.stringify(decemberEntry.blockers)).toEqual([])
 
   const novemberLedger = await page.request.get(
-    `${apiUrl}/payroll/contribution-ledger?employee_code=${fixture.employeeCode}&contribution_month=2026-11-01&limit=100`,
+    `${apiUrl}/payroll/contribution-ledger?employee_code=${fixture.employeeCode}&contribution_month=2025-11-01&limit=100`,
     { headers: await bearer(page) },
   )
   expect(novemberLedger.status(), await novemberLedger.text()).toBe(200)
@@ -441,7 +441,7 @@ test('settles a finalized contribution through a later draft without changing th
   expect(pagibigCollection).toBeTruthy()
 
   await page.goto('/payroll')
-  await page.getByTestId('payroll-ledger-month').fill('2026-11')
+  await page.getByTestId('payroll-ledger-month').fill('2025-11')
   await page.getByTestId('payroll-ledger-employee-code').fill(fixture.employeeCode)
   const decemberCorrectionRow = page
     .getByRole('region', { name: 'Monthly statutory contribution ledger' })
@@ -460,7 +460,7 @@ test('settles a finalized contribution through a later draft without changing th
     'QA reviewed same-year BIR adjustment workpaper',
   )
   await page.getByLabel('Reason').fill('Correct documented November over-collection')
-  await page.getByLabel('Reconciliation reference').fill('QA contribution reconciliation 2026-11')
+  await page.getByLabel('Reconciliation reference').fill('QA contribution reconciliation 2025-11')
   const correctionResponsePromise = page.waitForResponse(response =>
     response.url().includes('/payroll/contribution-ledger/corrections') && response.request().method() === 'POST',
   )
@@ -488,7 +488,7 @@ test('settles a finalized contribution through a later draft without changing th
       scheme: 'pagibig',
       employee_amount: '-10.00',
       reason: 'Correct documented November over-collection',
-      source_reference: 'QA contribution reconciliation 2026-11',
+      source_reference: 'QA contribution reconciliation 2025-11',
     }),
   ])
   const novemberReadback = await page.request.get(`${apiUrl}/payroll/runs/${fixture.runId}`, {

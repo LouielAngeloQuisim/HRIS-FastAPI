@@ -3,15 +3,18 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from sqlmodel import Session, select
 
 from app.payroll.calc import (
+    StatutoryScheduleUnavailable,
     calculate_pagibig_employee_share,
     calculate_pagibig_employer_share,
     calculate_philhealth_employee_share,
     calculate_philhealth_employer_share,
 )
 from app.payroll.models import PagIBIGBracket, PhilHealthBracket
+from app.payroll.routes import _statutory_schedule_errors
 
 
 def test_seeded_philhealth_and_pagibig_schedules_are_complete(db: Session) -> None:
@@ -55,3 +58,14 @@ def test_statutory_calculators_apply_published_floors_caps_and_rates(db: Session
     assert calculate_pagibig_employee_share(db, Decimal("1500.01"), "2024-02-01") == Decimal("30.00")
     assert calculate_pagibig_employee_share(db, Decimal("26000"), "2024-02-01") == Decimal("200.00")
     assert calculate_pagibig_employer_share(db, Decimal("26000"), "2024-02-01") == Decimal("200.00")
+
+
+def test_philhealth_schedule_must_be_reviewed_for_the_contribution_year(db: Session) -> None:
+    with pytest.raises(StatutoryScheduleUnavailable, match="calendar year 2026"):
+        calculate_philhealth_employee_share(db, Decimal("26000"), "2026-01-01")
+
+    errors = _statutory_schedule_errors(db, date(2026, 1, 1))
+    assert any(
+        "PhilHealth requires one active floor/ceiling schedule effective in 2026" in error
+        for error in errors
+    )

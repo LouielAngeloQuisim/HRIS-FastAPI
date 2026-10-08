@@ -186,7 +186,7 @@ def test_policy_confirmation_requires_once_monthly_final_period_collection(
     valid = client.post(
         f"{API}/policies",
         json={
-            "effective_from": "2100-02-01",
+            "effective_from": "2099-02-01",
             "policy": _policy("once_monthly", "last_period"),
         },
         headers=superuser_token_headers,

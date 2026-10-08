@@ -955,6 +955,8 @@ def _monthly_contribution_snapshot(
         if not rows:
             return []
         latest = rows[0].effective_date
+        if model is PhilHealthBracket and latest.year != effective_date.year:
+            return []
         snapshots: list[dict[str, Any]] = []
         for row in rows:
             if row.effective_date != latest:
@@ -1353,6 +1355,8 @@ def _latest_effective_rows(
     if not rows:
         return []
     latest_date = rows[0].effective_date
+    if model is PhilHealthBracket and latest_date.year != as_of.year:
+        return []
     return [row for row in rows if row.effective_date == latest_date]
 
 
@@ -1421,7 +1425,9 @@ def _statutory_schedule_errors(session: Session, as_of: date) -> list[str]:
             break
     philhealth_rows = _latest_effective_rows(session, PhilHealthBracket, as_of)
     if len(philhealth_rows) != 1:
-        errors.append("PhilHealth requires exactly one active floor/ceiling schedule row")
+        errors.append(
+            f"PhilHealth requires one active floor/ceiling schedule effective in {as_of.year}"
+        )
     elif (
         philhealth_rows[0].salary_min <= 0
         or philhealth_rows[0].salary_max < philhealth_rows[0].salary_min

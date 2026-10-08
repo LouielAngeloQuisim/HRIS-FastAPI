@@ -74,7 +74,7 @@ def test_monthly_contribution_snapshot_uses_each_effective_schedule(
         sss_monthly_compensation=Decimal("26000"),
         philhealth_basic_salary=Decimal("26000"),
         pagibig_monthly_salary=Decimal("26000"),
-        contribution_month=date(2026, 10, 1),
+        contribution_month=date(2025, 10, 1),
         source_urls=[
             "https://www.sss.gov.ph/pay-contribution/",
             "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
@@ -82,7 +82,7 @@ def test_monthly_contribution_snapshot_uses_each_effective_schedule(
         ],
     )
 
-    assert snapshot["month"] == "2026-10"
+    assert snapshot["month"] == "2025-10"
     assert _dec(snapshot["schemes"]["sss"]["employee"]) == Decimal("1300")
     assert _dec(snapshot["schemes"]["sss"]["employer"]) == Decimal("2630")
     assert _dec(snapshot["schemes"]["philhealth"]["employee"]) == Decimal("650")

@@ -35,7 +35,13 @@ def _get_effective_bracket(session: Session, model: type[T], as_of: date) -> T |
         .where(model.effective_date <= as_of, model.is_deleted.is_(False), model.is_active.is_(True))
         .order_by(model.effective_date.desc())
     )
-    return session.exec(stmt).first()
+    row = session.exec(stmt).first()
+    # PhilHealth's published rate tables are annual and the latest official
+    # table found here covers 2025 only. Do not silently carry that rate into a
+    # later calendar year without a newly dated, reviewed schedule row.
+    if isinstance(row, PhilHealthBracket) and row.effective_date.year != as_of.year:
+        return None
+    return row
 
 
 def _get_effective_sss_bracket(
@@ -152,7 +158,7 @@ def calculate_philhealth_employee_share(
     bracket = _get_effective_bracket(session, PhilHealthBracket, as_of)
     if not bracket:
         raise StatutoryScheduleUnavailable(
-            f"No active PhilHealth schedule is effective on {as_of.isoformat()}"
+            f"No active PhilHealth schedule is configured for calendar year {as_of.year}"
         )
     if salary < bracket.salary_min:
         basis = bracket.salary_min

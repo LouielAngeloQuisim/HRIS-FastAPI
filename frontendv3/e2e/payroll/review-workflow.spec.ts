@@ -25,7 +25,7 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
     first_name: 'QA Payroll',
     last_name: unique,
     birthdate: '1990-01-01',
-    date_hired: '2026-01-01',
+    date_hired: '2025-01-01',
     email: `qa-payroll-${unique}@example.test`,
   })
   const group = await createResource(page, 'pay-groups', {
@@ -38,7 +38,7 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
     weekend_rule: 'next_business_day',
   })
   const policy = await createResource(page, 'policies', {
-    effective_from: '2026-10-01',
+    effective_from: '2025-10-01',
     policy: {
       timezone: 'Asia/Manila',
       monthly_divisor: '22',
@@ -81,7 +81,7 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
       employee_id: employee.id,
       basic_rate: '26000.00',
       currency: 'PHP',
-      effective_date: '2026-10-01',
+      effective_date: '2025-10-01',
       pay_type: 'monthly',
       overtime_rate: '1.25',
       absent_penalty_rate: '1.00',
@@ -95,7 +95,7 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
 
   const groupAssignment = await page.request.post(`${apiUrl}/payroll/pay-group-assignments`, {
     headers: await bearer(page),
-    data: { employee_id: employee.id, pay_group_id: group.id, effective_from: '2026-10-01' },
+    data: { employee_id: employee.id, pay_group_id: group.id, effective_from: '2025-10-01' },
   })
   expect(groupAssignment.status(), 'Assign employee to isolated pay group').toBe(201)
   const shift = await createParent(page, 'shifts', {
@@ -113,7 +113,7 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
   })
   expect(shiftAssignment.status(), 'Assign weekday payroll shift').toBe(201)
   for (let day = 1; day <= 31; day++) {
-    const workDate = new Date(Date.UTC(2026, 9, day))
+    const workDate = new Date(Date.UTC(2025, 9, day))
     if (workDate.getUTCDay() === 0 || workDate.getUTCDay() === 6) continue
     const date = workDate.toISOString().slice(0, 10)
     const punch = await page.request.post(`${apiUrl}/daily-time-records/`, {
@@ -129,19 +129,19 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
   }
 
   const configuredPeriods = await page.request.get(
-    `${apiUrl}/payroll/pay-groups/${group.id}/periods?month=2026-10`,
+    `${apiUrl}/payroll/pay-groups/${group.id}/periods?month=2025-10`,
     { headers: await bearer(page) },
   )
   expect(configuredPeriods.status(), await configuredPeriods.text()).toBe(200)
   const periodRows = await configuredPeriods.json()
   expect(periodRows.map((row: { date_from: string; date_to: string }) => [row.date_from, row.date_to])).toContainEqual([
-    '2026-10-16',
-    '2026-10-31',
+    '2025-10-16',
+    '2025-10-31',
   ])
 
   const prepared = await page.request.post(`${apiUrl}/payroll/runs/prepare-attendance-draft`, {
     headers: await bearer(page),
-    data: { pay_group_id: group.id, date_from: '2026-10-16', date_to: '2026-10-31' },
+    data: { pay_group_id: group.id, date_from: '2025-10-16', date_to: '2025-10-31' },
   })
   expect(prepared.status(), `Prepare isolated payroll draft: ${await prepared.text()}`).toBe(201)
   const draft = await prepared.json()
@@ -192,7 +192,7 @@ test('blocked attendance payroll draft can be explicitly excluded with a reason'
     entry.input_snapshot.monthly_contributions,
     JSON.stringify({ blockers: entry.blockers, snapshot: entry.input_snapshot }),
   ).toBeTruthy()
-  expect(entry.input_snapshot.monthly_contributions.month).toBe('2026-10')
+  expect(entry.input_snapshot.monthly_contributions.month).toBe('2025-10')
   expect(entry.deductions.sss_employee).toBe('1300.00')
   expect(entry.deductions.philhealth_employee).toBe('650.00')
   expect(entry.deductions.pagibig_employee).toBe('200.00')

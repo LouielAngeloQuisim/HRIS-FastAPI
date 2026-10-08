@@ -524,7 +524,15 @@ export interface PayrollDeliveryStatus {
   payroll_entry_id: string
   document_version: number
   recipient_snapshot: string | null
-  status: 'scheduled' | 'sent' | 'failed' | 'uncertain' | 'blocked_email'
+  status:
+    | 'scheduled'
+    | 'preparing'
+    | 'processing'
+    | 'sending'
+    | 'sent'
+    | 'failed'
+    | 'uncertain'
+    | 'blocked_email'
   attempts: number
   next_attempt_at: string | null
   sent_at: string | null

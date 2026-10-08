@@ -92,7 +92,7 @@ def _delivery_job(db: Session) -> PayrollDeliveryOutbox:
         payroll_entry_id=entry.id,
         recipient_snapshot=employee.email,
         content_snapshot=_snapshot(),
-        status="processing",
+        status="preparing",
         attempts=1,
         claimed_until=datetime.now(timezone.utc) + timedelta(minutes=10),
     )
@@ -362,6 +362,49 @@ def test_ambiguous_smtp_failure_is_not_retried(
     assert job.last_error_code == "TimeoutError"
 
 
+def test_pdf_preparation_failure_retries_without_marking_delivery_uncertain(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_job: PayrollDeliveryOutbox,
+) -> None:
+    monkeypatch.setattr(settings, "SMTP_HOST", "mail.example.test")
+    monkeypatch.setattr(settings, "EMAILS_FROM_EMAIL", "noreply@example.test")
+    with (
+        patch(
+            "app.payroll.delivery_worker._render_email",
+            side_effect=ValueError("invalid frozen snapshot"),
+        ),
+        patch("app.payroll.delivery_worker._send_smtp_once") as send,
+    ):
+        _send_job(delivery_job.id)
+
+    db.refresh(delivery_job)
+    assert send.call_count == 0
+    assert delivery_job.status == "failed"
+    assert delivery_job.last_error_code == "pre_send_ValueError"
+    assert delivery_job.next_attempt_at is not None
+    assert delivery_job.claimed_until is None
+
+
+def test_expired_preparation_lease_is_retried_but_expired_send_is_not(
+    db: Session, delivery_job: PayrollDeliveryOutbox
+) -> None:
+    job = delivery_job
+    now = datetime.now(timezone.utc)
+    job.status = "preparing"
+    job.attempts = 1
+    job.claimed_until = now - timedelta(seconds=1)
+    db.add(job)
+    db.commit()
+
+    assert _claim_due_jobs(now=now) == []
+    db.refresh(job)
+    assert job.status == "failed"
+    assert job.claimed_until is None
+    assert job.last_error_code == "worker_lease_expired_before_send"
+    assert job.next_attempt_at is not None and job.next_attempt_at > now
+
+
 def test_due_job_is_claimed_once_and_attempt_count_is_incremented(
     db: Session, delivery_job: PayrollDeliveryOutbox
 ) -> None:
@@ -378,7 +421,7 @@ def test_due_job_is_claimed_once_and_attempt_count_is_incremented(
 
     db.refresh(job)
     assert claimed == [job.id]
-    assert job.status == "processing"
+    assert job.status == "preparing"
     assert job.attempts == 1
     assert job.claimed_until is not None and job.claimed_until > now
 
@@ -388,7 +431,7 @@ def test_expired_send_lease_becomes_uncertain_and_is_not_reclaimed(
 ) -> None:
     job = delivery_job
     now = datetime.now(timezone.utc)
-    job.status = "processing"
+    job.status = "sending"
     job.claimed_until = now - timedelta(seconds=1)
     db.add(job)
     db.commit()
@@ -402,6 +445,22 @@ def test_expired_send_lease_becomes_uncertain_and_is_not_reclaimed(
     assert job.last_error_code == "worker_lease_expired_after_send_started"
 
 
+def test_expired_legacy_processing_lease_is_uncertain_for_duplicate_safety(
+    db: Session, delivery_job: PayrollDeliveryOutbox
+) -> None:
+    job = delivery_job
+    job.status = "processing"
+    job.claimed_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.add(job)
+    db.commit()
+
+    assert _claim_due_jobs() == []
+
+    db.refresh(job)
+    assert job.status == "uncertain"
+    assert job.last_error_code == "legacy_worker_lease_expired"
+
+
 def test_worker_restart_does_not_resend_job_with_expired_send_lease(
     db: Session,
     delivery_job: PayrollDeliveryOutbox,
@@ -412,7 +471,7 @@ def test_worker_restart_does_not_resend_job_with_expired_send_lease(
     import app.payroll.delivery_worker as worker
 
     job = delivery_job
-    job.status = "processing"
+    job.status = "sending"
     job.attempts = 1
     job.claimed_until = datetime.now(timezone.utc) - timedelta(seconds=1)
     db.add(job)
@@ -460,7 +519,7 @@ def test_connection_failures_retry_within_the_bounded_attempt_limit(
     monkeypatch.setattr(settings, "SMTP_HOST", "mail.example.test")
     monkeypatch.setattr(settings, "EMAILS_FROM_EMAIL", "noreply@example.test")
     job = delivery_job
-    job.status = "processing"
+    job.status = "preparing"
     job.attempts = 1
     db.add(job)
     db.commit()
@@ -483,7 +542,7 @@ def test_connection_failures_retry_within_the_bounded_attempt_limit(
 
             assert _claim_due_jobs(now=now) == [job.id]
             db.refresh(job)
-            assert job.status == "processing"
+            assert job.status == "preparing"
             assert job.attempts == expected_attempt
 
             _send_job(job.id)

@@ -132,16 +132,36 @@ def _claim_due_jobs(*, now: datetime | None = None, limit: int = 25) -> list[uui
         expired = session.exec(
             select(PayrollDeliveryOutbox)
             .where(
-                PayrollDeliveryOutbox.status == "processing",
+                col(PayrollDeliveryOutbox.status).in_(
+                    ["processing", "preparing", "sending"]
+                ),
                 col(PayrollDeliveryOutbox.claimed_until) < current,
             )
             .with_for_update(skip_locked=True)
             .limit(limit)
         ).all()
         for job in expired:
-            job.status = "uncertain"
+            expired_status = job.status
             job.claimed_until = None
-            job.last_error_code = "worker_lease_expired_after_send_started"
+            if expired_status in {"processing", "sending"}:
+                # SMTP may have accepted DATA before the worker disappeared.
+                # "processing" is the legacy pre-deployment state and did not
+                # record the send boundary, so it must also fail closed.
+                job.status = "uncertain"
+                job.last_error_code = (
+                    "worker_lease_expired_after_send_started"
+                    if expired_status == "sending"
+                    else "legacy_worker_lease_expired"
+                )
+            else:
+                # Rendering and preparation happen before the durable sending
+                # transition, so an expired preparation lease is safe to retry.
+                job.status = "failed"
+                job.last_error_code = "worker_lease_expired_before_send"
+                job.next_attempt_at = current + timedelta(
+                    minutes=min(60, 2 ** job.attempts)
+                )
+            job.updated_at = current
             session.add(job)
         if expired:
             session.flush()
@@ -162,7 +182,7 @@ def _claim_due_jobs(*, now: datetime | None = None, limit: int = 25) -> list[uui
             .limit(limit)
         ).all()
         for job in due:
-            job.status = "processing"
+            job.status = "preparing"
             job.claimed_until = current + LEASE
             job.attempts += 1
             job.updated_at = current
@@ -236,7 +256,7 @@ def _send_job(job_id: uuid.UUID) -> None:
             select(PayrollDeliveryOutbox)
             .where(
                 PayrollDeliveryOutbox.id == job_id,
-                PayrollDeliveryOutbox.status == "processing",
+                PayrollDeliveryOutbox.status == "preparing",
             )
             .with_for_update()
         ).first()
@@ -260,23 +280,67 @@ def _send_job(job_id: uuid.UUID) -> None:
         # lock across the SMTP call.
         session.commit()
 
-    subject, body = _render_email(snapshot)
-    pdf_bytes = render_payslip_pdf(snapshot)
-    message = Message(
-        subject=subject,
-        html=body,
-        mail_from=(
-            settings.EMAILS_FROM_NAME or settings.PROJECT_NAME,
-            str(settings.EMAILS_FROM_EMAIL),
-        ),
-        attachments=[
-            {
-                "filename": "payslip.pdf",
-                "mime_type": "application/pdf",
-                "data": pdf_bytes,
-            }
-        ],
-    )
+    try:
+        subject, body = _render_email(snapshot)
+        pdf_bytes = render_payslip_pdf(snapshot)
+        message = Message(
+            subject=subject,
+            html=body,
+            mail_from=(
+                settings.EMAILS_FROM_NAME or settings.PROJECT_NAME,
+                str(settings.EMAILS_FROM_EMAIL),
+            ),
+            attachments=[
+                {
+                    "filename": "payslip.pdf",
+                    "mime_type": "application/pdf",
+                    "data": pdf_bytes,
+                }
+            ],
+        )
+    except Exception as exc:
+        # No SMTP transaction has begun, so a retry cannot duplicate a message.
+        with Session(engine) as session:
+            job = session.exec(
+                select(PayrollDeliveryOutbox)
+                .where(
+                    PayrollDeliveryOutbox.id == job_id,
+                    PayrollDeliveryOutbox.status == "preparing",
+                )
+                .with_for_update()
+            ).first()
+            if job is not None:
+                job.status = "failed"
+                job.last_error_code = f"pre_send_{type(exc).__name__}"[:64]
+                job.claimed_until = None
+                job.next_attempt_at = datetime.now(timezone.utc) + timedelta(
+                    minutes=min(60, 2**attempts)
+                )
+                job.updated_at = datetime.now(timezone.utc)
+                session.add(job)
+                session.commit()
+        logger.warning("Payslip preparation failed before SMTP for job %s", job_id)
+        return
+
+    # Persist this boundary before issuing SMTP commands. If the process dies
+    # after this commit, recovery treats the send as ambiguous and requires
+    # operator reconciliation instead of risking a duplicate payslip.
+    with Session(engine) as session:
+        job = session.exec(
+            select(PayrollDeliveryOutbox)
+            .where(
+                PayrollDeliveryOutbox.id == job_id,
+                PayrollDeliveryOutbox.status == "preparing",
+            )
+            .with_for_update()
+        ).first()
+        if job is None:
+            return
+        job.status = "sending"
+        job.claimed_until = datetime.now(timezone.utc) + LEASE
+        job.updated_at = datetime.now(timezone.utc)
+        session.add(job)
+        session.commit()
     try:
         _send_smtp_once(
             message=message,
@@ -296,10 +360,13 @@ def _send_job(job_id: uuid.UUID) -> None:
         with Session(engine) as session:
             job = session.exec(
                 select(PayrollDeliveryOutbox)
-                .where(PayrollDeliveryOutbox.id == job_id)
+                .where(
+                    PayrollDeliveryOutbox.id == job_id,
+                    PayrollDeliveryOutbox.status == "sending",
+                )
                 .with_for_update()
             ).first()
-            if job is not None and job.status == "processing":
+            if job is not None and job.status == "sending":
                 job.status = "blocked_email"
                 job.last_error_code = "smtp_recipient_rejected"
                 job.claimed_until = None
@@ -313,10 +380,13 @@ def _send_job(job_id: uuid.UUID) -> None:
         with Session(engine) as session:
             job = session.exec(
                 select(PayrollDeliveryOutbox)
-                .where(PayrollDeliveryOutbox.id == job_id)
+                .where(
+                    PayrollDeliveryOutbox.id == job_id,
+                    PayrollDeliveryOutbox.status == "sending",
+                )
                 .with_for_update()
             ).first()
-            if job is not None and job.status == "processing":
+            if job is not None and job.status == "sending":
                 job.status = "failed"
                 job.last_error_code = type(exc).__name__
                 job.claimed_until = None
@@ -333,10 +403,13 @@ def _send_job(job_id: uuid.UUID) -> None:
         with Session(engine) as session:
             job = session.exec(
                 select(PayrollDeliveryOutbox)
-                .where(PayrollDeliveryOutbox.id == job_id)
+                .where(
+                    PayrollDeliveryOutbox.id == job_id,
+                    PayrollDeliveryOutbox.status == "sending",
+                )
                 .with_for_update()
             ).first()
-            if job is not None and job.status == "processing":
+            if job is not None and job.status == "sending":
                 job.status = "uncertain"
                 job.last_error_code = type(exc).__name__[:64]
                 job.claimed_until = None
@@ -348,10 +421,13 @@ def _send_job(job_id: uuid.UUID) -> None:
     with Session(engine) as session:
         job = session.exec(
             select(PayrollDeliveryOutbox)
-            .where(PayrollDeliveryOutbox.id == job_id)
+            .where(
+                PayrollDeliveryOutbox.id == job_id,
+                PayrollDeliveryOutbox.status == "sending",
+            )
             .with_for_update()
         ).first()
-        if job is not None and job.status == "processing":
+        if job is not None and job.status == "sending":
             job.status = "sent"
             job.sent_at = datetime.now(timezone.utc)
             job.claimed_until = None

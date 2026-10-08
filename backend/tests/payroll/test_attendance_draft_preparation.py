@@ -772,7 +772,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     # Oct 5 was Monday in the former 2026 fixture but is Sunday in 2025.
     # Keep the intended absence and late punch on actual scheduled weekdays.
     absent_date = date(2025, 10, 6)
-    late_date = date(2025, 10, 7)
+    late_date = date(2025, 10, 9)
     for day in range(1, 16):
         work_date = date(2025, 10, day)
         if work_date.weekday() >= 5:

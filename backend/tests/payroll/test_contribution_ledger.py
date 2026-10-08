@@ -1,19 +1,19 @@
 """Monthly contribution collection is unique and corrections are reasoned."""
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from decimal import Decimal
 from threading import Event
 from time import sleep
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.config.settings import settings
 from app.config.database import engine
+from app.config.settings import settings
 from app.employee.models import EmployeeRecords
 from app.payroll.models import (
     PayrollContributionLedger,
@@ -97,6 +97,26 @@ def test_monthly_collection_rejects_duplicate_and_keeps_reasoned_correction(
     )
     db.add(correction)
     db.commit()
+
+    duplicate_correction = PayrollContributionLedger(
+        employee_id=employee.id,
+        payroll_entry_id=entry.id,
+        scheme="pagibig",
+        contribution_month=date(2026, 10, 1),
+        sequence=2,
+        monthly_basis=Decimal("26000.00"),
+        employee_amount=Decimal("10.00"),
+        employer_amount=Decimal("0.00"),
+        calculation_snapshot={"correction": "duplicate reversal attempt"},
+        source_references=["https://www.pagibigfund.gov.ph/"],
+        adjustment_reason="Attempt to reverse the same collection twice",
+        reverses_id=base.id,
+        created_by=actor.id,
+    )
+    db.add(duplicate_correction)
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
 
     duplicate_entry = _entry(db, employee.id, actor.id, day=16)
     duplicate = PayrollContributionLedger(

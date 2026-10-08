@@ -688,6 +688,10 @@ class PayrollContributionLedger(SQLModel, table=True):
             "sequence",
             name="uq_payroll_contribution_entry_scheme_sequence",
         ),
+        UniqueConstraint(
+            "reverses_id",
+            name="uq_payroll_contribution_single_reversal",
+        ),
         CheckConstraint(
             "scheme IN ('sss', 'philhealth', 'pagibig')",
             name="ck_payroll_contribution_scheme",

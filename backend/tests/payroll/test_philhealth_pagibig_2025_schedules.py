@@ -3,9 +3,11 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from sqlmodel import Session, select
 
 from app.payroll.calc import (
+    StatutoryScheduleUnavailable,
     calculate_pagibig_employee_share,
     calculate_pagibig_employer_share,
     calculate_philhealth_employee_share,
@@ -70,12 +72,11 @@ def test_statutory_calculators_apply_published_floors_caps_and_rates(db: Session
     assert calculate_pagibig_employer_share(db, Decimal("26000"), "2024-02-01") == Decimal("200.00")
 
 
-def test_philhealth_uses_the_explicit_verified_2026_schedule(
+def test_philhealth_does_not_carry_the_2026_schedule_into_2027(
     db: Session,
 ) -> None:
-    assert calculate_philhealth_employee_share(
-        db, Decimal("26000"), "2026-01-01"
-    ) == Decimal("650.00")
+    with pytest.raises(StatutoryScheduleUnavailable, match="calendar year 2027"):
+        calculate_philhealth_employee_share(db, Decimal("26000"), "2027-01-01")
 
-    errors = _statutory_schedule_errors(db, date(2026, 1, 1))
-    assert not any("PhilHealth" in error for error in errors)
+    errors = _statutory_schedule_errors(db, date(2027, 1, 1))
+    assert any("PhilHealth requires one active floor/ceiling schedule" in error for error in errors)

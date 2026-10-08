@@ -868,15 +868,22 @@ class TestBatchContributionCalculation:
 
     def test_calculate_contributions_without_effective_date(self, client: TestClient, superuser_token_headers,
                                                              sss_brackets, philhealth_brackets, pagibig_brackets,
-                                                             bir_brackets):
-        # Without an explicit date, the endpoint uses today's year. The test
-        # database has only the published 2025 PhilHealth schedule, so it must
-        # fail closed rather than silently carry that rate forward.
+                                                             bir_brackets, monkeypatch):
+        from datetime import datetime
+
+        import app.payroll.calc as payroll_calc
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 10, 8)
+
+        monkeypatch.setattr(payroll_calc, "datetime", FixedDateTime)
         response = client.post(f"{API}/calculate-contributions/",
                                params={"gross_pay": 15000.0, "period_type": "monthly"},
                                headers=superuser_token_headers)
-        assert response.status_code == 409, response.text
-        assert "No active PhilHealth schedule is configured" in response.text
+        assert response.status_code == 200, response.text
+        assert response.json()["contributions"]["philhealth_employee"] == 375.0
 
     def test_calculate_contributions_with_incomplete_sss_schedule_fails_closed(self, client: TestClient, superuser_token_headers,
                                                     sss_brackets, philhealth_brackets, pagibig_brackets,

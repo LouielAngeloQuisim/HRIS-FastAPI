@@ -63,8 +63,8 @@ def test_inactive_configuration_is_not_used_by_calculator(db: Session, slug: str
         # created inactive row must not override it for the same period.
         assert calculators[slug](db, Decimal('150000'), 'monthly', '2026-02-01') == Decimal('29375.05')
     elif slug == 'philhealth':
-        # A 2025 table must not be carried into 2026 without a newly reviewed
-        # schedule, and an inactive 2026 row does not satisfy that requirement.
+        # A 2025 table must not be carried into 2026 without an active row
+        # effective in that year; an inactive 2026 row does not qualify.
         with pytest.raises(StatutoryScheduleUnavailable, match='calendar year 2026'):
             calculators[slug](db, Decimal('20000'), '2026-02-01')
     else:

@@ -869,29 +869,14 @@ class TestBatchContributionCalculation:
     def test_calculate_contributions_without_effective_date(self, client: TestClient, superuser_token_headers,
                                                              sss_brackets, philhealth_brackets, pagibig_brackets,
                                                              bir_brackets):
-        # No effective_date → today → latest applicable effective schedule.
-        # SSS 2025: ₱15,000 compensation maps to ₱15,000 MSC; employee=₱750,
-        # employer regular SS=₱1,500 plus EC=₱30.
-        # PH: 15000 >= min 15000, <= max 40001 → exact → 15000*5%/2 = 375.0
-        # PI: 15000 > max 10000 → clamp → 10000*2%=200 for each share.
+        # Without an explicit date, the endpoint uses today's year. The test
+        # database has only the published 2025 PhilHealth schedule, so it must
+        # fail closed rather than silently carry that rate forward.
         response = client.post(f"{API}/calculate-contributions/",
                                params={"gross_pay": 15000.0, "period_type": "monthly"},
                                headers=superuser_token_headers)
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert set(data) == {"contributions"}
-        c = data["contributions"]
-        assert set(c) == BATCH_CONTRIBUTION_KEYS
-
-        assert c["sss_employee"] == 750.0
-        assert c["sss_employer"] == 1530.0
-        assert c["philhealth_employee"] == 375.0
-        assert c["philhealth_employer"] == 375.0
-        assert c["pagibig_employee"] == 200.0
-        assert c["pagibig_employer"] == 200.0
-        assert _dec(c["taxable_income"]) == Decimal("15000.00") - Decimal("750.00") - Decimal("375.00") - Decimal("200.00")
-        assert c["taxable_income"] == 13675.0
-        assert c["bir"] == 2897.91
+        assert response.status_code == 409, response.text
+        assert "No active PhilHealth schedule is configured" in response.text
 
     def test_calculate_contributions_with_incomplete_sss_schedule_fails_closed(self, client: TestClient, superuser_token_headers,
                                                     sss_brackets, philhealth_brackets, pagibig_brackets,

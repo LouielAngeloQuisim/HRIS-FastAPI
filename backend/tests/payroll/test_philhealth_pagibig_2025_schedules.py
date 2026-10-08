@@ -60,7 +60,9 @@ def test_statutory_calculators_apply_published_floors_caps_and_rates(db: Session
     assert calculate_pagibig_employer_share(db, Decimal("26000"), "2024-02-01") == Decimal("200.00")
 
 
-def test_philhealth_schedule_must_be_reviewed_for_the_contribution_year(db: Session) -> None:
+def test_philhealth_schedule_must_be_effective_in_the_contribution_year(
+    db: Session,
+) -> None:
     with pytest.raises(StatutoryScheduleUnavailable, match="calendar year 2026"):
         calculate_philhealth_employee_share(db, Decimal("26000"), "2026-01-01")
 

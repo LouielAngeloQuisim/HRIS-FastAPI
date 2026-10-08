@@ -750,7 +750,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         EmployeeSalary(
             employee_id=employee.id,
             basic_rate="26000.00",
-            effective_date=date(2026, 10, 1),
+            effective_date=date(2025, 10, 1),
             pay_type=PayType.MONTHLY,
             non_taxable_allowance="3100.00",
         )
@@ -759,25 +759,25 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         EmployeePayGroupAssignment(
             employee_id=employee.id,
             pay_group_id=group.id,
-            effective_from=date(2026, 10, 1),
+            effective_from=date(2025, 10, 1),
         )
     )
     db.add(
         EmployeeShiftAssignment(
             employee_id=employee.id,
             shift_id=shift.id,
-            effective_from=date(2026, 10, 1),
+            effective_from=date(2025, 10, 1),
         )
     )
-    absent_date = date(2026, 10, 5)
-    late_date = date(2026, 10, 6)
+    absent_date = date(2025, 10, 5)
+    late_date = date(2025, 10, 6)
     for day in range(1, 16):
-        work_date = date(2026, 10, day)
+        work_date = date(2025, 10, day)
         if work_date.weekday() >= 5:
             continue
         is_absent = work_date == absent_date
         is_late = work_date == late_date
-        login_at = datetime(2026, 10, day, tzinfo=timezone.utc) + timedelta(
+        login_at = datetime(2025, 10, day, tzinfo=timezone.utc) + timedelta(
             minutes=15 if is_late else 0
         )
         db.add(
@@ -803,8 +803,8 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         )
     policy = PayrollPolicyVersion(
         version=900_000 + int(uuid.uuid4().hex[:6], 16),
-        effective_from=date(2026, 10, 1),
-        effective_to=date(2026, 10, 7),
+        effective_from=date(2025, 10, 1),
+        effective_to=date(2025, 10, 7),
         policy={
             "timezone": "Asia/Manila",
             "monthly_divisor": "22",
@@ -837,8 +837,8 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     )
     policy_after_change = PayrollPolicyVersion(
         version=policy.version + 1,
-        effective_from=date(2026, 10, 8),
-        effective_to=date(2026, 10, 31),
+        effective_from=date(2025, 10, 8),
+        effective_to=date(2025, 10, 31),
         policy={**policy.policy, "overtime_rule": {"multiplier": "1.5"}},
         confirmed=True,
     )
@@ -854,7 +854,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         policy_id=leave_policy.id,
         date_start=absent_date,
         date_end=absent_date,
-        leave_year=2026,
+        leave_year=2025,
         total_days_requested=Decimal("1.00"),
         status="approved",
     )
@@ -864,8 +864,8 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
 
     payload = {
         "pay_group_id": str(group.id),
-        "date_from": "2026-10-01",
-        "date_to": "2026-10-15",
+        "date_from": "2025-10-01",
+        "date_to": "2025-10-15",
     }
     first = client.post(
         f"{API}/runs/prepare-attendance-draft",
@@ -896,7 +896,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     assert len(entry["input_snapshot"]["policy_versions"]) == 2
     assert {
         row["effective_from"] for row in entry["input_snapshot"]["policy_versions"]
-    } == {"2026-10-01", "2026-10-08"}
+    } == {"2025-10-01", "2025-10-08"}
     assert entry["input_snapshot"]["leave_policy_revisions"] == [
         {
             "id": str(leave_policy.id),
@@ -912,8 +912,8 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         f"{API}/runs/attendance-calculation-preview",
         params={
             "pay_group_id": str(group.id),
-            "date_from": "2026-10-01",
-            "date_to": "2026-10-15",
+            "date_from": "2025-10-01",
+            "date_to": "2025-10-15",
         },
         headers=superuser_token_headers,
     )
@@ -950,10 +950,10 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
 
     preview_params = {
         "pay_group_id": str(group.id),
-        "date_from": "2026-10-01",
-        "date_to": "2026-10-15",
+        "date_from": "2025-10-01",
+        "date_to": "2025-10-15",
     }
-    partial_leave_date = date(2026, 10, 7)
+    partial_leave_date = date(2025, 10, 7)
     partial_dtr = db.exec(
         select(DailyTimeRecord).where(
             DailyTimeRecord.employee_id == employee.id,
@@ -968,7 +968,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         policy_id=leave_policy.id,
         date_start=partial_leave_date,
         date_end=partial_leave_date,
-        leave_year=2026,
+        leave_year=2025,
         requested_hours=Decimal("4.00"),
         total_days_requested=Decimal("0.50"),
         status="approved",
@@ -999,7 +999,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         policy_id=leave_policy.id,
         date_start=partial_leave_date,
         date_end=partial_leave_date,
-        leave_year=2026,
+        leave_year=2025,
         requested_hours=Decimal("2.00"),
         total_days_requested=Decimal("0.25"),
         status="approved",
@@ -1132,8 +1132,8 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         )
     ).first()
     assert resolved_absence is not None
-    resolved_absence.login_date = datetime(2026, 10, 5, tzinfo=timezone.utc)
-    resolved_absence.logout_date = datetime(2026, 10, 5, tzinfo=timezone.utc) + timedelta(hours=9)
+    resolved_absence.login_date = datetime(2025, 10, 5, tzinfo=timezone.utc)
+    resolved_absence.logout_date = datetime(2025, 10, 5, tzinfo=timezone.utc) + timedelta(hours=9)
     resolved_absence.rendered_minutes = 480
     resolved_absence.is_absent = False
     resolved_absence.is_time_calculated = True
@@ -1168,15 +1168,15 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     assert rebuild_audit.extra["replacement_run_id"] == replacement["id"]
 
     for day in range(16, 32):
-        work_date = date(2026, 10, day)
+        work_date = date(2025, 10, day)
         if work_date.weekday() >= 5:
             continue
         db.add(
             DailyTimeRecord(
                 employee_id=employee.id,
                 shift_id=shift.id,
-                login_date=datetime(2026, 10, day, tzinfo=timezone.utc),
-                logout_date=datetime(2026, 10, day, tzinfo=timezone.utc) + timedelta(hours=9),
+                login_date=datetime(2025, 10, day, tzinfo=timezone.utc),
+                logout_date=datetime(2025, 10, day, tzinfo=timezone.utc) + timedelta(hours=9),
                 work_date=work_date,
                 rendered_minutes=480,
                 overtime_minutes=0,
@@ -1187,9 +1187,9 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     db.add(
         EmployeeTaxYearDeclaration(
             employee_id=employee.id,
-            tax_year=2026,
+            tax_year=2025,
             tax_classification="ordinary",
-            opening_as_of=date(2026, 9, 30),
+            opening_as_of=date(2025, 9, 30),
             taxable_compensation_ytd="0.00",
             tax_withheld_ytd="0.00",
             previous_employer_included=False,
@@ -1199,7 +1199,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     db.commit()
     second = client.post(
         f"{API}/runs/prepare-attendance-draft",
-        json={**payload, "date_from": "2026-10-16", "date_to": "2026-10-31"},
+        json={**payload, "date_from": "2025-10-16", "date_to": "2025-10-31"},
         headers=superuser_token_headers,
     )
     assert second.status_code == 201, second.text
@@ -1245,7 +1245,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     assert _payroll_entry_inputs_are_current(db, payroll_entry)
     payroll_employee = db.get(EmployeeRecords, employee.id)
     assert payroll_employee is not None
-    payroll_employee.date_separated = date(2026, 10, 20)
+    payroll_employee.date_separated = date(2025, 10, 20)
     db.add(payroll_employee)
     db.commit()
     assert not _payroll_entry_inputs_are_current(db, payroll_entry)
@@ -1458,7 +1458,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     late_assignment = EmployeePayGroupAssignment(
         employee_id=late_member.id,
         pay_group_id=payroll_entry.input_snapshot["pay_group_assignments"][0]["pay_group_id"],
-        effective_from=date(2026, 10, 1),
+        effective_from=date(2025, 10, 1),
     )
     db.add(late_assignment)
     db.commit()
@@ -1536,7 +1536,7 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
     ("period_start", "period_end", "opening_as_of", "separation_date", "employee_status", "trigger", "expected_taxable", "expected_tax_due", "expected_withholding"),
     [
         (date(2026, 12, 16), date(2026, 12, 31), date(2026, 12, 15), None, EmployeeStatus.ACTIVE, "year_end", Decimal("323000.00"), Decimal("10950.00"), Decimal("6950.00")),
-        (date(2026, 6, 1), date(2026, 6, 15), date(2026, 5, 31), date(2026, 6, 15), EmployeeStatus.RESIGNED, "termination_final_pay", Decimal("321500.00"), Decimal("10725.00"), Decimal("6725.00")),
+        (date(2025, 6, 1), date(2025, 6, 15), date(2025, 5, 31), date(2025, 6, 15), EmployeeStatus.RESIGNED, "termination_final_pay", Decimal("321500.00"), Decimal("10725.00"), Decimal("6725.00")),
     ],
 )
 def test_final_pay_period_uses_annualized_tax_and_opening_balance(
@@ -1585,22 +1585,22 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
             EmployeeSalary(
                 employee_id=employee.id,
                 basic_rate="26000.00",
-                effective_date=date(2026, 1, 1),
+                effective_date=date(period_end.year, 1, 1),
                 pay_type=PayType.MONTHLY,
             ),
             EmployeePayGroupAssignment(
                 employee_id=employee.id,
                 pay_group_id=group.id,
-                effective_from=date(2026, 1, 1),
+                effective_from=date(period_end.year, 1, 1),
             ),
             EmployeeShiftAssignment(
                 employee_id=employee.id,
                 shift_id=shift.id,
-                effective_from=date(2026, 1, 1),
+                effective_from=date(period_end.year, 1, 1),
             ),
             EmployeeTaxYearDeclaration(
                 employee_id=employee.id,
-                tax_year=2026,
+                tax_year=period_end.year,
                 tax_classification="ordinary",
                 opening_as_of=opening_as_of,
                 taxable_compensation_ytd="300000.00",
@@ -1625,7 +1625,7 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
             ),
             EmployeeTaxBenefit(
                 employee_id=employee.id,
-                tax_year=2026,
+                tax_year=period_end.year,
                 paid_on=period_start + timedelta(days=1),
                 benefit_type="thirteenth_month",
                 gross_amount="30000.00",
@@ -1782,7 +1782,7 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
     db.add(
         EmployeeTaxBenefit(
             employee_id=employee.id,
-            tax_year=2026,
+            tax_year=period_end.year,
             paid_on=period_start + timedelta(days=2),
             benefit_type="other_benefit",
             gross_amount="100.00",
@@ -2158,9 +2158,9 @@ def test_daily_and_hourly_pay_bases_are_calculated_for_nonfinal_periods(
 @pytest.mark.parametrize(
     ("year", "pay_type", "basic_rate"),
     [
-        (2029, PayType.MONTHLY, "22000.00"),
-        (2027, PayType.DAILY, "1000.00"),
-        (2028, PayType.HOURLY, "125.00"),
+        (2025, PayType.MONTHLY, "22000.00"),
+        (2025, PayType.DAILY, "1000.00"),
+        (2025, PayType.HOURLY, "125.00"),
     ],
 )
 def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
@@ -2226,7 +2226,7 @@ def test_final_semi_monthly_run_collects_one_month_of_time_based_contributions(
                 employee_id=employee.id,
                 tax_year=year,
                 tax_classification="ordinary",
-                opening_as_of=date(2025, 12, 31),
+                opening_as_of=date(year - 1, 12, 31),
                 taxable_compensation_ytd="0.00",
                 tax_withheld_ytd="0.00",
                 previous_employer_included=False,

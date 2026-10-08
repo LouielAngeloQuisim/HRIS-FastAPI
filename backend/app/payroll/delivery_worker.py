@@ -2,7 +2,8 @@
 
 An SMTP exception after a send attempt is ambiguous; those jobs move to
 ``uncertain`` and are never automatically retried. Only definite connection
-setup failures receive bounded retries. The worker logs opaque job IDs only.
+setup and pre-send preparation failures receive bounded retries. The worker
+logs opaque job IDs only.
 """
 
 from __future__ import annotations

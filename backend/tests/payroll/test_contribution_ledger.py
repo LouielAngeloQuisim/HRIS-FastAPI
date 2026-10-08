@@ -9,9 +9,11 @@ from time import sleep
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from app.audit.models import AuditLog
 from app.config.database import engine
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords, EmployeeStatus
@@ -258,6 +260,141 @@ def test_contribution_ledger_readback_is_paginated_and_only_shows_finalized_rows
     assert second_page.data[0].sequence == 1
     assert second_page.data[0].reverses_id == base.id
     assert second_page.data[0].adjustment_reason == "Correct an over-collection"
+
+
+def test_reasoned_contribution_correction_updates_later_draft_and_is_single_use(
+    db: Session,
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    actor = db.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).one()
+    employee = EmployeeRecords(
+        employee_code=f"LEDGER-CORR-{uuid.uuid4().hex[:8]}",
+        first_name="QA",
+        last_name="Correction",
+        birthdate=date(1990, 1, 1),
+    )
+    db.add(employee)
+    db.flush()
+    source_entry = _entry(db, employee.id, actor.id, day=1)
+    source_run = db.get(PayrollRun, source_entry.payroll_run_id)
+    assert source_run is not None
+    source_run.status = PayrollRunStatus.APPROVED
+    source_run.workflow_status = "finalized"
+    source = PayrollContributionLedger(
+        employee_id=employee.id,
+        payroll_entry_id=source_entry.id,
+        scheme="pagibig",
+        contribution_month=date(2026, 10, 1),
+        monthly_basis=Decimal("10000.00"),
+        employee_amount=Decimal("200.00"),
+        employer_amount=Decimal("200.00"),
+        source_references=["https://www.pagibigfund.gov.ph/"],
+        created_by=actor.id,
+    )
+    db.add(source)
+    target_run = PayrollRun(
+        cutoff_type="semi_monthly",
+        date_from=date(2026, 11, 1),
+        date_to=date(2026, 11, 15),
+        created_by=actor.id,
+    )
+    db.add(target_run)
+    db.flush()
+    target = PayrollEntry(
+        payroll_run_id=target_run.id,
+        employee_id=employee.id,
+        basic_rate=Decimal("26000.00"),
+        rate_date_from=target_run.date_from,
+        rate_date_to=target_run.date_to,
+        deductions={"pagibig_employee": "100.00", "bir_withholding": "500.00"},
+        gross_pay=Decimal("13000.00"),
+        total_deductions=Decimal("600.00"),
+        net_pay=Decimal("12400.00"),
+        taxable_income=Decimal("13000.00"),
+    )
+    db.add(target)
+    db.commit()
+    db.refresh(source)
+    db.refresh(target)
+
+    target_response = client.get(
+        f"/api/v1/payroll/contribution-ledger/{source.id}/correction-targets",
+        headers=superuser_token_headers,
+    )
+    assert target_response.status_code == 200, target_response.text
+    assert [item["entry_id"] for item in target_response.json()] == [str(target.id)]
+
+    payload = {
+        "source_ledger_id": str(source.id),
+        "target_entry_id": str(target.id),
+        "employee_amount": "-25.00",
+        "employer_amount": "-50.00",
+        "bir_withholding_delta": "2.50",
+        "tax_review_reference": "BIR reconciliation workpaper 2026-11-001",
+        "reason": "Correct documented October over-collection",
+        "source_reference": "QA reconciliation record 2026-10-004",
+    }
+    missing_tax_review = client.post(
+        "/api/v1/payroll/contribution-ledger/corrections",
+        headers=superuser_token_headers,
+        json={**payload, "tax_review_reference": ""},
+    )
+    assert missing_tax_review.status_code == 422
+    over_reversal = client.post(
+        "/api/v1/payroll/contribution-ledger/corrections",
+        headers=superuser_token_headers,
+        json={**payload, "employee_amount": "-201.00"},
+    )
+    assert over_reversal.status_code == 422
+    response = client.post(
+        "/api/v1/payroll/contribution-ledger/corrections",
+        headers=superuser_token_headers,
+        json=payload,
+    )
+    assert response.status_code == 201, response.text
+    result = response.json()
+    assert result["sequence"] == 1
+    assert result["employee_amount"] == "-25.00"
+    db.refresh(target)
+    assert target.deductions["pagibig_correction"] == "-25.00"
+    assert target.deductions["bir_withholding"] == "502.50"
+    assert target.total_deductions == Decimal("577.50")
+    assert target.net_pay == Decimal("12422.50")
+    assert target.taxable_income == Decimal("13025.00")
+    assert target.review_state == "ready"
+    assert target.input_snapshot["contribution_corrections"][0]["source_ledger_id"] == str(
+        source.id
+    )
+    audit_rows = db.exec(
+        select(AuditLog).where(
+            AuditLog.module == "payroll",
+            AuditLog.action == "contribution_correction",
+            AuditLog.user_id == actor.id,
+        )
+    ).all()
+    assert len(audit_rows) == 1
+    assert audit_rows[0].extra is not None
+    assert audit_rows[0].extra["source_ledger_id"] == str(source.id)
+
+    duplicate = client.post(
+        "/api/v1/payroll/contribution-ledger/corrections",
+        headers=superuser_token_headers,
+        json=payload,
+    )
+    assert duplicate.status_code == 409
+    no_targets = client.get(
+        f"/api/v1/payroll/contribution-ledger/{source.id}/correction-targets",
+        headers=superuser_token_headers,
+    )
+    assert no_targets.status_code == 409
+    voided = client.post(
+        f"/api/v1/payroll/runs/{target_run.id}/void",
+        headers=superuser_token_headers,
+    )
+    assert voided.status_code == 409
+    db.refresh(target)
+    assert target.net_pay == Decimal("12422.50")
 
 
 def test_final_period_stages_exactly_one_monthly_collection_per_scheme(

@@ -125,6 +125,8 @@ from app.payroll.schemas import (
     PayrollAttendanceCalculationEntry,
     PayrollAttendanceCalculationPreview,
     PayrollAttendancePrepareRequest,
+    PayrollContributionCorrectionCreate,
+    PayrollContributionCorrectionTarget,
     PayrollContributionLedgerList,
     PayrollContributionLedgerPublic,
     PayrollDeliveryAddressUpdate,
@@ -271,6 +273,321 @@ def list_payroll_contribution_ledger(
         for ledger, employee in rows
     ]
     return PayrollContributionLedgerList(data=data, count=count)
+
+
+@router.get(
+    "/contribution-ledger/{ledger_id}/correction-targets",
+    response_model=list[PayrollContributionCorrectionTarget],
+    dependencies=[Depends(require_permission("payroll", "edit"))],
+)
+def list_contribution_correction_targets(
+    *, session: SessionDep, ledger_id: uuid.UUID
+) -> list[PayrollContributionCorrectionTarget]:
+    """List bounded later drafts eligible to receive this employee's correction."""
+    source = session.get(PayrollContributionLedger, ledger_id)
+    if source is None or source.sequence != 0:
+        raise HTTPException(status_code=404, detail="Original contribution not found")
+    original_entry = session.get(PayrollEntry, source.payroll_entry_id)
+    original_run = (
+        session.get(PayrollRun, original_entry.payroll_run_id)
+        if original_entry is not None and original_entry.payroll_run_id
+        else None
+    )
+    if (
+        original_entry is None
+        or original_run is None
+        or original_run.workflow_status != "finalized"
+        or original_run.status not in {PayrollRunStatus.APPROVED, PayrollRunStatus.PAID}
+        or source.employee_id != original_entry.employee_id
+    ):
+        raise HTTPException(status_code=409, detail="Source collection is not finalized")
+    if session.exec(
+        select(PayrollContributionLedger.id).where(
+            PayrollContributionLedger.reverses_id == source.id
+        )
+    ).first() is not None:
+        raise HTTPException(status_code=409, detail="This contribution already has a correction")
+    month_end = source.contribution_month.replace(
+        day=calendar.monthrange(
+            source.contribution_month.year, source.contribution_month.month
+        )[1]
+    )
+    rows = session.exec(
+        select(PayrollEntry, PayrollRun)
+        .join(PayrollRun, col(PayrollRun.id) == col(PayrollEntry.payroll_run_id))
+        .where(
+            PayrollEntry.employee_id == source.employee_id,
+            col(PayrollEntry.is_deleted).is_(False),
+            col(PayrollEntry.review_state).in_(["blocked", "ready"]),
+            PayrollRun.workflow_status == "draft",
+            PayrollRun.status == PayrollRunStatus.DRAFT,
+            col(PayrollRun.is_deleted).is_(False),
+            PayrollRun.date_from > month_end,
+        )
+        .order_by(col(PayrollRun.date_from), col(PayrollRun.id))
+        .limit(200)
+    ).all()
+    return [
+        PayrollContributionCorrectionTarget(
+            entry_id=entry.id,
+            run_id=run.id,
+            date_from=run.date_from,
+            date_to=run.date_to,
+            review_state=entry.review_state,
+            net_pay=entry.net_pay,
+        )
+        for entry, run in rows
+    ]
+
+
+@router.post(
+    "/contribution-ledger/corrections",
+    response_model=PayrollContributionLedgerPublic,
+    status_code=201,
+    dependencies=[Depends(require_permission("payroll", "edit"))],
+)
+def create_payroll_contribution_correction(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    obj_in: PayrollContributionCorrectionCreate,
+) -> PayrollContributionLedgerPublic:
+    """Apply a linked contribution delta to a later, still-unreviewed payroll.
+
+    Finalized runs are immutable. The correction changes only the target draft's
+    deduction and net-pay preview, invalidates its input fingerprint, and must
+    be reviewed again before finalization.
+    """
+    source = session.exec(
+        select(PayrollContributionLedger)
+        .where(PayrollContributionLedger.id == obj_in.source_ledger_id)
+        .with_for_update()
+    ).first()
+    if source is None or source.sequence != 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Original finalized contribution collection was not found",
+        )
+    original_entry = session.get(PayrollEntry, source.payroll_entry_id)
+    original_run = (
+        session.get(PayrollRun, original_entry.payroll_run_id)
+        if original_entry is not None and original_entry.payroll_run_id
+        else None
+    )
+    if (
+        original_entry is None
+        or original_run is None
+        or original_run.workflow_status != "finalized"
+        or original_run.status not in {PayrollRunStatus.APPROVED, PayrollRunStatus.PAID}
+        or original_entry.employee_id != source.employee_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Contribution corrections require an original finalized payroll collection",
+        )
+
+    target = session.exec(
+        select(PayrollEntry)
+        .where(PayrollEntry.id == obj_in.target_entry_id)
+        .with_for_update()
+    ).first()
+    target_run = (
+        session.get(PayrollRun, target.payroll_run_id)
+        if target is not None and target.payroll_run_id
+        else None
+    )
+    source_month_end = source.contribution_month.replace(
+        day=calendar.monthrange(
+            source.contribution_month.year, source.contribution_month.month
+        )[1]
+    )
+    if (
+        target is None
+        or target_run is None
+        or target.employee_id != source.employee_id
+        or target_run.workflow_status != "draft"
+        or target_run.status != PayrollRunStatus.DRAFT
+        or target_run.is_deleted
+        or target.is_deleted
+        or target.review_state not in {"blocked", "ready"}
+        or target_run.date_from <= source_month_end
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Choose this employee's unreviewed draft in a later pay period",
+        )
+
+    for field, original in (
+        ("employee_amount", source.employee_amount),
+        ("employer_amount", source.employer_amount),
+    ):
+        delta = getattr(obj_in, field)
+        if not original and delta != 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{field} cannot change a zero original collection",
+            )
+        if original and (original + delta) * original < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{field} cannot reverse the original collection past zero",
+            )
+
+    if obj_in.employee_amount != 0:
+        if target_run.date_to.year != source.contribution_month.year:
+            raise HTTPException(
+                status_code=409,
+                detail="Employee contribution corrections must be settled in the same tax year; use the year-end tax correction workflow otherwise",
+            )
+        if "bir_withholding" not in target.deductions:
+            raise HTTPException(
+                status_code=409,
+                detail="The target draft has no calculated BIR withholding line for the reviewed tax correction",
+            )
+
+    prior = session.exec(
+        select(PayrollContributionLedger).where(
+            PayrollContributionLedger.reverses_id == source.id
+        )
+    ).first()
+    if prior is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This finalized contribution already has a correction; use a separate reviewed adjustment for any further correction",
+        )
+
+    deduction_key = f"{source.scheme}_correction"
+    try:
+        existing_adjustment = Decimal(str(target.deductions.get(deduction_key, "0.00")))
+        current_bir_withholding = Decimal(
+            str(target.deductions.get("bir_withholding", "0.00"))
+        )
+        total_deductions = (
+            Decimal(str(target.total_deductions))
+            + obj_in.employee_amount
+            + obj_in.bir_withholding_delta
+        )
+        gross = Decimal(str(target.gross_pay))
+        taxable_income = Decimal(str(target.taxable_income)) - obj_in.employee_amount
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=409, detail="Target payroll has invalid deduction amounts"
+        ) from exc
+    net_pay = gross - total_deductions
+    corrected_bir_withholding = current_bir_withholding + obj_in.bir_withholding_delta
+    if net_pay < 0 or corrected_bir_withholding < 0 or taxable_income < 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Correction cannot produce negative net pay, BIR withholding, or taxable compensation",
+        )
+
+    next_sequence = (
+        session.exec(
+            select(func.max(PayrollContributionLedger.sequence)).where(
+                PayrollContributionLedger.employee_id == source.employee_id,
+                PayrollContributionLedger.scheme == source.scheme,
+                PayrollContributionLedger.contribution_month == source.contribution_month,
+            )
+        ).one()
+        or 0
+    ) + 1
+    correction = PayrollContributionLedger(
+        employee_id=source.employee_id,
+        payroll_entry_id=target.id,
+        scheme=source.scheme,
+        contribution_month=source.contribution_month,
+        sequence=next_sequence,
+        monthly_basis=source.monthly_basis,
+        employee_amount=obj_in.employee_amount,
+        employer_amount=obj_in.employer_amount,
+        calculation_snapshot={
+            "source_ledger_id": str(source.id),
+            "target_payroll_entry_id": str(target.id),
+            "original_basis": str(source.monthly_basis),
+            "employee_delta": str(obj_in.employee_amount),
+            "employer_delta": str(obj_in.employer_amount),
+            "bir_withholding_delta": str(obj_in.bir_withholding_delta),
+            "tax_review_reference": obj_in.tax_review_reference,
+        },
+        source_references=[obj_in.source_reference.strip()],
+        adjustment_reason=obj_in.reason.strip(),
+        reverses_id=source.id,
+        created_by=current_user.id,
+    )
+    target.deductions = {
+        **target.deductions,
+        deduction_key: str(existing_adjustment + obj_in.employee_amount),
+        **(
+            {"bir_withholding": str(corrected_bir_withholding)}
+            if obj_in.bir_withholding_delta != 0
+            else {}
+        ),
+    }
+    target.total_deductions = total_deductions
+    target.net_pay = net_pay
+    target.taxable_income = taxable_income
+    target.input_snapshot = {
+        **target.input_snapshot,
+        "contribution_corrections": [
+            *target.input_snapshot.get("contribution_corrections", []),
+            {
+                "source_ledger_id": str(source.id),
+                "correction_id": str(correction.id),
+                "scheme": source.scheme,
+                "contribution_month": source.contribution_month.isoformat(),
+                "employee_amount": str(obj_in.employee_amount),
+                "employer_amount": str(obj_in.employer_amount),
+                "bir_withholding_delta": str(obj_in.bir_withholding_delta),
+                "tax_review_reference": obj_in.tax_review_reference,
+                "reason": obj_in.reason.strip(),
+                "source_reference": obj_in.source_reference.strip(),
+            },
+        ],
+    }
+    target.input_fingerprint = hashlib.sha256(
+        json.dumps(target.input_snapshot, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    target.updated_at = datetime.now(timezone.utc)
+    audit = AuditLog(
+        method="POST",
+        path="/api/v1/payroll/contribution-ledger/corrections",
+        status_code=201,
+        user_id=current_user.id,
+        module="payroll",
+        action="contribution_correction",
+        extra={
+            "source_ledger_id": str(source.id),
+            "target_payroll_entry_id": str(target.id),
+            "scheme": source.scheme,
+            "employee_amount": str(obj_in.employee_amount),
+            "employer_amount": str(obj_in.employer_amount),
+            "bir_withholding_delta": str(obj_in.bir_withholding_delta),
+            "tax_review_reference": obj_in.tax_review_reference,
+            "reason": obj_in.reason.strip(),
+        },
+    )
+    session.add(correction)
+    session.add(target)
+    session.add(audit)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="The contribution was already corrected or the target payroll changed; reload before retrying",
+        ) from exc
+    session.refresh(correction)
+    employee = session.get(EmployeeRecords, correction.employee_id)
+    if employee is None:
+        raise HTTPException(status_code=409, detail="Correction employee was removed")
+    return PayrollContributionLedgerPublic.model_validate(
+        correction,
+        update={
+            "employee_code": employee.employee_code,
+            "employee_name": f"{employee.first_name} {employee.last_name}".strip(),
+        },
+    )
 
 
 def _confirmed_rest_day_factors(policy: dict[str, Any]) -> tuple[Decimal, Decimal]:
@@ -5564,6 +5881,11 @@ def rebuild_attendance_payroll_draft(
             status_code=409,
             detail="A draft with reviewed or excluded employees cannot be rebuilt",
         )
+    if any(entry.input_snapshot.get("contribution_corrections") for entry in entries):
+        raise HTTPException(
+            status_code=409,
+            detail="This draft contains an immutable contribution correction; resolve it in place instead of rebuilding",
+        )
     if not any(
         entry.blockers or not _payroll_entry_inputs_are_current(session, entry)
         for entry in entries
@@ -6920,6 +7242,21 @@ async def void_payroll_run(
     run = get_existing_singleton_payroll_run_for_voiding(
         session, run_id, current_user.id
     )
+
+    has_contribution_correction = session.exec(
+        select(PayrollContributionLedger.id)
+        .join(PayrollEntry, col(PayrollEntry.id) == col(PayrollContributionLedger.payroll_entry_id))
+        .where(
+            PayrollEntry.payroll_run_id == run_id,
+            PayrollContributionLedger.sequence > 0,
+        )
+        .limit(1)
+    ).first()
+    if has_contribution_correction is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="A payroll run containing a statutory contribution correction cannot be voided",
+        )
 
     if run.status not in [PayrollRunStatus.DRAFT, PayrollRunStatus.APPROVED]:
         raise HTTPException(

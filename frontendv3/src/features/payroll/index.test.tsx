@@ -3,16 +3,25 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import PayrollPage from './index'
 
-const { canView, setup, preflight, calculation, prepare, ledger } = vi.hoisted(
-  () => ({
-    canView: vi.fn((..._args: unknown[]) => true),
-    setup: vi.fn(),
-    preflight: vi.fn(),
-    calculation: vi.fn(),
-    prepare: vi.fn(),
-    ledger: vi.fn(),
-  })
-)
+const {
+  canView,
+  setup,
+  preflight,
+  calculation,
+  prepare,
+  ledger,
+  correctionTargets,
+  createCorrection,
+} = vi.hoisted(() => ({
+  canView: vi.fn((..._args: unknown[]) => true),
+  setup: vi.fn(),
+  preflight: vi.fn(),
+  calculation: vi.fn(),
+  prepare: vi.fn(),
+  ledger: vi.fn(),
+  correctionTargets: vi.fn(),
+  createCorrection: vi.fn(),
+}))
 
 vi.mock('@/context/permissions-provider', () => ({
   useCan: (...args: unknown[]) => canView(...args),
@@ -20,6 +29,12 @@ vi.mock('@/context/permissions-provider', () => ({
 vi.mock('@/lib/api/payroll', () => ({
   usePayrollSetup: () => setup(),
   usePayrollContributionLedger: (...args: unknown[]) => ledger(...args),
+  usePayrollContributionCorrectionTargets: (...args: unknown[]) =>
+    correctionTargets(...args),
+  useCreatePayrollContributionCorrection: () => ({
+    mutateAsync: (...args: unknown[]) => createCorrection(...args),
+    isPending: false,
+  }),
   usePayrollRunPreflight: () => ({
     mutateAsync: (...args: unknown[]) => preflight(...args),
     isPending: false,
@@ -55,6 +70,12 @@ describe('Payroll readiness page', () => {
     canView.mockReturnValue(true)
     setup.mockReturnValue(baseSetup())
     ledger.mockReturnValue({ data: null, isPending: false, isError: false })
+    correctionTargets.mockReturnValue({
+      data: [],
+      isPending: false,
+      isError: false,
+    })
+    createCorrection.mockResolvedValue({})
   })
 
   it('shows the expected roster readiness page and keeps payroll execution paused', async () => {
@@ -133,6 +154,98 @@ describe('Payroll readiness page', () => {
         skip: 0,
       })
     )
+  })
+
+  it('applies a reasoned contribution correction to a later employee draft', async () => {
+    ledger.mockReturnValue({
+      data: {
+        count: 1,
+        data: [
+          {
+            id: 'ledger-original',
+            employee_id: 'employee-1',
+            employee_code: 'QA001',
+            employee_name: 'QA Employee',
+            payroll_entry_id: 'entry-original',
+            scheme: 'pagibig',
+            contribution_month: '2026-10-01',
+            sequence: 0,
+            monthly_basis: '10000.00',
+            employee_amount: '200.00',
+            employer_amount: '200.00',
+            source_references: ['https://www.pagibigfund.gov.ph/'],
+            adjustment_reason: null,
+            reverses_id: null,
+            created_at: '2026-10-31T00:00:00Z',
+          },
+        ],
+      },
+      isPending: false,
+      isError: false,
+      isFetching: false,
+    })
+    correctionTargets.mockReturnValue({
+      data: [
+        {
+          entry_id: 'entry-november',
+          run_id: 'run-november',
+          date_from: '2026-11-01',
+          date_to: '2026-11-15',
+          review_state: 'ready',
+          net_pay: '12900.00',
+        },
+      ],
+      isPending: false,
+      isError: false,
+    })
+    const screen = await renderWithClient(<PayrollPage />)
+    await userEvent.fill(screen.getByTestId('payroll-ledger-month'), '2026-10')
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Correct in later draft' })
+    )
+    await userEvent.selectOptions(
+      screen.getByLabelText('Later payroll draft'),
+      'entry-november'
+    )
+    await userEvent.fill(
+      screen.getByLabelText('Employee contribution change'),
+      '-25.00'
+    )
+    await userEvent.fill(
+      screen.getByLabelText('Employer contribution change'),
+      '-50.00'
+    )
+    await userEvent.fill(
+      screen.getByLabelText('Reviewed BIR withholding change'),
+      '2.50'
+    )
+    await userEvent.fill(
+      screen.getByLabelText(
+        'BIR tax review reference (required for employee correction)'
+      ),
+      'BIR reconciliation workpaper 2026-11-001'
+    )
+    await userEvent.fill(
+      screen.getByLabelText('Reason'),
+      'Correct over-collection'
+    )
+    await userEvent.fill(
+      screen.getByLabelText('Reconciliation reference'),
+      'QA reconciliation 2026-10-004'
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Apply to draft' })
+    )
+    expect(createCorrection).toHaveBeenCalledWith({
+      source_ledger_id: 'ledger-original',
+      target_entry_id: 'entry-november',
+      employee_amount: '-25.00',
+      employer_amount: '-50.00',
+      bir_withholding_delta: '2.50',
+      tax_review_reference: 'BIR reconciliation workpaper 2026-11-001',
+      reason: 'Correct over-collection',
+      source_reference: 'QA reconciliation 2026-10-004',
+    })
   })
 
   it('submits a selected configured period and displays named blockers', async () => {

@@ -697,6 +697,51 @@ class PayrollContributionLedgerList(SQLModel):
     count: int
 
 
+class PayrollContributionCorrectionCreate(SQLModel):
+    """Apply a reasoned contribution correction to a later draft payroll."""
+
+    source_ledger_id: uuid.UUID
+    target_entry_id: uuid.UUID
+    employee_amount: Decimal
+    employer_amount: Decimal
+    bir_withholding_delta: Decimal = Decimal("0.00")
+    tax_review_reference: str | None = Field(default=None, max_length=512)
+    reason: str = Field(min_length=5, max_length=1024)
+    source_reference: str = Field(min_length=3, max_length=512)
+
+    @model_validator(mode="after")
+    def validate_correction_amounts(self) -> "PayrollContributionCorrectionCreate":
+        if self.employee_amount == 0 and self.employer_amount == 0:
+            raise ValueError("At least one contribution correction amount is required")
+        for value in (
+            self.employee_amount,
+            self.employer_amount,
+            self.bir_withholding_delta,
+        ):
+            if value != value.quantize(Decimal("0.01")):
+                raise ValueError("Contribution corrections must use whole cents")
+        if self.employee_amount != 0 and not (self.tax_review_reference or "").strip():
+            raise ValueError(
+                "Employee contribution corrections require a reviewed BIR withholding reference"
+            )
+        if self.bir_withholding_delta != 0 and self.employee_amount == 0:
+            raise ValueError(
+                "A BIR withholding change must accompany an employee contribution correction"
+            )
+        if not self.reason.strip() or not self.source_reference.strip():
+            raise ValueError("A correction reason and source reference are required")
+        return self
+
+
+class PayrollContributionCorrectionTarget(SQLModel):
+    entry_id: uuid.UUID
+    run_id: uuid.UUID
+    date_from: date
+    date_to: date
+    review_state: Literal["blocked", "ready"]
+    net_pay: Decimal
+
+
 class PayrollDeliveryAddressUpdate(SQLModel):
     email: EmailStr
     reason: str = Field(min_length=5, max_length=1024)

@@ -339,6 +339,26 @@ export interface PayrollContributionLedgerList {
   count: number
 }
 
+export interface PayrollContributionCorrectionTarget {
+  entry_id: string
+  run_id: string
+  date_from: string
+  date_to: string
+  review_state: 'blocked' | 'ready'
+  net_pay: string
+}
+
+export interface PayrollContributionCorrectionInput {
+  source_ledger_id: string
+  target_entry_id: string
+  employee_amount: string
+  employer_amount: string
+  bir_withholding_delta: string
+  tax_review_reference: string
+  reason: string
+  source_reference: string
+}
+
 export function usePayrollContributionLedger({
   month,
   scheme,
@@ -375,6 +395,47 @@ export function usePayrollContributionLedger({
         .then((response) => response.data),
     enabled: Boolean(month),
     placeholderData: keepPreviousData,
+  })
+}
+
+export function usePayrollContributionCorrectionTargets(
+  ledgerId: string,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: ['payroll-contribution-correction-targets', ledgerId],
+    queryFn: () =>
+      api
+        .get<
+          PayrollContributionCorrectionTarget[]
+        >(`${API}/payroll/contribution-ledger/${ledgerId}/correction-targets`)
+        .then((response) => response.data),
+    enabled: Boolean(ledgerId && enabled),
+  })
+}
+
+export function useCreatePayrollContributionCorrection() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: PayrollContributionCorrectionInput) =>
+      api
+        .post<PayrollContributionLedgerRow>(
+          `${API}/payroll/contribution-ledger/corrections`,
+          payload
+        )
+        .then((response) => response.data),
+    onSuccess: async (_row, payload) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['payroll-contribution-ledger'] }),
+        qc.invalidateQueries({
+          queryKey: [
+            'payroll-contribution-correction-targets',
+            payload.source_ledger_id,
+          ],
+        }),
+        qc.invalidateQueries({ queryKey: ['payroll-runs'] }),
+      ])
+    },
   })
 }
 

@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import {
+  useCreatePayrollContributionCorrection,
   usePayrollAttendanceCalculationPreview,
+  usePayrollContributionCorrectionTargets,
   usePayrollContributionLedger,
   usePayrollRunPreflight,
   usePayrollSetup,
   usePrepareAttendancePayrollDraft,
   type PayrollAttendanceCalculationPreview,
+  type PayrollContributionLedgerRow,
   type PayrollRunPreflight,
 } from '@/lib/api/payroll'
 import { saveErrorMessage } from '@/lib/api/save-error'
@@ -23,9 +26,182 @@ import {
 
 const PAGE_SIZE = 100
 
+function ContributionCorrectionForm({
+  row,
+}: {
+  row: PayrollContributionLedgerRow
+}) {
+  const [open, setOpen] = useState(false)
+  const [targetEntryId, setTargetEntryId] = useState('')
+  const [employeeAmount, setEmployeeAmount] = useState('0.00')
+  const [employerAmount, setEmployerAmount] = useState('0.00')
+  const [birWithholdingDelta, setBirWithholdingDelta] = useState('0.00')
+  const [taxReviewReference, setTaxReviewReference] = useState('')
+  const [reason, setReason] = useState('')
+  const [sourceReference, setSourceReference] = useState('')
+  const targets = usePayrollContributionCorrectionTargets(row.id, open)
+  const correction = useCreatePayrollContributionCorrection()
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!targetEntryId) {
+      toast.error('Choose a later draft payroll for this employee.')
+      return
+    }
+    try {
+      await correction.mutateAsync({
+        source_ledger_id: row.id,
+        target_entry_id: targetEntryId,
+        employee_amount: employeeAmount,
+        employer_amount: employerAmount,
+        bir_withholding_delta: birWithholdingDelta,
+        tax_review_reference: taxReviewReference,
+        reason,
+        source_reference: sourceReference,
+      })
+      toast.success(
+        'Contribution correction added to the draft; review it again.'
+      )
+      setOpen(false)
+      setTargetEntryId('')
+      setEmployeeAmount('0.00')
+      setEmployerAmount('0.00')
+      setBirWithholdingDelta('0.00')
+      setTaxReviewReference('')
+      setReason('')
+      setSourceReference('')
+    } catch (error) {
+      toast.error(saveErrorMessage(error))
+    }
+  }
+
+  return (
+    <div className='mt-2'>
+      <Button
+        type='button'
+        size='sm'
+        variant='outline'
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? 'Close correction' : 'Correct in later draft'}
+      </Button>
+      {open && (
+        <form className='mt-2 grid min-w-64 gap-2' onSubmit={submit}>
+          <label className='grid gap-1 text-xs'>
+            Later payroll draft
+            <select
+              className='h-9 rounded-md border bg-background px-2 text-sm'
+              value={targetEntryId}
+              onChange={(event) => setTargetEntryId(event.target.value)}
+              required
+            >
+              <option value=''>Select a draft</option>
+              {(targets.data ?? []).map((target) => (
+                <option key={target.entry_id} value={target.entry_id}>
+                  {target.date_from} to {target.date_to} · {target.review_state}
+                </option>
+              ))}
+            </select>
+          </label>
+          {targets.isPending && (
+            <p role='status' className='text-xs'>
+              Loading eligible drafts…
+            </p>
+          )}
+          {targets.isError && (
+            <p role='alert' className='text-xs text-destructive'>
+              {saveErrorMessage(targets.error)}
+            </p>
+          )}
+          {targets.data?.length === 0 && (
+            <p className='text-xs text-muted-foreground'>
+              No later unreviewed payroll draft is available for this employee.
+            </p>
+          )}
+          <label className='grid gap-1 text-xs'>
+            Employee contribution change
+            <Input
+              type='number'
+              step='0.01'
+              value={employeeAmount}
+              onChange={(event) => setEmployeeAmount(event.target.value)}
+            />
+          </label>
+          <label className='grid gap-1 text-xs'>
+            Employer contribution change
+            <Input
+              type='number'
+              step='0.01'
+              value={employerAmount}
+              onChange={(event) => setEmployerAmount(event.target.value)}
+            />
+          </label>
+          <label className='grid gap-1 text-xs'>
+            Reviewed BIR withholding change
+            <Input
+              type='number'
+              step='0.01'
+              value={birWithholdingDelta}
+              onChange={(event) => setBirWithholdingDelta(event.target.value)}
+            />
+          </label>
+          <label className='grid gap-1 text-xs'>
+            BIR tax review reference (required for employee correction)
+            <Input
+              value={taxReviewReference}
+              minLength={3}
+              required={Number(employeeAmount) !== 0}
+              onChange={(event) => setTaxReviewReference(event.target.value)}
+            />
+          </label>
+          <label className='grid gap-1 text-xs'>
+            Reason
+            <Input
+              value={reason}
+              minLength={5}
+              onChange={(event) => setReason(event.target.value)}
+              required
+            />
+          </label>
+          <label className='grid gap-1 text-xs'>
+            Reconciliation reference
+            <Input
+              value={sourceReference}
+              minLength={3}
+              onChange={(event) => setSourceReference(event.target.value)}
+              required
+            />
+          </label>
+          <Button
+            type='submit'
+            size='sm'
+            disabled={
+              !targets.data?.length ||
+              !targetEntryId ||
+              correction.isPending ||
+              (Number(employeeAmount) !== 0 && !taxReviewReference.trim())
+            }
+          >
+            {correction.isPending ? 'Saving correction…' : 'Apply to draft'}
+          </Button>
+          <p className='text-xs text-muted-foreground'>
+            Enter a signed delta. Negative employee amounts return an
+            over-collection through the next payslip; positive amounts add a
+            deduction. Employee contribution changes also adjust taxable
+            compensation and require the separately reviewed BIR withholding
+            change. Finalized payroll is never changed.
+          </p>
+        </form>
+      )}
+    </div>
+  )
+}
+
 export default function PayrollPage() {
   const canView = useCan('payroll', 'view')
   const canAdd = useCan('payroll', 'add')
+  const canEdit = useCan('payroll', 'edit')
   const setup = usePayrollSetup()
   const preflightMutation = usePayrollRunPreflight()
   const calculationMutation = usePayrollAttendanceCalculationPreview()
@@ -249,17 +425,26 @@ export default function PayrollPage() {
                             Reverses {row.reverses_id}
                           </p>
                         )}
-                        {row.source_references.map((source) => (
-                          <a
-                            key={source}
-                            href={source}
-                            target='_blank'
-                            rel='noreferrer'
-                            className='block text-xs break-all underline'
-                          >
-                            Source
-                          </a>
-                        ))}
+                        {row.source_references.map((source) =>
+                          /^https?:\/\//i.test(source) ? (
+                            <a
+                              key={source}
+                              href={source}
+                              target='_blank'
+                              rel='noreferrer'
+                              className='block text-xs break-all underline'
+                            >
+                              Source
+                            </a>
+                          ) : (
+                            <p key={source} className='text-xs break-all'>
+                              Reference: {source}
+                            </p>
+                          )
+                        )}
+                        {canEdit && row.sequence === 0 && (
+                          <ContributionCorrectionForm key={row.id} row={row} />
+                        )}
                       </td>
                     </tr>
                   ))}

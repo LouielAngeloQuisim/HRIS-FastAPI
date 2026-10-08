@@ -3,6 +3,17 @@ import { apiUrl, createParent } from '../helpers/crud-journey'
 import type { Page } from '@playwright/test'
 
 const FINALIZER_PASSWORD = 'e2e-payroll-finalizer-placeholder'
+let finalizedPayrollCorrectionFixture: {
+  employeeId: string
+  employeeCode: string
+  groupId: string
+  runId: string
+  entryId: string
+  netPay: string
+  unique: string
+} | null = null
+
+test.describe.configure({ mode: 'serial' })
 
 async function bearer(page: Page) {
   const token = (await page.context().cookies()).find(cookie => cookie.name === 'hris_at')?.value
@@ -337,18 +348,128 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   const pdfBody = await payslip.body()
   expect(pdfBody.subarray(0, 5).toString()).toBe('%PDF-')
 
+  finalizedPayrollCorrectionFixture = {
+    employeeId: employee.id,
+    employeeCode: employee.employee_code,
+    groupId: group.id,
+    runId: draft.id,
+    entryId: preparedEntry.id,
+    netPay: finalizedEntry.net_pay,
+    unique,
+  }
+})
+
+test('settles a finalized contribution through a later draft without changing the frozen payslip', async ({
+  page,
+  loginAsAdmin,
+}) => {
+  const fixture = finalizedPayrollCorrectionFixture
+  expect(fixture, 'The prior payroll setup and finalization journey must pass first').toBeTruthy()
+  if (!fixture) return
+  await loginAsAdmin()
+
+  // Import December attendance and prepare the later draft used to settle a
+  // reasoned correction. The prior November payslip remains frozen.
+  const decemberRows = ['employee_code,login_date,logout_date']
+  for (let day = 1; day <= 15; day++) {
+    const workDate = new Date(Date.UTC(2026, 11, day))
+    if (workDate.getUTCDay() === 0 || workDate.getUTCDay() === 6) continue
+    const date = workDate.toISOString().slice(0, 10)
+    decemberRows.push(`${fixture.employeeCode},${date}T00:00:00Z,${date}T09:00:00Z`)
+  }
+  await page.goto('/daily-time-records')
+  await page.getByTestId('import-dtr-csv-button').click()
+  await page.getByPlaceholder(/employee_code/).fill(decemberRows.join('\n'))
+  const decemberImport = page.waitForResponse(response =>
+    response.url().includes('/daily-time-records/import-batches/commit') && response.request().method() === 'POST',
+  )
+  await page.getByTestId('csv-import-submit-button').click()
+  const decemberImportResponse = await decemberImport
+  expect(decemberImportResponse.status(), await decemberImportResponse.text()).toBe(200)
+  await expect(page.getByText(`${decemberRows.length - 1} succeeded`)).toBeVisible()
+  await page.getByTestId('csv-import-close-button').click()
+
+  await page.goto('/payroll')
+  await page.getByTestId('payroll-pay-group-select').click()
+  await page.getByRole('option', { name: new RegExp(`QA semi-monthly ${fixture.unique}`) }).click()
+  await page.getByTestId('payroll-period-from').fill('2026-12-01')
+  await page.getByTestId('payroll-period-to').fill('2026-12-15')
+  const decemberReadiness = page.waitForResponse(response =>
+    response.url().includes('/payroll/runs/preflight') && response.request().method() === 'GET',
+  )
+  await page.getByTestId('payroll-preflight-button').click()
+  expect((await decemberReadiness).status()).toBe(200)
+  await expect(page.getByText('Ready for calculation review')).toBeVisible()
+  const decemberPreparation = page.waitForResponse(response =>
+    response.url().includes('/payroll/runs/prepare-attendance-draft') && response.request().method() === 'POST',
+  )
+  await page.getByTestId('payroll-prepare-draft-button').click()
+  const decemberDraftResponse = await decemberPreparation
+  expect(decemberDraftResponse.status(), await decemberDraftResponse.text()).toBe(201)
+  const decemberDraft = await decemberDraftResponse.json()
+  const decemberEntry = decemberDraft.entries.find(
+    (entry: { employee_id: string }) => entry.employee_id === fixture.employeeId,
+  )
+  expect(decemberEntry).toBeTruthy()
+  expect(decemberEntry.blockers, JSON.stringify(decemberEntry.blockers)).toEqual([])
+
+  const novemberLedger = await page.request.get(
+    `${apiUrl}/payroll/contribution-ledger?employee_code=${fixture.employeeCode}&contribution_month=2026-11-01&limit=100`,
+    { headers: await bearer(page) },
+  )
+  expect(novemberLedger.status(), await novemberLedger.text()).toBe(200)
+  const novemberRows = (await novemberLedger.json()).data
+  const pagibigCollection = novemberRows.find(
+    (row: { scheme: string; sequence: number }) => row.scheme === 'pagibig' && row.sequence === 0,
+  )
+  expect(pagibigCollection).toBeTruthy()
+
   await page.goto('/payroll')
   await page.getByTestId('payroll-ledger-month').fill('2026-11')
-  await page.getByTestId('payroll-ledger-employee-code').fill(employee.employee_code)
-  const reconciliation = page.getByRole('region', {
-    name: 'Monthly statutory contribution ledger',
+  await page.getByTestId('payroll-ledger-employee-code').fill(fixture.employeeCode)
+  const decemberCorrectionRow = page
+    .getByRole('region', { name: 'Monthly statutory contribution ledger' })
+    .getByRole('row')
+    .filter({ hasText: 'PAGIBIG' })
+  await decemberCorrectionRow.getByRole('button', { name: 'Correct in later draft' }).click()
+  const correctionTargets = page.waitForResponse(response =>
+    response.url().includes(`/payroll/contribution-ledger/${pagibigCollection.id}/correction-targets`) && response.request().method() === 'GET',
+  )
+  expect((await correctionTargets).status()).toBe(200)
+  await page.getByLabel('Later payroll draft').selectOption(decemberEntry.id)
+  await page.getByLabel('Employee contribution change').fill('-10.00')
+  await page.getByLabel('Employer contribution change').fill('0.00')
+  await page.getByLabel('Reviewed BIR withholding change').fill('0.00')
+  await page.getByLabel('BIR tax review reference (required for employee correction)').fill(
+    'QA reviewed same-year BIR adjustment workpaper',
+  )
+  await page.getByLabel('Reason').fill('Correct documented November over-collection')
+  await page.getByLabel('Reconciliation reference').fill('QA contribution reconciliation 2026-11')
+  const correctionResponsePromise = page.waitForResponse(response =>
+    response.url().includes('/payroll/contribution-ledger/corrections') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Apply to draft' }).click()
+  const correctionResponse = await correctionResponsePromise
+  expect(correctionResponse.status(), await correctionResponse.text()).toBe(201)
+  await expect(decemberCorrectionRow.getByText('Correct documented November over-collection')).toBeVisible()
+
+  const correctedDecember = await page.request.get(`${apiUrl}/payroll/runs/${decemberDraft.id}`, {
+    headers: await bearer(page),
   })
-  await expect(
-    reconciliation.getByRole('cell', {
-      name: new RegExp(employee.employee_code),
-    })
-  ).toHaveCount(3)
-  await expect(reconciliation.getByText('SSS', { exact: true })).toBeVisible()
-  await expect(reconciliation.getByText('PHILHEALTH', { exact: true })).toBeVisible()
-  await expect(reconciliation.getByText('PAGIBIG', { exact: true })).toBeVisible()
+  expect(correctedDecember.status(), await correctedDecember.text()).toBe(200)
+  const correctedDecemberRun = await correctedDecember.json()
+  const correctedDecemberEntry = correctedDecemberRun.entries.find(
+    (entry: { id: string }) => entry.id === decemberEntry.id,
+  )
+  expect(correctedDecemberEntry.deductions.pagibig_correction).toBe('-10.00')
+  expect(correctedDecemberEntry.net_pay).toBe((Number(decemberEntry.net_pay) + 10).toFixed(2))
+  expect(correctedDecemberEntry.taxable_income).toBe((Number(decemberEntry.taxable_income) + 10).toFixed(2))
+  const novemberReadback = await page.request.get(`${apiUrl}/payroll/runs/${fixture.runId}`, {
+    headers: await bearer(page),
+  })
+  expect(novemberReadback.status(), await novemberReadback.text()).toBe(200)
+  const unchangedNovember = (await novemberReadback.json()).entries.find(
+    (entry: { id: string }) => entry.id === fixture.entryId,
+  )
+  expect(unchangedNovember.net_pay).toBe(fixture.netPay)
 })

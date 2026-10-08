@@ -4,9 +4,9 @@ Status: in progress; not release-ready. Verification was run on 2026-10-08 again
 
 ## Current continuation (2026-10-08)
 
-- PR #87 remains draft/open, unmerged and undeployed. Its latest application/E2E code was tested before the evidence-only documentation updates below. No production records or real mail were used.
-- `scripts/verify.sh` passed on application commit `d4cb959`: **987 backend tests**, **450 Vitest tests across 124 files**, Ruff, mypy, Alembic drift, TypeScript and build. ESLint reported **0 errors / 8 warnings** (report-only); MAP was in sync. Payroll E2E passed **10/10**; the Batch 1 employee/salary/tax/leave E2E file passed **6/6** after correcting its prior-benefit reconciliation setup.
-- Hosted checks passed on tested application/E2E head `b9b6c143`: backend, frontend, E2E (**70/70**), CI configuration, CodeQL, and Actions/JavaScript/Python analysis. Subsequent changes are limited to this evidence document. The first full E2E attempt on the preceding head exposed the missing test confirmation; the corrected full run passed.
+- PR #87 remains draft/open, unmerged and undeployed at `75d50b645edd369e7907f8b7b75e0c57b4a4d4f9`. The current identity update passed local and hosted validation. No production records or real mail were used.
+- `scripts/verify.sh` passed on the current candidate: **990 backend tests**, **450 Vitest tests across 124 files**, Ruff, mypy, Alembic drift, TypeScript and build. ESLint reported **0 errors / 8 warnings** (report-only); MAP was in sync. The current Batch 1 employee/salary/tax/leave browser file passed **6/6**.
+- Hosted checks passed on the current PR head: backend, frontend, CI configuration, CodeQL, and Actions/JavaScript/Python analysis; hosted E2E passed **70/70**. The first full E2E attempt on an earlier head exposed missing prior-benefit confirmation; the corrected journey and subsequent full runs passed.
 - This batch added same-day prior-benefit balance handling and corrected the browser test to confirm reconciliation when prior-employer history is included. Finalization and mail flags remain off.
 - The current working-tree candidate adds tax-year-scoped employee and previous-employer identity capture for Form 2316, with separate approval metadata, required-field/date validation, an evidence-preserving migration downgrade guard, and profile UI/API/browser regressions. It does not generate a certificate or classify compensation lines.
 - Remaining release blockers are deliberate and documented below: HR/payroll-owner review and parallel sample comparison; owner confirmation of the applicable statutory schedules and company rules; Form 2316 generation; termination-month contribution timing; unsupported meal/night de minimis and unused-leave cases; mixed-holiday and other compensation cases; and delivery-worker health/recovery acceptance. Affected entries remain blocked, and global finalization/delivery flags remain off.
@@ -79,15 +79,13 @@ Verified minimum-wage-earner declarations now use the BIR exemption for statutor
 
 ## Final verification gate
 
-Latest fully hosted verification before this tax-identity change: PR head `b9b6c143df6c05c5c7d4cebc2a1ce69759ba7ff8` (2026-10-08). The tax-identity candidate's hosted checks must be confirmed on its pushed head before the PR is considered ready.
+Latest fully hosted verification: PR head `75d50b645edd369e7907f8b7b75e0c57b4a4d4f9` (2026-10-08). The backend, frontend, CI configuration, E2E, CodeQL, and language-analysis checks all passed on this head.
 
 - Latest local `bash scripts/verify.sh` on the tax-identity candidate (2026-10-08): **RESULT: PASS (exit 0)** using disposable PostgreSQL; **990 backend tests** (871 warnings) and **450 Vitest tests across 124 files** passed, Ruff/mypy/Alembic/TypeScript/build passed, MAP was in sync, and ESLint reported 0 errors / 8 report-only warnings. The verifier removed its disposable database container on completion.
 - Latest local `bash scripts/run-e2e-qa.sh payroll` (2026-10-08): **10/10 passed** in 57.4 seconds, one worker, zero retries, including the separate-reviewer finalization flow with payslip email delivery disabled. The runner completed cleanup; no containers remained running afterward.
-- Local full E2E evidence of **70/70** on the preceding implementation head remains useful baseline evidence; the current tax-identity candidate's HRIS batch workflow passed **6/6**, including profile save/reload and API readback; payroll E2E passed **10/10** on its prior implementation head. Hosted full E2E passed **70/70** on the preceding hosted head.
-- Hosted backend CI: **930 passed, 0 failed, 0 skipped** on the verified head (859 warnings).
-- Hosted frontend CI: TypeScript and build passed; **444 Vitest tests across 123 files passed**. ESLint reported 0 errors and 8 report-only warnings.
-- Hosted Playwright E2E: **70/70 passed** on the current head. The preceding head's first run failed only because the HRIS tax-year test marked previous-employer history without confirming prior benefit reconciliation; after correcting that test input, the full hosted suite passed. The payroll acceptance journey uses the DTR CSV-import UI for attendance, reviews the prepared run and finalizes with a separate user; email delivery remains disabled.
-- Hosted CI configuration, CodeQL, and actions/JavaScript/Python analysis checks passed.
+- Hosted full E2E passed **70/70** on the current head. Locally, the tax-identity candidate's HRIS batch workflow passed **6/6**, including profile save/reload and API readback. Payroll E2E passed **10/10** on its previously verified implementation slice.
+- Hosted backend and frontend CI passed on the current head; TypeScript, build, and all required jobs are green. Hosted Playwright E2E passed **70/70**. The payroll acceptance journey uses the DTR CSV-import UI for attendance, reviews the prepared run and finalizes with a separate user; email delivery remains disabled.
+- Hosted CI configuration, CodeQL, and Actions/JavaScript/Python analysis checks passed on the current head.
 - Local focused checks passed for the changed Python files (Ruff and mypy) and changed frontend files (ESLint, TypeScript, and the interval-editor regression test: 1/1). The repository's full local gate also ran its database-backed checks against its disposable PostgreSQL container.
 - Earlier local payroll acceptance and delivery-worker evidence remains as described above; it does not establish HR policy approval, production scheduling, or delivery through the production mail provider.
 

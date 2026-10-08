@@ -164,7 +164,7 @@ test.describe('Batch 1 employee, salary and leave workflows', () => {
 
     await page.goto('/payroll')
     await expect(page.getByRole('heading', { name: 'Payroll readiness' })).toBeVisible()
-    await expect(page.getByText(/statutory deductions.*remain disabled/i)).toBeVisible()
+    await expect(page.getByText(/final approval also requires.*system approval gate/i)).toBeVisible()
     const preview = await page.request.post(`${apiUrl}/payroll/runs/preview`, {
       headers: await authHeaders(page),
       data: { cutoff_type: 'monthly', date_from: '2026-10-01', date_to: '2026-10-31', employee_ids: [employee.id] },

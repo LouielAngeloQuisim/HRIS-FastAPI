@@ -6,6 +6,7 @@ No hardcoded rates. All values come from the bracket tables in the database.
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, TypeVar
+from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, col, select
 
@@ -26,7 +27,7 @@ class StatutoryScheduleUnavailable(ValueError):
 def _effective_date(value: str | None) -> date:
     if value:
         return datetime.fromisoformat(value).date()
-    return datetime.now().date()
+    return datetime.now(ZoneInfo("Asia/Manila")).date()
 
 
 def _get_effective_bracket(session: Session, model: type[T], as_of: date) -> T | None:
@@ -36,9 +37,8 @@ def _get_effective_bracket(session: Session, model: type[T], as_of: date) -> T |
         .order_by(model.effective_date.desc())
     )
     row = session.exec(stmt).first()
-    # PhilHealth's published rate tables are annual and the latest official
-    # table found here covers 2025 only. Do not silently carry that rate into a
-    # later calendar year without a newly dated, reviewed schedule row.
+    # PhilHealth schedules are annual: require an explicitly effective row
+    # for the requested calendar year instead of silently carrying one forward.
     if isinstance(row, PhilHealthBracket) and row.effective_date.year != as_of.year:
         return None
     return row

@@ -876,7 +876,8 @@ class TestBatchContributionCalculation:
         class FixedDateTime(datetime):
             @classmethod
             def now(cls, tz=None):
-                return cls(2026, 10, 8)
+                assert getattr(tz, "key", None) == "Asia/Manila"
+                return cls(2026, 10, 8, tzinfo=tz)
 
         monkeypatch.setattr(payroll_calc, "datetime", FixedDateTime)
         response = client.post(f"{API}/calculate-contributions/",

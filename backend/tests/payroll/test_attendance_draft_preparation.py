@@ -1134,8 +1134,10 @@ def test_prepare_creates_replayable_draft_and_guards_then_finalizes(
         )
     ).first()
     assert resolved_absence is not None
-    resolved_absence.login_date = datetime(2025, 10, 5, tzinfo=timezone.utc)
-    resolved_absence.logout_date = datetime(2025, 10, 5, tzinfo=timezone.utc) + timedelta(hours=9)
+    resolved_absence.login_date = datetime(
+        absent_date.year, absent_date.month, absent_date.day, tzinfo=timezone.utc
+    )
+    resolved_absence.logout_date = resolved_absence.login_date + timedelta(hours=9)
     resolved_absence.rendered_minutes = 480
     resolved_absence.is_absent = False
     resolved_absence.is_time_calculated = True

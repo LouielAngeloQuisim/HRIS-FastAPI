@@ -58,6 +58,7 @@ from app.payroll.fact_tables import (
 from app.payroll.models import (
     CutoffType,
     EmployeePayGroupAssignment,
+    EmployeePayGroupBulkBatch,
     EmployeeSalaryBulkBatch,
     EmployeeTaxYearDeclaration,
     PayrollContributionLedger,
@@ -81,6 +82,10 @@ from app.payroll.schemas import (
     EmployeePayGroupAssignmentCreate,
     EmployeePayGroupAssignmentPublic,
     EmployeePayGroupAssignmentUpdate,
+    EmployeePayGroupBulkCommit,
+    EmployeePayGroupBulkIssue,
+    EmployeePayGroupBulkPreflight,
+    EmployeePayGroupBulkRequest,
     EmployeeSalaryBulkCommit,
     EmployeeSalaryBulkIssue,
     EmployeeSalaryBulkPreflight,
@@ -3790,6 +3795,381 @@ def list_pay_group_assignments(
         .limit(limit)
     ).all()
     return [EmployeePayGroupAssignmentPublic.model_validate(row) for row in rows]
+
+
+def _is_pay_group_period_start(group: PayrollPayGroup, effective_from: date) -> bool:
+    cadence = group.cadence.value
+    if cadence == CutoffType.DAILY.value:
+        return True
+    if cadence == CutoffType.MONTHLY.value:
+        return effective_from.day == 1
+    if cadence == CutoffType.SEMI_MONTHLY.value:
+        return effective_from.day == 1 or (
+            group.first_period_end_day is not None
+            and group.first_period_end_day < calendar.monthrange(
+                effective_from.year, effective_from.month
+            )[1]
+            and effective_from.day == group.first_period_end_day + 1
+        )
+    # Weekly groups do not yet define an effective-period calendar in the
+    # payroll period API, so a bulk change must fail closed for that cadence.
+    return False
+
+
+def _pay_group_bulk_fingerprint(request: EmployeePayGroupBulkRequest) -> str:
+    body = request.model_dump(mode="json", exclude={"batch_id"})
+    return hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _pay_group_bulk_preflight(
+    *, session: Session, request: EmployeePayGroupBulkRequest, actor_id: uuid.UUID
+) -> EmployeePayGroupBulkPreflight:
+    issues: list[EmployeePayGroupBulkIssue] = []
+    fingerprint = _pay_group_bulk_fingerprint(request)
+    batch = session.get(EmployeePayGroupBulkBatch, request.batch_id)
+    if batch is not None:
+        if batch.created_by != actor_id or batch.payload_fingerprint != fingerprint:
+            issues.append(
+                EmployeePayGroupBulkIssue(
+                    row_index=0,
+                    employee_id=request.employee_ids[0],
+                    code="batch_identity_conflict",
+                    message="This batch ID belongs to a different user or payload; reconcile it before starting another batch.",
+                )
+            )
+        else:
+            result_ids = [uuid.UUID(value) for value in batch.result_assignment_ids]
+            results = session.exec(
+                select(EmployeePayGroupAssignment).where(
+                    col(EmployeePayGroupAssignment.id).in_(result_ids)
+                )
+            ).all()
+            if len(results) != len(result_ids):
+                issues.append(
+                    EmployeePayGroupBulkIssue(
+                        row_index=0,
+                        employee_id=request.employee_ids[0],
+                        code="batch_result_unavailable",
+                        message="The saved batch result is incomplete; contact payroll support before retrying.",
+                    )
+                )
+            return EmployeePayGroupBulkPreflight(
+                batch_id=request.batch_id,
+                valid=not issues,
+                requested=len(request.employee_ids),
+                replayed=not issues,
+                issues=issues,
+            )
+
+    seen: set[uuid.UUID] = set()
+    employee_ids = sorted(set(request.employee_ids), key=str)
+    employees = session.exec(
+        select(EmployeeRecords)
+        .where(
+            col(EmployeeRecords.id).in_(employee_ids),
+            col(EmployeeRecords.is_deleted).is_(False),
+            EmployeeRecords.employee_status == "Active",
+        )
+        .order_by(col(EmployeeRecords.id))
+        .with_for_update()
+    ).all()
+    employee_by_id = {employee.id: employee for employee in employees}
+    target_group = session.get(PayrollPayGroup, request.pay_group_id)
+    if target_group is None or not target_group.is_active:
+        for index, employee_id in enumerate(request.employee_ids):
+            issues.append(
+                EmployeePayGroupBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="pay_group_unavailable",
+                    message="The selected pay group is missing or inactive.",
+                )
+            )
+        return EmployeePayGroupBulkPreflight(
+            batch_id=request.batch_id,
+            valid=False,
+            requested=len(request.employee_ids),
+            issues=issues,
+        )
+
+    assignments = session.exec(
+        select(EmployeePayGroupAssignment)
+        .where(col(EmployeePayGroupAssignment.employee_id).in_(employee_ids))
+        .order_by(
+            col(EmployeePayGroupAssignment.employee_id),
+            col(EmployeePayGroupAssignment.effective_from),
+        )
+        .with_for_update()
+    ).all()
+    by_employee: dict[uuid.UUID, list[EmployeePayGroupAssignment]] = {}
+    for assignment in assignments:
+        by_employee.setdefault(assignment.employee_id, []).append(assignment)
+
+    for index, employee_id in enumerate(request.employee_ids):
+        if employee_id in seen:
+            issues.append(
+                EmployeePayGroupBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="duplicate_employee",
+                    message="Select each employee only once in a pay-group batch.",
+                )
+            )
+            continue
+        seen.add(employee_id)
+        if employee_id not in employee_by_id:
+            issues.append(
+                EmployeePayGroupBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="employee_unavailable",
+                    message="Employee is missing, inactive, or unavailable.",
+                )
+            )
+            continue
+        employee_assignments = by_employee.get(employee_id, [])
+        if any(
+            assignment.effective_from == request.effective_from
+            for assignment in employee_assignments
+        ):
+            issues.append(
+                EmployeePayGroupBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="effective_date_conflict",
+                    message="An assignment already starts on this date; choose a later pay-period boundary or resolve the existing row.",
+                )
+            )
+            continue
+        covering = [
+            assignment
+            for assignment in employee_assignments
+            if assignment.effective_from <= request.effective_from
+            and (
+                assignment.effective_to is None
+                or assignment.effective_to >= request.effective_from
+            )
+        ]
+        if len(covering) > 1:
+            issues.append(
+                EmployeePayGroupBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="existing_assignment_overlap",
+                    message="Existing pay-group history overlaps this date; resolve it before bulk assignment.",
+                )
+            )
+            continue
+        current = covering[0] if covering else None
+        if current is not None and current.pay_group_id == target_group.id:
+            issues.append(
+                EmployeePayGroupBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="already_assigned",
+                    message="Employee is already assigned to this pay group on the selected date.",
+                )
+            )
+            continue
+        if not _is_pay_group_period_start(target_group, request.effective_from):
+            issues.append(
+                EmployeePayGroupBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="not_pay_period_boundary",
+                    message="Choose the start of a pay period in the target group; weekly group boundaries are not configured yet.",
+                )
+            )
+            continue
+        if current is not None:
+            current_group = session.get(PayrollPayGroup, current.pay_group_id)
+            if current_group is None or not _is_pay_group_period_start(
+                current_group, request.effective_from
+            ):
+                issues.append(
+                    EmployeePayGroupBulkIssue(
+                        row_index=index,
+                        employee_id=employee_id,
+                        code="not_current_period_boundary",
+                        message="The transfer date must also be a payroll-period boundary for the employee's current group.",
+                    )
+                )
+                continue
+        finalized = session.exec(
+            select(PayrollRun.id)
+            .join(PayrollEntry, col(PayrollEntry.payroll_run_id) == col(PayrollRun.id))
+            .where(
+                PayrollEntry.employee_id == employee_id,
+                col(PayrollEntry.is_deleted).is_(False),
+                PayrollRun.workflow_status == "finalized",
+                col(PayrollRun.status).in_(
+                    [PayrollRunStatus.APPROVED, PayrollRunStatus.PAID]
+                ),
+                col(PayrollRun.is_deleted).is_(False),
+                PayrollRun.date_to >= request.effective_from,
+            )
+            .limit(1)
+        ).first()
+        if finalized is not None:
+            issues.append(
+                EmployeePayGroupBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="finalized_payroll_overlap",
+                    message="A finalized payroll covers or follows this effective date; use the correction workflow instead.",
+                )
+            )
+
+    return EmployeePayGroupBulkPreflight(
+        batch_id=request.batch_id,
+        valid=not issues,
+        requested=len(request.employee_ids),
+        issues=issues,
+    )
+
+
+@router.post(
+    "/pay-group-assignments/bulk/preflight",
+    response_model=EmployeePayGroupBulkPreflight,
+    dependencies=[Depends(require_permission("payroll", "add"))],
+)
+def preflight_pay_group_bulk(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    request: EmployeePayGroupBulkRequest,
+) -> EmployeePayGroupBulkPreflight:
+    return _pay_group_bulk_preflight(
+        session=session, request=request, actor_id=current_user.id
+    )
+
+
+@router.post(
+    "/pay-group-assignments/bulk/commit",
+    response_model=EmployeePayGroupBulkCommit,
+    status_code=201,
+    dependencies=[Depends(require_permission("payroll", "add"))],
+)
+def commit_pay_group_bulk(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    request: EmployeePayGroupBulkRequest,
+) -> EmployeePayGroupBulkCommit:
+    fingerprint = _pay_group_bulk_fingerprint(request)
+    lock_key = int.from_bytes(request.batch_id.bytes[:8], "big", signed=True)
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+    existing_batch = session.get(EmployeePayGroupBulkBatch, request.batch_id)
+    if existing_batch is not None:
+        if (
+            existing_batch.created_by != current_user.id
+            or existing_batch.payload_fingerprint != fingerprint
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Pay-group batch ID belongs to another user or different data; reconcile before retrying.",
+            )
+        result_ids = [uuid.UUID(value) for value in existing_batch.result_assignment_ids]
+        rows = session.exec(
+            select(EmployeePayGroupAssignment).where(
+                col(EmployeePayGroupAssignment.id).in_(result_ids)
+            )
+        ).all()
+        if len(rows) != len(result_ids):
+            raise HTTPException(
+                status_code=409,
+                detail="The saved pay-group batch result is incomplete; contact payroll support before retrying.",
+            )
+        return EmployeePayGroupBulkCommit(
+            batch_id=request.batch_id,
+            replayed=True,
+            assignments=[EmployeePayGroupAssignmentPublic.model_validate(row) for row in rows],
+        )
+
+    preflight = _pay_group_bulk_preflight(
+        session=session, request=request, actor_id=current_user.id
+    )
+    if not preflight.valid:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Pay-group batch has conflicts; no assignments were saved.",
+                "issues": [issue.model_dump(mode="json") for issue in preflight.issues],
+            },
+        )
+    assignment_history = session.exec(
+        select(EmployeePayGroupAssignment)
+        .where(col(EmployeePayGroupAssignment.employee_id).in_(request.employee_ids))
+        .order_by(
+            col(EmployeePayGroupAssignment.employee_id),
+            col(EmployeePayGroupAssignment.effective_from),
+        )
+        .with_for_update()
+    ).all()
+    by_employee: dict[uuid.UUID, list[EmployeePayGroupAssignment]] = {}
+    for row in assignment_history:
+        by_employee.setdefault(row.employee_id, []).append(row)
+    now = datetime.now(timezone.utc)
+    new_rows: list[EmployeePayGroupAssignment] = []
+    for employee_id in request.employee_ids:
+        history = by_employee.get(employee_id, [])
+        current = next(
+            (
+                row
+                for row in history
+                if row.effective_from <= request.effective_from
+                and (row.effective_to is None or row.effective_to >= request.effective_from)
+            ),
+            None,
+        )
+        if current is not None:
+            current.effective_to = request.effective_from - timedelta(days=1)
+            current.updated_at = now
+            session.add(current)
+        next_assignment = next(
+            (row for row in history if row.effective_from > request.effective_from),
+            None,
+        )
+        new_rows.append(
+            EmployeePayGroupAssignment(
+                employee_id=employee_id,
+                pay_group_id=request.pay_group_id,
+                effective_from=request.effective_from,
+                effective_to=(
+                    next_assignment.effective_from - timedelta(days=1)
+                    if next_assignment is not None
+                    else None
+                ),
+                assigned_by=current_user.id,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    session.add_all(new_rows)
+    session.flush()
+    session.add(
+        EmployeePayGroupBulkBatch(
+            id=request.batch_id,
+            payload_fingerprint=fingerprint,
+            created_by=current_user.id,
+            result_assignment_ids=[str(row.id) for row in new_rows],
+        )
+    )
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Pay-group assignment changed while saving; reload the roster and preflight again. No partial batch was saved.",
+        ) from exc
+    return EmployeePayGroupBulkCommit(
+        batch_id=request.batch_id,
+        replayed=False,
+        assignments=[EmployeePayGroupAssignmentPublic.model_validate(row) for row in new_rows],
+    )
 
 
 @router.post(

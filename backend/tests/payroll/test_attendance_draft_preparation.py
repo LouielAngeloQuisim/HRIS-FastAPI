@@ -574,6 +574,34 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
     )
     db.add_all([employee, group, shift])
     db.flush()
+    policy = PayrollPolicyVersion(
+        version=930_000 + int(uuid.uuid4().hex[:6], 16),
+        effective_from=date(2025, 11, 1),
+        effective_to=date(2025, 11, 15),
+        policy={
+            "timezone": "Asia/Manila",
+            "monthly_divisor": "22",
+            "daily_partial_work": "pro_rated",
+            "paid_leave": False,
+            "paid_holidays": False,
+            "break_minutes": 60,
+            "grace_minutes": 0,
+            "overtime_rule": {"multiplier": "1.25"},
+            "premium_rules": {},
+            "allowance_tax_treatment": {},
+            "rounding_mode": "half_up",
+            "contribution_collection": {
+                "frequency": "once_monthly",
+                "collection_period": "last_period",
+            },
+            "statutory_sources_reviewed": [
+                "https://www.sss.gov.ph/pay-contribution/",
+                "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
+                "https://www.pagibigfund.gov.ph/",
+            ],
+        },
+        confirmed=True,
+    )
     db.add_all(
         [
             EmployeeSalary(
@@ -605,34 +633,7 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
                 source_reference=source_reference,
                 is_verified=True,
             ),
-            PayrollPolicyVersion(
-                version=930_000 + int(uuid.uuid4().hex[:6], 16),
-                effective_from=date(2025, 11, 1),
-                effective_to=date(2025, 11, 15),
-                policy={
-                    "timezone": "Asia/Manila",
-                    "monthly_divisor": "22",
-                    "daily_partial_work": "pro_rated",
-                    "paid_leave": False,
-                    "paid_holidays": False,
-                    "break_minutes": 60,
-                    "grace_minutes": 0,
-                    "overtime_rule": {"multiplier": "1.25"},
-                    "premium_rules": {},
-                    "allowance_tax_treatment": {},
-                    "rounding_mode": "half_up",
-                    "contribution_collection": {
-                        "frequency": "once_monthly",
-                        "collection_period": "last_period",
-                    },
-                    "statutory_sources_reviewed": [
-                        "https://www.sss.gov.ph/pay-contribution/",
-                        "https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf",
-                        "https://www.pagibigfund.gov.ph/",
-                    ],
-                },
-                confirmed=True,
-            ),
+            policy,
         ]
     )
     for day in range(1, 16):
@@ -654,42 +655,52 @@ def test_verified_tax_classification_uses_supported_bir_treatment(
             )
     db.commit()
 
-    response = client.post(
-        f"{API}/runs/prepare-attendance-draft",
-        json={
-            "pay_group_id": str(group.id),
-            "date_from": "2025-11-01",
-            "date_to": "2025-11-15",
-        },
-        headers=superuser_token_headers,
-    )
-    assert response.status_code == 201, response.text
-    entry = next(
-        row for row in response.json()["entries"] if row["employee_id"] == str(employee.id)
-    )
-    assert "bir_cumulative_history_unavailable" not in {
-        blocker["code"] for blocker in entry["blockers"]
-    }
-    assert "bir_cumulative_opening_unavailable" not in {
-        blocker["code"] for blocker in entry["blockers"]
-    }
-    trace = entry["input_snapshot"]["bir_calculation"]
-    if tax_classification == "ordinary":
-        assert trace["method"] == "cumulative_average_rr_11_2018"
-        # November 1–15, 2025 has 10 weekdays. Monthly proration uses the
-        # configured 22-day divisor, so current taxable pay is 35,000 * 10 / 22.
-        assert trace["cumulative_taxable_compensation"] == "195909.09"
-        assert trace["cumulative_period_count"] == 7
-        assert trace["average_period_compensation"] == "27987.01"
-        assert trace["prior_tax_withheld"] == "11000.40"
-    else:
-        assert trace["method"] == "mwe_exemption_rr_8_2018"
-        assert trace["taxable_compensation"] == "0.00"
-        assert trace["withholding"] == "0.00"
-    assert Decimal(trace["withholding"]) == Decimal(entry["deductions"]["bir_withholding"])
-    history = entry["input_snapshot"]["bir_year_to_date_history"]
-    assert history["opening_pay_period_count"] == 6
-    assert history["complete"] is True
+    try:
+        response = client.post(
+            f"{API}/runs/prepare-attendance-draft",
+            json={
+                "pay_group_id": str(group.id),
+                "date_from": "2025-11-01",
+                "date_to": "2025-11-15",
+            },
+            headers=superuser_token_headers,
+        )
+        assert response.status_code == 201, response.text
+        entry = next(
+            row
+            for row in response.json()["entries"]
+            if row["employee_id"] == str(employee.id)
+        )
+        assert "bir_cumulative_history_unavailable" not in {
+            blocker["code"] for blocker in entry["blockers"]
+        }
+        assert "bir_cumulative_opening_unavailable" not in {
+            blocker["code"] for blocker in entry["blockers"]
+        }
+        trace = entry["input_snapshot"]["bir_calculation"]
+        if tax_classification == "ordinary":
+            assert trace["method"] == "cumulative_average_rr_11_2018"
+            # November 1–15, 2025 has 10 weekdays. Monthly proration uses the
+            # configured 22-day divisor, so current taxable pay is 35,000 * 10 / 22.
+            assert trace["cumulative_taxable_compensation"] == "195909.09"
+            assert trace["cumulative_period_count"] == 7
+            assert trace["average_period_compensation"] == "27987.01"
+            assert trace["prior_tax_withheld"] == "11000.40"
+        else:
+            assert trace["method"] == "mwe_exemption_rr_8_2018"
+            assert trace["taxable_compensation"] == "0.00"
+            assert trace["withholding"] == "0.00"
+        assert Decimal(trace["withholding"]) == Decimal(
+            entry["deductions"]["bir_withholding"]
+        )
+        history = entry["input_snapshot"]["bir_year_to_date_history"]
+        assert history["opening_pay_period_count"] == 6
+        assert history["complete"] is True
+    finally:
+        # The module-scoped test database persists rows across test cases. This
+        # fixed-period policy must not contaminate the next parametrized case.
+        db.delete(policy)
+        db.commit()
 
 
 @pytest.mark.parametrize(

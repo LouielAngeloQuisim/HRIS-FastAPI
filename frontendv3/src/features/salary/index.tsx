@@ -2,10 +2,13 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useEmployees } from '@/lib/api/employees'
 import {
+  useBulkPayGroupAssignments,
   useBulkSalary,
   useEmployeeSalaries,
+  usePayGroupList,
   useSalaryRoster,
 } from '@/lib/api/payroll'
+import { saveErrorMessage } from '@/lib/api/save-error'
 import type { EmployeeSalaryPublic } from '@/lib/api/types'
 import { useCan } from '@/context/permissions-provider'
 import { Button } from '@/components/ui/button'
@@ -29,14 +32,16 @@ export default function SalaryPage() {
   const canAdd = useCan('payroll', 'add')
   const canEdit = useCan('payroll', 'edit')
 
-  const [page] = useState(1)
+  const [employeePage, setEmployeePage] = useState(1)
   const pageSize = 500
   const { data: employeesData, isPending: employeesPending } = useEmployees(
-    page,
+    employeePage,
     pageSize
   )
-  const employees = employeesData?.data ?? []
-
+  const employees = useMemo(
+    () => employeesData?.data ?? [],
+    [employeesData?.data]
+  )
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<
     string | undefined
   >(undefined)
@@ -45,6 +50,8 @@ export default function SalaryPage() {
   const [missingSalaryOnly, setMissingSalaryOnly] = useState(false)
   const salaryRoster = useSalaryRoster(missingSalaryOnly)
   const bulk = useBulkSalary()
+  const payGroups = usePayGroupList()
+  const payGroupBulk = useBulkPayGroupAssignments()
   const [bulkSelected, setBulkSelected] = useState<Record<string, boolean>>({})
   const [bulkRates, setBulkRates] = useState<
     Record<
@@ -59,6 +66,17 @@ export default function SalaryPage() {
   >({})
   const [bulkEffectiveDate, setBulkEffectiveDate] = useState('')
   const [bulkBatchId, setBulkBatchId] = useState(crypto.randomUUID())
+  const [payGroupSelected, setPayGroupSelected] = useState<
+    Record<string, (typeof employees)[number]>
+  >({})
+  const [bulkPayGroupId, setBulkPayGroupId] = useState('')
+  const [bulkPayGroupDate, setBulkPayGroupDate] = useState('')
+  const [payGroupBatchId, setPayGroupBatchId] = useState(crypto.randomUUID())
+  const [payGroupPreflight, setPayGroupPreflight] = useState<{
+    batchId: string
+    valid: boolean
+    issues: Array<{ employee_id: string; code: string; message: string }>
+  } | null>(null)
 
   const { data, isPending, isError, refetch } =
     useEmployeeSalaries(selectedEmployeeId)
@@ -92,6 +110,17 @@ export default function SalaryPage() {
   const selectedBulkEmployees = useMemo(
     () => employeeOptions.filter((emp) => bulkSelected[emp.id]),
     [employeeOptions, bulkSelected]
+  )
+  const activeEmployees = useMemo(
+    () => employees.filter((employee) => employee.employee_status === 'Active'),
+    [employees]
+  )
+  const selectedPayGroupEmployees = useMemo(
+    () =>
+      Object.values(payGroupSelected).filter(
+        (employee) => employee.employee_status === 'Active'
+      ),
+    [payGroupSelected]
   )
   const invalidBulkEmployees = selectedBulkEmployees.filter((emp) => {
     const rates = bulkRates[emp.id]
@@ -150,6 +179,53 @@ export default function SalaryPage() {
     } catch {
       toast.error(
         'Save result is uncertain or blocked. Keep this batch ID and reconcile before starting another batch.'
+      )
+    }
+  }
+
+  const payGroupRequest = () => ({
+    batch_id: payGroupBatchId,
+    pay_group_id: bulkPayGroupId,
+    effective_from: bulkPayGroupDate,
+    employee_ids: selectedPayGroupEmployees.map((employee) => employee.id),
+  })
+  const resetPayGroupBatch = () => {
+    setPayGroupBatchId(crypto.randomUUID())
+    setPayGroupPreflight(null)
+  }
+  const handlePayGroupPreflight = async () => {
+    try {
+      const result = await payGroupBulk.preflight.mutateAsync(payGroupRequest())
+      setPayGroupPreflight({
+        batchId: result.batch_id,
+        valid: result.valid,
+        issues: result.issues,
+      })
+      if (result.valid) {
+        toast.success(
+          `${result.requested} selected employees are ready to assign.`
+        )
+      } else {
+        toast.error(
+          `${result.issues.length} pay-group assignment issue(s) found.`
+        )
+      }
+    } catch (error) {
+      setPayGroupPreflight(null)
+      toast.error(saveErrorMessage(error))
+    }
+  }
+  const handlePayGroupCommit = async () => {
+    try {
+      const result = await payGroupBulk.commit.mutateAsync(payGroupRequest())
+      toast.success(
+        `${result.assignments.length} employees assigned${result.replayed ? ' (recovered saved result)' : ''}.`
+      )
+      setPayGroupSelected({})
+      resetPayGroupBatch()
+    } catch (error) {
+      toast.error(
+        `${saveErrorMessage(error)} Keep this selection and retry with the same batch ID if the result is uncertain.`
       )
     }
   }
@@ -230,6 +306,199 @@ export default function SalaryPage() {
             </SelectContent>
           </Select>
         </div>
+        {canAdd && (
+          <section
+            className='space-y-3 rounded-lg border p-4'
+            aria-label='Bulk pay-group assignment'
+          >
+            <div>
+              <h3 className='font-semibold'>Bulk pay-group assignment</h3>
+              <p className='text-sm text-muted-foreground'>
+                Choose specific active employees and one effective date. A
+                transfer closes the current assignment the day before the new
+                period starts. Monthly and twice-monthly changes must start at a
+                boundary shared by the current and target groups.
+              </p>
+            </div>
+            <div className='grid gap-3 md:grid-cols-2'>
+              <label className='grid gap-1 text-sm'>
+                Target pay group
+                <Select
+                  value={bulkPayGroupId}
+                  onValueChange={(value) => {
+                    setBulkPayGroupId(value)
+                    resetPayGroupBatch()
+                  }}
+                >
+                  <SelectTrigger data-testid='bulk-pay-group-select'>
+                    <SelectValue placeholder='Select pay group' />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(payGroups.data ?? [])
+                      .filter((group) => group.is_active)
+                      .map((group) => (
+                        <SelectItem key={group.id} value={group.id}>
+                          {group.name} · {group.cadence.replace('_', ' ')}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className='grid gap-1 text-sm'>
+                Effective from
+                <input
+                  data-testid='bulk-pay-group-effective-date'
+                  aria-label='Pay-group effective date'
+                  type='date'
+                  value={bulkPayGroupDate}
+                  onChange={(event) => {
+                    setBulkPayGroupDate(event.target.value)
+                    resetPayGroupBatch()
+                  }}
+                  className='h-9 rounded-md border bg-background px-3'
+                />
+              </label>
+            </div>
+            {payGroups.isError ? (
+              <p role='alert' className='text-sm text-destructive'>
+                Pay groups could not be loaded.
+              </p>
+            ) : null}
+            {!employeesPending && (employeesData?.count ?? 0) > pageSize ? (
+              <p className='text-sm text-amber-700'>
+                Select employees across pages; checked employees remain
+                selected.
+              </p>
+            ) : null}
+            <div className='flex items-center gap-2 text-sm'>
+              <Button
+                type='button'
+                variant='outline'
+                disabled={employeePage <= 1 || employeesPending}
+                onClick={() =>
+                  setEmployeePage((current) => Math.max(1, current - 1))
+                }
+              >
+                Previous employees
+              </Button>
+              <span>
+                Page {employeePage} of{' '}
+                {Math.max(1, Math.ceil((employeesData?.count ?? 0) / pageSize))}
+              </span>
+              <Button
+                type='button'
+                variant='outline'
+                disabled={
+                  employeesPending ||
+                  employeePage * pageSize >= (employeesData?.count ?? 0)
+                }
+                onClick={() => setEmployeePage((current) => current + 1)}
+              >
+                Next employees
+              </Button>
+            </div>
+            <div className='max-h-72 overflow-auto rounded border'>
+              {activeEmployees.map((employee) => (
+                <label
+                  key={employee.id}
+                  className='flex items-center gap-2 border-b p-2 text-sm last:border-b-0'
+                >
+                  <input
+                    aria-label={`Assign ${employee.employee_code}`}
+                    type='checkbox'
+                    checked={Boolean(payGroupSelected[employee.id])}
+                    onChange={(event) => {
+                      const checked = event.target.checked
+                      setPayGroupSelected((current) => {
+                        const next = { ...current }
+                        if (checked) next[employee.id] = employee
+                        else delete next[employee.id]
+                        return next
+                      })
+                      resetPayGroupBatch()
+                    }}
+                  />
+                  <span>
+                    {employee.employee_code} — {employee.first_name}{' '}
+                    {employee.last_name}
+                  </span>
+                </label>
+              ))}
+              {!activeEmployees.length ? (
+                <p className='p-3 text-sm text-muted-foreground'>
+                  No active employees are available.
+                </p>
+              ) : null}
+            </div>
+            <div className='flex flex-wrap items-center gap-2'>
+              <span className='text-sm text-muted-foreground'>
+                {selectedPayGroupEmployees.length} employees explicitly selected
+              </span>
+              {selectedPayGroupEmployees.length > 200 ? (
+                <span role='alert' className='text-sm text-destructive'>
+                  A batch can include at most 200 employees. Remove some
+                  selections before continuing.
+                </span>
+              ) : null}
+              <Button
+                type='button'
+                variant='outline'
+                data-testid='pay-group-bulk-preflight'
+                disabled={
+                  !selectedPayGroupEmployees.length ||
+                  selectedPayGroupEmployees.length > 200 ||
+                  !bulkPayGroupId ||
+                  !bulkPayGroupDate ||
+                  payGroupBulk.preflight.isPending ||
+                  payGroupBulk.commit.isPending
+                }
+                onClick={handlePayGroupPreflight}
+              >
+                {payGroupBulk.preflight.isPending
+                  ? 'Checking assignments…'
+                  : 'Validate selected employees'}
+              </Button>
+              <Button
+                type='button'
+                data-testid='pay-group-bulk-commit'
+                disabled={
+                  !payGroupPreflight?.valid ||
+                  payGroupPreflight.batchId !== payGroupBatchId ||
+                  payGroupBulk.commit.isPending
+                }
+                onClick={handlePayGroupCommit}
+              >
+                {payGroupBulk.commit.isPending
+                  ? 'Saving assignments…'
+                  : payGroupBulk.commit.isError
+                    ? 'Retry same batch'
+                    : 'Assign selected employees'}
+              </Button>
+            </div>
+            {payGroupPreflight?.issues.map((issue) => {
+              const employee =
+                activeEmployees.find((row) => row.id === issue.employee_id) ??
+                payGroupSelected[issue.employee_id]
+              return (
+                <p
+                  key={`${issue.employee_id}-${issue.code}`}
+                  role='alert'
+                  className='text-sm text-destructive'
+                >
+                  {employee?.employee_code ?? issue.employee_id}:{' '}
+                  {issue.message}
+                </p>
+              )
+            })}
+            {payGroupBulk.commit.isError ? (
+              <p role='status' className='text-sm text-amber-700'>
+                The result may be uncertain. Keep this selection unchanged and
+                retry with the same batch ID to recover without duplicate
+                assignments.
+              </p>
+            ) : null}
+          </section>
+        )}
         {canAdd && (
           <section
             className='space-y-3 rounded-lg border p-4'

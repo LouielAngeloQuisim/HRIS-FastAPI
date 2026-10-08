@@ -410,6 +410,22 @@ class EmployeeSalaryBulkBatch(SQLModel, table=True):
     )  # type: ignore
 
 
+class EmployeePayGroupBulkBatch(SQLModel, table=True):
+    """Idempotency record for an explicitly selected pay-group batch."""
+
+    __tablename__ = "employee_pay_group_bulk_batch"
+
+    id: uuid.UUID = Field(primary_key=True)
+    payload_fingerprint: str = Field(max_length=64)
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    result_assignment_ids: list[str] = Field(default_factory=list, sa_type=JSON)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
 class PayrollPolicyVersion(SQLModel, table=True):
     """Immutable version of company payroll calculation rules."""
 

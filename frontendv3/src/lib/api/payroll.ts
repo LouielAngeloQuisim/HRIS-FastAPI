@@ -482,6 +482,34 @@ export interface EmployeePayGroupAssignmentCreate {
   effective_to: string | null
 }
 
+export interface EmployeePayGroupBulkRequest {
+  batch_id: string
+  pay_group_id: string
+  effective_from: string
+  employee_ids: string[]
+}
+
+export interface EmployeePayGroupBulkIssue {
+  row_index: number
+  employee_id: string
+  code: string
+  message: string
+}
+
+export interface EmployeePayGroupBulkPreflight {
+  batch_id: string
+  valid: boolean
+  requested: number
+  replayed: boolean
+  issues: EmployeePayGroupBulkIssue[]
+}
+
+export interface EmployeePayGroupBulkCommit {
+  batch_id: string
+  replayed: boolean
+  assignments: EmployeePayGroupAssignment[]
+}
+
 export interface PayrollPolicyVersion {
   id: string
   version: number
@@ -733,6 +761,41 @@ export function usePayrollSetup() {
     createPolicy,
     confirmPolicy,
   }
+}
+
+export function usePayGroupList() {
+  return useQuery({
+    queryKey: ['payroll-pay-groups'],
+    queryFn: () =>
+      api.get<PayrollPayGroup[]>('/payroll/pay-groups').then((r) => r.data),
+  })
+}
+
+export function useBulkPayGroupAssignments() {
+  const qc = useQueryClient()
+  const preflight = useMutation({
+    mutationFn: (request: EmployeePayGroupBulkRequest) =>
+      api
+        .post<EmployeePayGroupBulkPreflight>(
+          '/payroll/pay-group-assignments/bulk/preflight',
+          request
+        )
+        .then((r) => r.data),
+  })
+  const commit = useMutation({
+    mutationFn: (request: EmployeePayGroupBulkRequest) =>
+      api
+        .post<EmployeePayGroupBulkCommit>(
+          '/payroll/pay-group-assignments/bulk/commit',
+          request
+        )
+        .then((r) => r.data),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['payroll-pay-group-assignments'] })
+      await qc.invalidateQueries({ queryKey: ['payroll-runs'] })
+    },
+  })
+  return { preflight, commit }
 }
 
 // -----------------------------------------------------------------------------

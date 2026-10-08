@@ -830,6 +830,34 @@ class EmployeePayGroupAssignmentUpdate(SQLModel):
     effective_to: date
 
 
+class EmployeePayGroupBulkRequest(SQLModel):
+    batch_id: uuid.UUID
+    pay_group_id: uuid.UUID
+    effective_from: date
+    employee_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
+class EmployeePayGroupBulkIssue(SQLModel):
+    row_index: int
+    employee_id: uuid.UUID
+    code: str
+    message: str
+
+
+class EmployeePayGroupBulkPreflight(SQLModel):
+    batch_id: uuid.UUID
+    valid: bool
+    requested: int
+    replayed: bool = False
+    issues: list[EmployeePayGroupBulkIssue]
+
+
+class EmployeePayGroupBulkCommit(SQLModel):
+    batch_id: uuid.UUID
+    replayed: bool
+    assignments: list[EmployeePayGroupAssignmentPublic]
+
+
 class PayrollPolicyVersionCreate(SQLModel):
     effective_from: date
     policy: dict[str, Any]

@@ -930,6 +930,21 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     db.commit()
     assert _payroll_entry_inputs_are_current(db, payroll_entry)
 
+    # Frozen attendance fields are compared directly as well as by revision and
+    # timestamp, so an out-of-band write cannot preserve a stale review.
+    attendance_revision = payroll_entry.input_snapshot["attendance_revisions"][0]
+    payroll_dtr = db.get(DailyTimeRecord, uuid.UUID(attendance_revision["id"]))
+    assert payroll_dtr is not None and payroll_dtr.rendered_minutes is not None
+    original_rendered_minutes = payroll_dtr.rendered_minutes
+    payroll_dtr.rendered_minutes += 1
+    db.add(payroll_dtr)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_dtr.rendered_minutes = original_rendered_minutes
+    db.add(payroll_dtr)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
     # A shift definition can change while the employee's assignment row stays
     # identical. It still changes scheduled hours and must invalidate review.
     shift_revision = payroll_entry.input_snapshot["shift_revisions"][0]
@@ -957,6 +972,38 @@ def test_prepare_creates_replayable_draft_and_keeps_finalization_blocked(
     assert not _payroll_entry_inputs_are_current(db, payroll_entry)
     payroll_salary.overtime_rate = original_overtime_rate
     db.add(payroll_salary)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
+    # Effective-dated assignment edits are frozen as values, not inferred only
+    # from their row IDs and updated_at timestamps.
+    shift_assignment_revision = payroll_entry.input_snapshot["shift_assignments"][0]
+    payroll_shift_assignment = db.get(
+        EmployeeShiftAssignment, uuid.UUID(shift_assignment_revision["id"])
+    )
+    assert payroll_shift_assignment is not None
+    original_shift_end = payroll_shift_assignment.effective_to
+    payroll_shift_assignment.effective_to = date(2035, 1, 1)
+    db.add(payroll_shift_assignment)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_shift_assignment.effective_to = original_shift_end
+    db.add(payroll_shift_assignment)
+    db.commit()
+    assert _payroll_entry_inputs_are_current(db, payroll_entry)
+
+    group_assignment_revision = payroll_entry.input_snapshot["pay_group_assignments"][0]
+    payroll_group_assignment = db.get(
+        EmployeePayGroupAssignment, uuid.UUID(group_assignment_revision["id"])
+    )
+    assert payroll_group_assignment is not None
+    original_group_start = payroll_group_assignment.effective_from
+    payroll_group_assignment.effective_from = original_group_start - timedelta(days=1)
+    db.add(payroll_group_assignment)
+    db.commit()
+    assert not _payroll_entry_inputs_are_current(db, payroll_entry)
+    payroll_group_assignment.effective_from = original_group_start
+    db.add(payroll_group_assignment)
     db.commit()
     assert _payroll_entry_inputs_are_current(db, payroll_entry)
 

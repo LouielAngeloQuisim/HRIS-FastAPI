@@ -1384,19 +1384,32 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
             return False
         for reference in snapshot.get("attendance_revisions", []):
             dtr = session.get(DailyTimeRecord, uuid.UUID(str(reference["id"])))
-            if (
-                dtr is None
-                or dtr.is_deleted
-                or dtr.interval_revision != reference["interval_revision"]
-            ):
+            if dtr is None or dtr.is_deleted:
                 return False
-            if (dtr.updated_at.isoformat() if dtr.updated_at else None) != reference[
-                "updated_at"
-            ]:
-                return False
-            if (
-                dtr.overtime_decided_at.isoformat() if dtr.overtime_decided_at else None
-            ) != reference.get("overtime_decided_at"):
+            current_attendance_reference = {
+                "id": str(dtr.id),
+                "interval_revision": dtr.interval_revision,
+                "updated_at": dtr.updated_at.isoformat() if dtr.updated_at else None,
+                "overtime_decided_at": dtr.overtime_decided_at.isoformat()
+                if dtr.overtime_decided_at
+                else None,
+                "work_date": dtr.work_date.isoformat() if dtr.work_date else None,
+                "shift_id": str(dtr.shift_id) if dtr.shift_id else None,
+                "login_date": dtr.login_date.isoformat() if dtr.login_date else None,
+                "logout_date": dtr.logout_date.isoformat() if dtr.logout_date else None,
+                "rendered_minutes": dtr.rendered_minutes,
+                "late_minutes": dtr.late_minutes,
+                "undertime_minutes": dtr.undertime_minutes,
+                "overtime_minutes": dtr.overtime_minutes,
+                "overtime_approved": dtr.overtime_approved,
+                "overtime_approved_minutes": dtr.overtime_approved_minutes,
+                "overtime_decision_reason": dtr.overtime_decision_reason,
+                "overtime_decided_by": str(dtr.overtime_decided_by)
+                if dtr.overtime_decided_by
+                else None,
+                "is_absent": dtr.is_absent,
+            }
+            if current_attendance_reference != reference:
                 return False
         for reference in snapshot.get("salary_versions", []):
             salary = session.get(EmployeeSalary, uuid.UUID(str(reference["id"])))
@@ -1426,11 +1439,20 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
             )
             if assignment is None or assignment.is_deleted:
                 return False
-            if (
-                assignment.updated_at.isoformat() if assignment.updated_at else None
-            ) != reference["updated_at"] or str(assignment.shift_id) != reference[
-                "shift_id"
-            ]:
+            current_shift_assignment_reference = {
+                "id": str(assignment.id),
+                "updated_at": assignment.updated_at.isoformat()
+                if assignment.updated_at
+                else None,
+                "employee_id": str(assignment.employee_id),
+                "shift_id": str(assignment.shift_id),
+                "effective_from": assignment.effective_from.isoformat(),
+                "effective_to": assignment.effective_to.isoformat()
+                if assignment.effective_to
+                else None,
+                "is_deleted": assignment.is_deleted,
+            }
+            if current_shift_assignment_reference != reference:
                 return False
         for reference in snapshot.get("pay_group_assignments", []):
             pay_group_assignment = session.get(
@@ -1438,31 +1460,51 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
             )
             if pay_group_assignment is None:
                 return False
-            if (
-                pay_group_assignment.updated_at.isoformat()
+            current_pay_group_reference = {
+                "id": str(pay_group_assignment.id),
+                "updated_at": pay_group_assignment.updated_at.isoformat()
                 if pay_group_assignment.updated_at
-                else None
-            ) != reference["updated_at"]:
-                return False
-            if str(pay_group_assignment.pay_group_id) != reference["pay_group_id"]:
+                else None,
+                "employee_id": str(pay_group_assignment.employee_id),
+                "pay_group_id": str(pay_group_assignment.pay_group_id),
+                "effective_from": pay_group_assignment.effective_from.isoformat(),
+                "effective_to": pay_group_assignment.effective_to.isoformat()
+                if pay_group_assignment.effective_to
+                else None,
+            }
+            if current_pay_group_reference != reference:
                 return False
         for reference in snapshot.get("leave_revisions", []):
             leave = session.get(LeaveRequest, uuid.UUID(str(reference["id"])))
             if leave is None or leave.is_deleted:
                 return False
-            if str(getattr(leave.status, "value", leave.status)) != reference["status"]:
-                return False
-            if (
-                leave.updated_at.isoformat() if leave.updated_at else None
-            ) != reference["updated_at"]:
+            current_leave_reference = {
+                "id": str(leave.id),
+                "updated_at": leave.updated_at.isoformat() if leave.updated_at else None,
+                "employee_id": str(leave.employee_id) if leave.employee_id else None,
+                "policy_id": str(leave.policy_id) if leave.policy_id else None,
+                "date_start": leave.date_start.isoformat(),
+                "date_end": leave.date_end.isoformat(),
+                "status": str(getattr(leave.status, "value", leave.status)),
+            }
+            if current_leave_reference != reference:
                 return False
         for reference in snapshot.get("holiday_revisions", []):
             holiday = session.get(HolidayInstance, uuid.UUID(str(reference["id"])))
             if holiday is None or holiday.is_deleted or not holiday.is_active:
                 return False
-            if (
-                holiday.updated_at.isoformat() if holiday.updated_at else None
-            ) != reference["updated_at"]:
+            current_holiday_reference = {
+                "id": str(holiday.id),
+                "updated_at": holiday.updated_at.isoformat()
+                if holiday.updated_at
+                else None,
+                "config_id": str(holiday.config_id),
+                "observed_date": holiday.observed_date.isoformat(),
+                "raw_date": holiday.raw_date.isoformat() if holiday.raw_date else None,
+                "is_active": holiday.is_active,
+                "is_deleted": holiday.is_deleted,
+            }
+            if current_holiday_reference != reference:
                 return False
     except (KeyError, TypeError, ValueError):
         return False
@@ -4209,6 +4251,21 @@ def prepare_attendance_payroll_draft(
                 "overtime_decided_at": row.overtime_decided_at.isoformat()
                 if row.overtime_decided_at
                 else None,
+                "work_date": row.work_date.isoformat() if row.work_date else None,
+                "shift_id": str(row.shift_id) if row.shift_id else None,
+                "login_date": row.login_date.isoformat() if row.login_date else None,
+                "logout_date": row.logout_date.isoformat() if row.logout_date else None,
+                "rendered_minutes": row.rendered_minutes,
+                "late_minutes": row.late_minutes,
+                "undertime_minutes": row.undertime_minutes,
+                "overtime_minutes": row.overtime_minutes,
+                "overtime_approved": row.overtime_approved,
+                "overtime_approved_minutes": row.overtime_approved_minutes,
+                "overtime_decision_reason": row.overtime_decision_reason,
+                "overtime_decided_by": str(row.overtime_decided_by)
+                if row.overtime_decided_by
+                else None,
+                "is_absent": row.is_absent,
             }
             for row in dtr_rows
         ]
@@ -4226,7 +4283,13 @@ def prepare_attendance_payroll_draft(
             {
                 "id": str(row.id),
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "employee_id": str(row.employee_id),
                 "shift_id": str(row.shift_id),
+                "effective_from": row.effective_from.isoformat(),
+                "effective_to": row.effective_to.isoformat()
+                if row.effective_to
+                else None,
+                "is_deleted": row.is_deleted,
             }
             for row in shift_rows
         ]
@@ -4263,7 +4326,12 @@ def prepare_attendance_payroll_draft(
             {
                 "id": str(row.id),
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "employee_id": str(row.employee_id),
                 "pay_group_id": str(row.pay_group_id),
+                "effective_from": row.effective_from.isoformat(),
+                "effective_to": row.effective_to.isoformat()
+                if row.effective_to
+                else None,
             }
             for row in group_rows
         ]
@@ -4279,6 +4347,10 @@ def prepare_attendance_payroll_draft(
             {
                 "id": str(row.id),
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "employee_id": str(row.employee_id) if row.employee_id else None,
+                "policy_id": str(row.policy_id) if row.policy_id else None,
+                "date_start": row.date_start.isoformat(),
+                "date_end": row.date_end.isoformat(),
                 "status": str(getattr(row.status, "value", row.status)),
             }
             for row in leave_rows
@@ -4295,6 +4367,11 @@ def prepare_attendance_payroll_draft(
             {
                 "id": str(row.id),
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "config_id": str(row.config_id),
+                "observed_date": row.observed_date.isoformat(),
+                "raw_date": row.raw_date.isoformat() if row.raw_date else None,
+                "is_active": row.is_active,
+                "is_deleted": row.is_deleted,
             }
             for row in holiday_rows
         ]

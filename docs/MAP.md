@@ -1,6 +1,6 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-09
-Source commit: fdc1f151376033edfe4964b94c24afbf2ab5ac20
+Source commit: dedc92f07230e32e03e075108d65bcd9f6e5fc17
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.

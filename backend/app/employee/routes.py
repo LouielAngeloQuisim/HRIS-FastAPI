@@ -36,6 +36,7 @@ from app.employee.services import (
     update_obj,
     upsert_additional_records,
 )
+from app.payroll.roster_lock import lock_payroll_roster
 from app.rbac.dependencies import require_permission
 from app.rbac.models import PermissionAction
 from app.rbac.services import user_has_permission
@@ -126,6 +127,8 @@ def _make_crud_router(
         # as a type alias (variables-vs-type-aliases) — genuinely unavoidable.
         obj_in: create,  # type: ignore[valid-type]
     ) -> Any:
+        if model is m.EmployeeRecords:
+            lock_payroll_roster(session)
         db_obj = create_obj(session=session, model=model, data=obj_in)
         return public.model_validate(db_obj)
 
@@ -143,6 +146,8 @@ def _make_crud_router(
         db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
         if db_obj is None:
             raise HTTPException(status_code=404, detail=f"{model_name} not found")
+        if model is m.EmployeeRecords:
+            lock_payroll_roster(session)
         return public.model_validate(update_obj(session=session, db_obj=db_obj, data=obj_in))
 
     if not custom_delete:
@@ -155,6 +160,8 @@ def _make_crud_router(
             db_obj = get_active_by_id(session=session, model=model, obj_id=obj_id)
             if db_obj is None:
                 raise HTTPException(status_code=404, detail=f"{model_name} not found")
+            if model is m.EmployeeRecords:
+                lock_payroll_roster(session)
             soft_delete_obj(session=session, db_obj=db_obj)
             return Message(message=f"{model_name} deleted successfully")
 

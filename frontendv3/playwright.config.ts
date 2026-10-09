@@ -60,6 +60,7 @@ export default defineConfig({
       command: 'pnpm dev --host 127.0.0.1',
       url: process.env.E2E_BASE_URL || 'http://localhost:5173',
       reuseExistingServer: !process.env.CI,
+      env: { VITE_ENABLE_DEVTOOLS: 'false' },
       timeout: 120000,
     },
   ],

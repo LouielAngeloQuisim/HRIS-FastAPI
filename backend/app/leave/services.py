@@ -15,7 +15,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.employee.models import EmployeeRecords
-from app.employee.selectors import get_active_by_id as get_employee_active_by_id
 from app.leave import calc, selectors
 from app.leave.models import (
     EmployeeLeaveEnrollment,
@@ -102,6 +101,12 @@ def submit_request(
     if data.date_end < data.date_start:
         raise HTTPException(status_code=422, detail="date_end must be greater than or equal to date_start")
 
+    if data.requested_hours is not None and data.date_start != data.date_end:
+        raise HTTPException(
+            status_code=422,
+            detail="Hourly leave requests must cover a single date; submit separate requests for separate dates.",
+        )
+
     workday_hours = Decimal("8.0")
     holidays: set[date] = set()
     schedule: set[date] | None = None
@@ -172,6 +177,19 @@ def approve_request(
         )
         session.commit()
         return db_obj
+
+    # Share the employee-row mutex with payroll's vacation-leave monetization.
+    # Both operations consume the same ledger balance and must not race.
+    employee = session.exec(
+        select(EmployeeRecords)
+        .where(
+            EmployeeRecords.id == db_obj.employee_id,
+            EmployeeRecords.is_deleted == False,  # noqa: E712
+        )
+        .with_for_update()
+    ).first()
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
 
     calc.validate_state_transition(db_obj.status.value, "approved")
 
@@ -257,11 +275,30 @@ def cancel_request(
     current active enrollment year (not the original leave year), with original_year
     recorded.
     """
-    db_obj = selectors.get_leave_request(session=session, request_id=request_id)
+    db_obj = session.exec(
+        select(LeaveRequest)
+        .where(
+            LeaveRequest.id == request_id,
+            LeaveRequest.is_deleted == False,  # noqa: E712
+        )
+        .with_for_update()
+    ).first()
     if db_obj is None:
         raise HTTPException(status_code=404, detail="Leave request not found")
 
     was_approved = db_obj.status == LeaveStatus.APPROVED
+
+    if was_approved:
+        employee = session.exec(
+            select(EmployeeRecords)
+            .where(
+                EmployeeRecords.id == db_obj.employee_id,
+                EmployeeRecords.is_deleted == False,  # noqa: E712
+            )
+            .with_for_update()
+        ).first()
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Employee not found")
 
     calc.validate_state_transition(db_obj.status.value, "cancelled")
 
@@ -314,7 +351,14 @@ def enroll_employee(
     Validates eligibility, creates the enrollment, and writes a grant ledger entry.
     Returns 409 if an active enrollment already exists.
     """
-    employee = get_employee_active_by_id(session=session, model=EmployeeRecords, obj_id=employee_id)
+    employee = session.exec(
+        select(EmployeeRecords)
+        .where(
+            EmployeeRecords.id == employee_id,
+            EmployeeRecords.is_deleted == False,  # noqa: E712
+        )
+        .with_for_update()
+    ).first()
     if employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
 
@@ -550,10 +594,19 @@ def apply_manual_adjustment(
     if not note or not note.strip():
         raise HTTPException(status_code=422, detail="Note is required for manual adjustments")
 
+    employee = session.exec(
+        select(EmployeeRecords)
+        .where(
+            EmployeeRecords.id == employee_id,
+            EmployeeRecords.is_deleted == False,  # noqa: E712
+        )
+        .with_for_update()
+    ).first()
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
     policy = selectors.get_policy(session=session, policy_id=policy_id)
     if policy is None:
         raise HTTPException(status_code=404, detail="Leave policy not found")
-
     enrollment = selectors.get_active_enrollment(
         session=session, employee_id=employee_id, policy_id=policy_id, leave_year=leave_year
     )
@@ -626,9 +679,30 @@ def update_policy(
     *, session: Session, policy_id: uuid.UUID, data: dict[str, Any]
 ) -> LeavePolicy:
     """Update an existing leave policy."""
-    policy = selectors.get_policy(session=session, policy_id=policy_id)
+    policy = session.exec(
+        select(LeavePolicy)
+        .where(
+            LeavePolicy.id == policy_id,
+            LeavePolicy.is_deleted == False,  # noqa: E712
+        )
+        .with_for_update()
+    ).first()
     if policy is None:
         raise HTTPException(status_code=404, detail="Leave policy not found")
+    if data.get("is_paid") is None:
+        data.pop("is_paid", None)
+    if data.get("tax_exempt_unused_vacation_leave") is None:
+        data.pop("tax_exempt_unused_vacation_leave", None)
+    next_is_paid = data.get("is_paid", policy.is_paid)
+    next_tax_exempt_flag = data.get(
+        "tax_exempt_unused_vacation_leave",
+        policy.tax_exempt_unused_vacation_leave,
+    )
+    if next_tax_exempt_flag and not next_is_paid:
+        raise HTTPException(
+            status_code=422,
+            detail="A vacation-leave policy used for the tax exemption must remain paid.",
+        )
     policy.sqlmodel_update(data)
     policy.updated_at = datetime.now(timezone.utc)
     session.add(policy)

@@ -23,6 +23,8 @@ vi.mock('@/lib/api/daily-time-records', () => ({
   useDailyTimeRecords: (...args: unknown[]) => useDailyTimeRecordsMock(...args),
   useApproveOvertime: () => useApproveOvertimeMock(),
   useRejectOvertime: () => useRejectOvertimeMock(),
+  useDtrIntervals: () => ({ data: [], isPending: false, isError: false }),
+  useReplaceDtrIntervals: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 
 vi.mock('@/components/layout/header', () => ({

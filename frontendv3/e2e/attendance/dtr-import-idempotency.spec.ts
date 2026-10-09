@@ -12,7 +12,7 @@ import { apiUrl, createParent } from '../helpers/crud-journey'
  */
 
 const wizardCsv = (code: string) =>
-  `employee_code,login_date,logout_date\n${code},2026-10-02T08:00:00Z,2026-10-02T17:00:00Z`
+  `employee_code,login_date,logout_date\n${code},2026-10-02T00:00:00Z,2026-10-02T09:00:00Z`
 
 async function bearer(page: import('@playwright/test').Page) {
   const token = (await page.context().cookies()).find(c => c.name === 'hris_at')?.value
@@ -21,7 +21,7 @@ async function bearer(page: import('@playwright/test').Page) {
 }
 
 async function rowsForKey(page: import('@playwright/test').Page, key: string) {
-  const res = await page.request.get(`${apiUrl}/daily-time-records?limit=1000`, {
+  const res = await page.request.get(`${apiUrl}/daily-time-records?limit=500`, {
     headers: { Authorization: `Bearer ${await bearer(page)}` },
   })
   expect(res.status()).toBe(200)
@@ -30,18 +30,31 @@ async function rowsForKey(page: import('@playwright/test').Page, key: string) {
   return rows.filter((r: { source_ref?: string }) => r.source_ref === key)
 }
 
-/** Intercept ONLY the wizard's bare POST /daily-time-records (the list route
- *  has a query string and the reconcile route a deeper path — both untouched). */
+async function assignTestShift(page: import('@playwright/test').Page, employeeId: string, code: string) {
+  const shift = await createParent(page, 'shifts', {
+    code, name: `QA ${code}`, start_time: '08:00', end_time: '17:00',
+    lunch_break_duration: 60, total_hours_minus_lunch: 480,
+    days_of_week: ['1', '2', '3', '4', '5', '6', '7'],
+  })
+  const response = await page.request.post(`${apiUrl}/employee-shift-assignments/`, {
+    headers: { Authorization: `Bearer ${await bearer(page)}` },
+    data: { employee_id: employeeId, shift_id: shift.id, effective_from: '2026-10-02' },
+  })
+  expect(response.status(), 'assign effective test shift').toBe(201)
+}
+
+/** Forward the atomic batch commit, then drop only its response. */
 async function lostResponseRoute(page: import('@playwright/test').Page, commit: boolean) {
   const captured: { key: string } = { key: '' }
   let fired = false
-  await page.route('**/api/v1/daily-time-records', async route => {
+  await page.route('**/api/v1/daily-time-records/import-batches/commit', async route => {
     if (route.request().method() !== 'POST' || fired) {
       await route.continue()
       return
     }
     fired = true
-    captured.key = JSON.parse(route.request().postData() ?? '{}').source_ref ?? ''
+    const payload = JSON.parse(route.request().postData() ?? '{}') as { batch_id: string }
+    captured.key = `dtr-import-${payload.batch_id}-r0`
     if (commit) {
       // Server writes the row for real, then the delivery to the browser dies.
       await route.fetch()
@@ -59,6 +72,7 @@ test.describe('DTR CSV import idempotency E2E (QA-01)', () => {
   test('commit-then-lost-response shows UNKNOWN; server-side Reconcile settles it committed; exactly one row exists; UI delete removes the persisted punch', async ({ page }) => {
     const unique = Date.now().toString(36)
     const employee = await createParent(page, 'employees', { employee_code: 'QA1' + unique, first_name: 'Lost', last_name: unique, birthdate: '1990-01-01' })
+    await assignTestShift(page, employee.id, 'QA1' + unique)
 
     const captured = await lostResponseRoute(page, true)
     await page.goto('/daily-time-records')
@@ -70,7 +84,7 @@ test.describe('DTR CSV import idempotency E2E (QA-01)', () => {
     await expect(page.getByTestId('csv-import-unknown-count')).toBeVisible()
     await expect(page.getByText(/1 unknown/i)).toBeVisible()
     await expect(page.getByText(/No response received/i)).toBeVisible()
-    expect(captured.key).toMatch(/^dtr-import-[a-z0-9]+-r0$/)
+    expect(captured.key).toMatch(/^dtr-import-[0-9a-f-]{36}-r0$/i)
 
     // The real backend DID commit behind the lost response.
     const committed = await rowsForKey(page, captured.key)
@@ -107,6 +121,7 @@ test.describe('DTR CSV import idempotency E2E (QA-01)', () => {
   test('unresolved identities survive close/reopen: banner restores the batch, edits are blocked, and the SAME key reconciles to the committed row', async ({ page }) => {
     const unique = Date.now().toString(36)
     const employee = await createParent(page, 'employees', { employee_code: 'QA2' + unique, first_name: 'Reopen', last_name: unique, birthdate: '1990-01-01' })
+    await assignTestShift(page, employee.id, 'QA2' + unique)
 
     const captured = await lostResponseRoute(page, true)
     await page.goto('/daily-time-records')
@@ -138,6 +153,7 @@ test.describe('DTR CSV import idempotency E2E (QA-01)', () => {
   test('never-reached request reconciles to not_found, key-stable retry commits exactly one row, then Discard path unlocks fresh import', async ({ page }) => {
     const unique = Date.now().toString(36)
     const employee = await createParent(page, 'employees', { employee_code: 'QA3' + unique, first_name: 'Retry', last_name: unique, birthdate: '1990-01-01' })
+    await assignTestShift(page, employee.id, 'QA3' + unique)
 
     // Abort BEFORE forwarding: nothing is committed anywhere.
     const captured = await lostResponseRoute(page, false)
@@ -150,7 +166,7 @@ test.describe('DTR CSV import idempotency E2E (QA-01)', () => {
     // Server verdict: not_found within scope -> retry is safe, but the retry
     // MUST reuse the same key so a hypothetical late commit cannot duplicate.
     await page.getByTestId('csv-import-reconcile-button').click()
-    await expect(page.getByText(/retry is safe/i)).toBeVisible()
+    await expect(page.getByTestId('csv-correction-row-2').getByText(/retry is safe/i)).toBeVisible()
     await expect(page.getByTestId('csv-import-submit-button')).toBeEnabled()
     expect(await rowsForKey(page, captured.key)).toHaveLength(0)
 
@@ -166,6 +182,7 @@ test.describe('DTR CSV import idempotency E2E (QA-01)', () => {
   test('Discard explicitly abandons unresolved identities and unlocks the editor', async ({ page }) => {
     const unique = Date.now().toString(36)
     const employee = await createParent(page, 'employees', { employee_code: 'QA4' + unique, first_name: 'Discard', last_name: unique, birthdate: '1990-01-01' })
+    await assignTestShift(page, employee.id, 'QA4' + unique)
 
     await lostResponseRoute(page, false)
     await page.goto('/daily-time-records')

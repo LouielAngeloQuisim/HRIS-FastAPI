@@ -17,6 +17,7 @@ import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/auth-store'
+import { useCan } from '@/context/permissions-provider'
 import { toast } from 'sonner'
 import { AlertTriangle, CheckCircle2, Upload, XCircle } from 'lucide-react'
 
@@ -37,13 +38,18 @@ interface RowResult {
   key: string
   status: ImportStatus
   error?: string
+  code?: string
+  workDate?: string
+  retryable?: boolean
 }
 
 interface RecoverableBatch {
   batchId: string
+  batchUuid: string
   csvText: string
   headers: string[]
   rows: CsvRow[]
+  sourceRows: CsvRow[]
   results: RowResult[]
 }
 
@@ -127,13 +133,20 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
   const [file, setFile] = useState<File | null>(null)
   const [csvText, setCsvText] = useState(() => restored?.csvText ?? '')
   const [parsedRows, setParsedRows] = useState<CsvRow[]>(() => restored?.rows ?? [])
+  const [sourceRows, setSourceRows] = useState<CsvRow[]>(() => restored?.sourceRows ?? restored?.rows ?? [])
   const [headers, setHeaders] = useState<string[]>(() => restored?.headers ?? [])
   const [batchId, setBatchId] = useState(() => restored?.batchId ?? '')
+  const [batchUuid, setBatchUuid] = useState(() => restored?.batchUuid ?? '')
   const [results, setResults] = useState<RowResult[]>(() => restored?.results ?? [])
   const [isImporting, setIsImporting] = useState(false)
   const [isReconciling, setIsReconciling] = useState(false)
   const [progress, setProgress] = useState(0)
   const [abandoned, setAbandoned] = useState(false)
+  const [issueFilter, setIssueFilter] = useState('all')
+  const [shiftOptions, setShiftOptions] = useState<Array<{ id: string; code: string; name: string }>>([])
+  const [assignShiftByRow, setAssignShiftByRow] = useState<Record<number, string>>({})
+  const [loadingShifts, setLoadingShifts] = useState(false)
+  const canAssignShift = useCan('shifts', 'add')
 
   // Defense in depth: a slot owned by a DIFFERENT session is dropped on the
   // spot — it can never be restored, reconciled or retried by this account.
@@ -144,8 +157,8 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
   const requiredFields = useMemo(() => DTR_REQUIRED_FIELDS, [])
 
   const keyForRow = useCallback(
-    (index: number) => `dtr-import-${batchId}-r${index}`,
-    [batchId],
+    (index: number) => `dtr-import-${batchUuid}-r${index}`,
+    [batchUuid],
   )
 
   const parseCsv = useCallback((text: string) => {
@@ -160,12 +173,14 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
       return
     }
 
-    const rows = parsed.data
+    const rows = parsed.data as CsvRow[]
     const cols = parsed.meta.fields ?? []
 
     setParsedRows(rows)
+    setSourceRows(rows.map(row => ({ ...row })))
     setHeaders(cols)
     setBatchId(Math.random().toString(36).slice(2, 10))
+    setBatchUuid(crypto.randomUUID())
     setResults([])
     setProgress(0)
   }, [])
@@ -209,19 +224,89 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
       parseCsv(e.target.value)
     } else {
       setParsedRows([])
+      setSourceRows([])
       setHeaders([])
       setBatchId('')
+      setBatchUuid('')
       setResults([])
     }
   }, [parseCsv, editingBlocked])
 
-  const mapColumns = (row: CsvRow, sourceRef: string) => ({
+  const mapColumns = (row: CsvRow, index: number) => ({
     employee_code: row.employee_code,
     login_date: row.login_date,
     logout_date: row.logout_date,
     shift_code: row.shift_code || undefined,
-    source_ref: sourceRef,
+    source_row: sourceRows[index] ?? {},
+    intervals: row.intervals_json ? (JSON.parse(row.intervals_json) as Array<{ start_at: string; end_at: string; source_row: CsvRow }>).map(({ start_at, end_at, source_row }) => ({ start_at, end_at, original_row: source_row })) : [],
   })
+
+  const mergeDuplicateDateRows = useCallback((targetIndex: number) => {
+    const targetResult = results[targetIndex]
+    const target = parsedRows[targetIndex]
+    if (!targetResult || !target || targetResult.code !== 'duplicate_employee_work_date' || !targetResult.workDate) return
+    const matches = results.map((result, index) => ({ result, index, row: parsedRows[index] }))
+      .filter(item => item.result.code === 'duplicate_employee_work_date'
+        && item.result.workDate === targetResult.workDate
+        && item.row?.employee_code?.trim().toUpperCase() === target.employee_code?.trim().toUpperCase())
+    if (matches.length < 2) return
+    const intervals = matches.flatMap(({ index, row }) => {
+      if (!row) return []
+      const saved = row.intervals_json ? JSON.parse(row.intervals_json) as Array<{ start_at: string; end_at: string; source_row: CsvRow }> : null
+      return saved ?? [{ start_at: row.login_date, end_at: row.logout_date, source_row: sourceRows[index] ?? row }]
+    }).sort((left, right) => Date.parse(left.start_at) - Date.parse(right.start_at))
+    const merged = {
+      ...target,
+      login_date: intervals[0].start_at,
+      logout_date: intervals[intervals.length - 1].end_at,
+      intervals_json: JSON.stringify(intervals),
+      merged_rows: String(intervals.length),
+    }
+    const removed = new Set(matches.slice(1).map(item => item.index))
+    const nextRows = parsedRows.flatMap((row, index) => index === matches[0].index ? [merged] : removed.has(index) ? [] : [row])
+    const nextSources = sourceRows.flatMap((row, index) => index === matches[0].index ? [row] : removed.has(index) ? [] : [row])
+    setParsedRows(nextRows)
+    setSourceRows(nextSources)
+    setResults([])
+    setAssignShiftByRow({})
+    toast.success(`Merged ${matches.length} same-day rows into one daily record with ${intervals.length} intervals. Review it, then import.`)
+  }, [parsedRows, results, sourceRows])
+
+  const loadShiftOptions = useCallback(async () => {
+    if (shiftOptions.length || loadingShifts) return
+    setLoadingShifts(true)
+    try {
+      const { data } = await api.get<{ data: Array<{ id: string; code: string; name: string }> }>('/shifts', { params: { skip: 0, limit: 500 } })
+      setShiftOptions(data.data.filter(item => item.id && item.code && item.name))
+    } catch {
+      toast.error('Could not load shifts. Check your shifts view permission and retry.')
+    } finally {
+      setLoadingShifts(false)
+    }
+  }, [shiftOptions.length, loadingShifts])
+
+  const assignShiftForRow = useCallback(async (index: number) => {
+    const row = parsedRows[index]
+    const result = results[index]
+    const employeeCode = row?.employee_code?.trim()
+    const shift = shiftOptions.find(item => item.id === assignShiftByRow[index])
+    const effectiveFrom = result?.workDate ?? row?.login_date?.slice(0, 10)
+    if (!row || !employeeCode || !shift || !effectiveFrom) return
+    const confirmed = window.confirm(`Assign ${shift.name} (${shift.code}) to ${employeeCode} starting ${effectiveFrom}? This is a separate audited change and remains even if you discard this attendance import.`)
+    if (!confirmed) return
+    try {
+      await api.post('/employee-shift-assignments', { employee_code: employeeCode, shift_id: shift.id, effective_from: effectiveFrom, effective_to: null })
+      setParsedRows(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, shift_code: shift.code } : item))
+      toast.success(`Shift assignment saved for ${employeeCode} from ${effectiveFrom}. It is audited and is independent of this import.`)
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : error instanceof Error ? error.message : 'Could not assign the shift. Check permissions and effective-date conflicts.')
+    }
+  }, [parsedRows, results, shiftOptions, assignShiftByRow])
+
+  const correctCell = useCallback((index: number, field: string, value: string) => {
+    setParsedRows(current => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row))
+  }, [])
 
   const validateRow = useCallback((row: CsvRow): string | null => {
     const missing = requiredFields.filter(f => !row[f] || row[f].trim() === '')
@@ -238,7 +323,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     () =>
       parsedRows
         .map((_, i) => i)
-        .filter((i) => results.length === 0 || results[i]?.status !== 'success'),
+        .filter((i) => results.length === 0 || (results[i]?.status !== 'success' && results[i]?.retryable !== false)),
     [parsedRows, results],
   )
 
@@ -256,8 +341,10 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     setFile(null)
     setCsvText('')
     setParsedRows([])
+    setSourceRows([])
     setHeaders([])
     setBatchId('')
+    setBatchUuid('')
     setResults([])
     setProgress(0)
     setIsImporting(false)
@@ -270,88 +357,126 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
       toast.error('No data to import')
       return
     }
-    if (unknownCount > 0) return // guarded in the UI; defense in depth
+    if (unknownCount > 0) return
+    if (results.some(row => row.retryable === false)) return
     if (!identityLive()) { abandonInstance(); return }
 
     setIsImporting(true)
+    const current: RowResult[] = parsedRows.map((row, i) => ({
+      row: i + 2,
+      data: row,
+      key: results[i]?.key ?? keyForRow(i),
+      status: 'pending',
+    }))
+    const localIssues = parsedRows.flatMap((row, index) => {
+      const message = validateRow(row)
+      return message ? [{ row_index: index, message }] : []
+    })
+    if (localIssues.length > 0) {
+      const issuesByRow = new Map(localIssues.map(issue => [issue.row_index, issue.message]))
+      setResults(current.map((item, index) => {
+        const issue = issuesByRow.get(index)
+        return {
+          ...item,
+          status: 'error',
+          error: issue ?? 'This row was not saved because another row in the batch needs correction.',
+        }
+      }))
+      setIsImporting(false)
+      toast.error(`Resolve ${localIssues.length} invalid row(s) before importing.`)
+      return
+    }
 
-    const current: RowResult[] = results.length
-      ? results.map((r) => ({ ...r }))
-      : parsedRows.map((row, i) => ({ row: i + 2, data: row, key: keyForRow(i), status: 'pending' as ImportStatus }))
-
-    const total = pendingIndices.length
-    let done = 0
-
-    for (const i of pendingIndices) {
+    const request = {
+      batch_id: batchUuid,
+      rows: parsedRows.map((row, index) => mapColumns(row, index)),
+    }
+    let preflight: {
+      valid: boolean
+      issues: Array<{ row_index: number; code: string; work_date?: string | null; employee_code: string; message: string }>
+      excluded: Array<{ row_index: number; reason: string }>
+    }
+    try {
+      const { data } = await api.post('/daily-time-records/import-batches/preflight', request)
+      preflight = data
+    } catch (err) {
       if (!identityLive()) { abandonInstance(); return }
-      const row = parsedRows[i]
-      const key = current[i].key
-      const validationError = validateRow(row)
+      const detail = (err as { response?: { data?: { detail?: string | { message?: string } } } })?.response?.data?.detail
+      const message = typeof detail === 'string' ? detail : detail?.message ?? 'Could not validate this attendance batch.'
+      setResults(current.map(item => ({ ...item, status: 'error', error: message })))
+      setIsImporting(false)
+      toast.error(message)
+      return
+    }
 
-      if (validationError) {
-        current[i] = { ...current[i], status: 'error', error: validationError }
-      } else {
-        try {
-          const mapped = mapColumns(row, key)
-          // 201 = first create; 200 = idempotent replay of a committed row.
-          await api.post('/daily-time-records', mapped)
-          current[i] = { ...current[i], status: 'success', error: undefined }
-        } catch (err) {
-          const response = (err as { response?: { status?: number; data?: { detail?: string; error?: { message?: string } } } })?.response
-          const status = response?.status
-          if (status !== undefined && status >= 400 && status < 500) {
-            // Definite server rejection: validation/permission/conflict — the
-            // row was NOT committed; safe to correct and retry (the retry
-            // keeps the same key — duplicate-safe regardless).
-            const message = response?.data?.error?.message ?? response?.data?.detail ?? `Server responded ${status}`
-            current[i] = { ...current[i], status: 'error', error: message }
-          } else if (status !== undefined && status >= 500) {
-            // Ambiguous: the server MAY have committed before failing to
-            // answer. Never assume non-commit just because an error body
-            // exists — treat like a lost response.
-            current[i] = {
-              ...current[i],
-              status: 'unknown',
-              error: `Server error ${status} — outcome unknown (may be recorded). Use Reconcile before retrying.`,
-            }
-          } else {
-            // Transport failure / timeout: no server verdict at all.
-            current[i] = {
-              ...current[i],
-              status: 'unknown',
-              error: 'No response received — record may exist. Use Reconcile before retrying.',
-            }
+    if (!identityLive()) { abandonInstance(); return }
+    if (!preflight.valid) {
+      const issuesByRow = new Map(preflight.issues.map(issue => [issue.row_index, issue]))
+      setResults(current.map((item, index) => {
+        const issue = issuesByRow.get(index)
+        return {
+          ...item,
+          status: 'error',
+          error: issue?.message ?? 'This row was not saved because another row in the batch needs correction.',
+          code: issue?.code,
+          workDate: issue?.work_date ?? undefined,
+        }
+      }))
+      setIsImporting(false)
+      toast.error(`Attendance needs correction in ${issuesByRow.size} row(s). Nothing was saved.`)
+      return
+    }
+
+    const excludedByRow = new Map(preflight.excluded.map(item => [item.row_index, item.reason]))
+    try {
+      await api.post('/daily-time-records/import-batches/commit', request)
+      if (!identityLive()) { abandonInstance(); return }
+      const next = current.map((item, index) => ({
+        ...item,
+        status: 'success' as const,
+        error: excludedByRow.get(index),
+      }))
+      await queryClient.invalidateQueries({ queryKey: ['daily-time-records'] })
+      setResults(next)
+      setProgress(100)
+      const excludedCount = preflight.excluded.length
+      toast.success(`Attendance batch saved. ${parsedRows.length - excludedCount} new, ${excludedCount} identical row(s) excluded.`)
+    } catch (err) {
+      if (!identityLive()) { abandonInstance(); return }
+      const response = (err as {
+        response?: {
+          status?: number
+          data?: {
+            detail?: string | { message?: string; issues?: Array<{ row_index: number; message: string }> }
+            error?: { message?: string }
           }
         }
+      })?.response
+      const status = response?.status
+      const detail = response?.data?.detail
+      if (status !== undefined && status >= 400 && status < 500) {
+        const issues = typeof detail === 'object' ? detail?.issues ?? [] : []
+        const issuesByRow = new Map(issues.map(issue => [issue.row_index, issue.message]))
+        const message = response?.data?.error?.message
+          ?? (typeof detail === 'string' ? detail : detail?.message)
+          ?? `Server responded ${status}; no attendance was saved.`
+        setResults(current.map((item, index) => ({
+          ...item,
+          status: 'error',
+          error: issuesByRow.get(index) ?? message,
+        })))
+        toast.error('The server rejected the whole batch. Correct the listed rows and retry; no attendance was saved.')
+      } else {
+        const message = status
+          ? `Server error ${status} — batch outcome unknown. Reconcile before retrying.`
+          : 'No response received — batch outcome unknown. Reconcile before retrying.'
+        setResults(current.map(item => ({ ...item, status: 'unknown', error: message })))
+        toast.error('The import outcome is unknown. Reconcile before retrying; blind retry is blocked.')
       }
-
-      done += 1
-      setProgress(Math.round((done / total) * 100))
+    } finally {
+      setIsImporting(false)
     }
-
-    // Final identity check before committing any results: if the account
-    // changed mid-import, verdicts from the previous account's session are
-    // never rendered and never stored for restore.
-    if (!identityLive()) { abandonInstance(); return }
-
-    if (current.some(row => row.status === 'success')) {
-      await queryClient.invalidateQueries({ queryKey: ['daily-time-records'] })
-    }
-    setResults(current)
-    setIsImporting(false)
-
-    const successCount = current.filter(r => r.status === 'success').length
-    const errorCount = current.filter(r => r.status === 'error').length
-    const unresolved = current.filter(r => r.status === 'unknown').length
-
-    if (unresolved > 0) {
-      toast.error(`Imported ${successCount} time records, ${errorCount} failed, ${unresolved} awaiting reconciliation`)
-    } else if (errorCount === 0) {
-      toast.success(`Successfully imported ${successCount} time records`)
-    } else {
-      toast.error(`Imported ${successCount} time records, ${errorCount} failed`)
-    }
-  }, [parsedRows, results, pendingIndices, unknownCount, validateRow, queryClient, keyForRow, identityLive, abandonInstance])
+  }, [parsedRows, sourceRows, results, unknownCount, validateRow, queryClient, keyForRow, batchUuid, identityLive, abandonInstance])
 
   // Deliberate resolution of 'unknown' rows (QA-01): ask the server for a
   // verdict on each (employee, identity-key) PAIR via the bounded authorized
@@ -426,6 +551,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
           return {
             ...r,
             status: 'error' as ImportStatus,
+            retryable: false,
             error: 'Record was committed and then deleted deliberately — this import row is retired. Re-import deliberately if intended.',
           }
         case 'not_found':
@@ -479,7 +605,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
     if (live && hasUnresolved(results) && parsedRows.length > 0) {
       recoverableSlot = {
         owner,
-        batch: { batchId, csvText, headers, rows: parsedRows, results },
+        batch: { batchId, batchUuid, csvText, headers, rows: parsedRows, sourceRows, results },
       }
     } else if (live) {
       recoverableSlot = null
@@ -487,17 +613,27 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
         setFile(null)
         setCsvText('')
         setParsedRows([])
+        setSourceRows([])
         setHeaders([])
         setBatchId('')
+        setBatchUuid('')
         setResults([])
         setProgress(0)
       }, 200)
     }
     onOpenChange(false)
-  }, [isImporting, results, parsedRows, batchId, csvText, headers, onOpenChange, identityLive, owner])
+  }, [isImporting, results, parsedRows, sourceRows, batchId, batchUuid, csvText, headers, onOpenChange, identityLive, owner])
 
   const successCount = results.filter(r => r.status === 'success').length
   const errorCount = results.filter(r => r.status === 'error').length
+  const correctionResults = results
+    .map((result, index) => ({ result, index }))
+    .filter(({ result }) => result.status === 'error')
+    .filter(({ result }) => {
+      if (issueFilter === 'all') return true
+      if (issueFilter === 'other') return !['missing_employee', 'missing_shift', 'incomplete_punch', 'duplicate_employee_work_date', 'saved_attendance_conflict'].includes(result.code ?? '')
+      return result.code === issueFilter
+    })
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -526,7 +662,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
                 className="cursor-pointer"
               />
               {file && (
-                <Button variant="ghost" size="icon" onClick={() => { setFile(null); setCsvText(''); setParsedRows([]); setHeaders([]); }}>
+                <Button variant="ghost" size="icon" onClick={() => { setFile(null); setCsvText(''); setParsedRows([]); setSourceRows([]); setHeaders([]); }}>
                   <XCircle className="h-4 w-4" />
                 </Button>
               )}
@@ -608,6 +744,43 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
                   and retry stays blocked. Unresolved identities are also preserved if you close this dialog.
                 </p>
               )}
+              {errorCount > 0 && !editingBlocked && (
+                <section className="space-y-3 rounded-md border border-amber-300 p-3" aria-label="Attendance corrections">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div><h3 className="font-medium">Review and correct failed rows</h3><p className="text-xs text-muted-foreground">No rows were saved. Corrections apply to this batch; the original CSV row is retained with the import record when saved.</p></div>
+                    <label className="flex items-center gap-2 text-sm">Filter issues<select aria-label="Filter import issues" value={issueFilter} onChange={event => setIssueFilter(event.target.value)} className="h-9 rounded border bg-background px-2"><option value="all">All issues</option><option value="missing_employee">Missing employees</option><option value="missing_shift">Missing shifts</option><option value="incomplete_punch">Incomplete or invalid punches</option><option value="duplicate_employee_work_date">Duplicate employee/date</option><option value="saved_attendance_conflict">Saved attendance conflict</option><option value="other">Other</option></select></label>
+                  </div>
+                  <div className="max-h-72 space-y-3 overflow-y-auto">
+                    {correctionResults.map(({ result, index }) => {
+                      const corrected = parsedRows[index] ?? result.data
+                      const source = sourceRows[index] ?? result.data
+                      const intervals = corrected.intervals_json ? JSON.parse(corrected.intervals_json) as Array<{ start_at: string; end_at: string }> : [{ start_at: corrected.login_date, end_at: corrected.logout_date }]
+                      const totalMinutes = intervals.reduce((total, interval) => {
+                        const start = Date.parse(interval.start_at)
+                        const end = Date.parse(interval.end_at)
+                        return Number.isFinite(start) && Number.isFinite(end) && end > start ? total + Math.floor((end - start) / 60_000) : total
+                      }, 0)
+                      const hours = totalMinutes ? `${(totalMinutes / 60).toFixed(2)} hours across ${intervals.length} interval(s)` : 'not calculable'
+                      return <article key={result.key} className="space-y-2 rounded border p-3" data-testid={`csv-correction-row-${result.row}`}>
+                        <div className="flex flex-wrap justify-between gap-2 text-sm"><strong>CSV row {result.row} · {result.workDate ?? corrected.login_date?.slice(0, 10) ?? 'date missing'}</strong><span className="text-destructive">{result.error}</span></div>
+                        <p className="text-xs text-muted-foreground">Original: {source.employee_code || 'no employee'} · {source.login_date || 'no login'} → {source.logout_date || 'no logout'} · {source.shift_code || 'no shift'}; calculated duration: {hours}</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {(['employee_code', 'login_date', 'logout_date', 'shift_code'] as const).map(field => <label key={field} className="grid gap-1 text-xs">{field.replace('_', ' ')}<input aria-label={`Correct row ${result.row} ${field}`} value={corrected[field] ?? ''} onChange={event => correctCell(index, field, event.target.value)} className="h-9 rounded border bg-background px-2" /></label>)}
+                        </div>
+                        {result.code === 'duplicate_employee_work_date' && result.workDate && <Button type="button" variant="outline" size="sm" data-testid={`merge-duplicate-date-${result.row}`} onClick={() => mergeDuplicateDateRows(index)}>Merge same employee/date rows into intervals</Button>}
+                        {result.code === 'missing_shift' && canAssignShift && <div className="flex flex-wrap items-end gap-2 rounded border border-amber-300 p-2">
+                          <p className="w-full text-xs text-muted-foreground">No effective shift covers this work date. Assigning one is a separate audited change and remains if this attendance import is discarded.</p>
+                          {!shiftOptions.length ? <Button type="button" variant="outline" size="sm" onClick={loadShiftOptions} disabled={loadingShifts}>{loadingShifts ? 'Loading shifts…' : 'Load shifts'}</Button> : <>
+                            <label className="grid gap-1 text-xs">Shift<select aria-label={`Assign shift for row ${result.row}`} value={assignShiftByRow[index] ?? ''} onChange={event => setAssignShiftByRow(current => ({ ...current, [index]: event.target.value }))} className="h-9 rounded border bg-background px-2"><option value="">Select shift</option>{shiftOptions.map(shift => <option key={shift.id} value={shift.id}>{shift.name} ({shift.code})</option>)}</select></label>
+                            <Button type="button" size="sm" variant="outline" disabled={!assignShiftByRow[index]} onClick={() => assignShiftForRow(index)}>Confirm shift assignment</Button>
+                          </>}
+                        </div>}
+                      </article>
+                    })}
+                    {correctionResults.length === 0 && <p className="text-sm text-muted-foreground">No failed rows match this filter.</p>}
+                  </div>
+                </section>
+              )}
               <div className="max-h-48 overflow-y-auto rounded-md border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
@@ -671,6 +844,7 @@ export function AttendanceCsvImportWizard({ open, onOpenChange }: { open: boolea
               isImporting ||
               parsedRows.length === 0 ||
               unknownCount > 0 ||
+              results.some(row => row.retryable === false) ||
               (results.length > 0 && pendingIndices.length === 0)
             }
             data-testid="csv-import-submit-button"

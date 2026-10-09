@@ -179,7 +179,12 @@ def _compute_employee_entry(
         gross_pay = Decimal("0.00")
 
     # Government contributions
-    contributions = calculate_all_contributions(session, gross_pay, str(payroll_run.cutoff_type))
+    contributions = calculate_all_contributions(
+        session,
+        gross_pay,
+        str(payroll_run.cutoff_type),
+        payroll_run.date_to.isoformat(),
+    )
     sss_employee = contributions["sss_employee"]
     philhealth_employee = contributions["philhealth_employee"]
     pagibig_employee = contributions["pagibig_employee"]
@@ -396,6 +401,5 @@ def create_or_complete_loan_amortization_schedule(
         session.add(amort)
     session.commit()
     return amortizations
-
 
 

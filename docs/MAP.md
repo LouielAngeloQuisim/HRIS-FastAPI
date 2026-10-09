@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
-Generated: 2026-10-05
-Source commit: 30357619464abb67133faed654be05f92c5fb221
+Generated: 2026-10-09
+Source commit: d2d6011f894da0ae5842ad738e4e6c9350525313
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 250 endpoints in 39 groups
+## Backend routes (`/api/*`): 293 endpoints in 40 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -37,15 +37,21 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `GET /api/v1/categories/{obj_id}`  `[perms: category:view]`
 - `PATCH /api/v1/categories/{obj_id}`  `[perms: category:edit]`
 
-### `/api/v1/daily-time-records` (8 routes)
+### `/api/v1/daily-time-records` (14 routes)
 
 - `GET /api/v1/daily-time-records/`  `[perms: daily_time_record:view]`
 - `POST /api/v1/daily-time-records/`  `[perms: daily_time_record:add]`
+- `POST /api/v1/daily-time-records/import-batches/commit`  `[perms: daily_time_record:add]`
+- `POST /api/v1/daily-time-records/import-batches/preflight`  `[perms: daily_time_record:add]`
+- `GET /api/v1/daily-time-records/import-batches/{batch_id}`  `[perms: daily_time_record:view]`
 - `POST /api/v1/daily-time-records/reconcile-imports`  `[perms: daily_time_record:add]`
 - `DELETE /api/v1/daily-time-records/{obj_id}`  `[perms: daily_time_record:delete]`
 - `GET /api/v1/daily-time-records/{obj_id}`  `[perms: daily_time_record:view]`
 - `PATCH /api/v1/daily-time-records/{obj_id}`  `[perms: daily_time_record:edit]`
 - `POST /api/v1/daily-time-records/{obj_id}/approve-overtime`  `[perms: daily_time_record:edit]`
+- `GET /api/v1/daily-time-records/{obj_id}/intervals`  `[perms: daily_time_record:view]`
+- `PUT /api/v1/daily-time-records/{obj_id}/intervals`  `[perms: daily_time_record:edit]`
+- `GET /api/v1/daily-time-records/{obj_id}/overtime-decisions`  `[perms: daily_time_record:view]`
 - `POST /api/v1/daily-time-records/{obj_id}/reject-overtime`  `[perms: daily_time_record:edit]`
 
 ### `/api/v1/dashboard` (1 routes)
@@ -98,6 +104,12 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `GET /api/v1/employee-projects/{obj_id}`  `[perms: emp_project:view]`
 - `PATCH /api/v1/employee-projects/{obj_id}`  `[perms: emp_project:edit]`
 - `POST /api/v1/employee-projects/{obj_id}/unassign`  `[perms: emp_project:edit]`
+
+### `/api/v1/employee-shift-assignments` (3 routes)
+
+- `GET /api/v1/employee-shift-assignments/`  `[perms: shifts:view]`
+- `POST /api/v1/employee-shift-assignments/`  `[perms: shifts:add]`
+- `PATCH /api/v1/employee-shift-assignments/{assignment_id}`  `[perms: shifts:edit]`
 
 ### `/api/v1/employees` (17 routes)
 
@@ -228,7 +240,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/password-recovery-html-content/{email}`
 
-### `/api/v1/payroll` (52 routes)
+### `/api/v1/payroll` (86 routes)
 
 - `POST /api/v1/payroll/amortizations/{amortization_id}/pay`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/bir-brackets/`  `[perms: payroll:view]`
@@ -237,10 +249,17 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `PATCH /api/v1/payroll/bir-brackets/{bracket_id}`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/bir/calculate`
 - `POST /api/v1/payroll/calculate-contributions/`
+- `GET /api/v1/payroll/contribution-ledger`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/contribution-ledger/corrections`  `[perms: payroll:edit]`
+- `GET /api/v1/payroll/contribution-ledger/{ledger_id}/correction-targets`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/employees/{employee_id}/loans`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/employees/{employee_id}/payslip`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/employees/{employee_id}/salary`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/employees/{employee_id}/salary`  `[perms: payroll:add]`
+- `GET /api/v1/payroll/employees/{employee_id}/tax-year-benefits/{tax_year}`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/employees/{employee_id}/tax-year-benefits/{tax_year}`  `[perms: payroll:approve]`
+- `GET /api/v1/payroll/employees/{employee_id}/tax-year-declarations/{tax_year}`  `[perms: payroll:view]`
+- `PUT /api/v1/payroll/employees/{employee_id}/tax-year-declarations/{tax_year}`  `[perms: payroll:approve]`
 - `GET /api/v1/payroll/integrations`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/integrations`  `[perms: payroll:add]`
 - `DELETE /api/v1/payroll/integrations/mappings/{mapping_id}`  `[perms: payroll:delete]`
@@ -260,22 +279,49 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `DELETE /api/v1/payroll/pagibig-brackets/{bracket_id}`  `[perms: payroll:delete]`
 - `PATCH /api/v1/payroll/pagibig-brackets/{bracket_id}`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/pagibig/calculate`
+- `GET /api/v1/payroll/pay-group-assignments`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/pay-group-assignments`  `[perms: payroll:add]`
+- `POST /api/v1/payroll/pay-group-assignments/bulk/commit`  `[perms: payroll:add]`
+- `POST /api/v1/payroll/pay-group-assignments/bulk/preflight`  `[perms: payroll:add]`
+- `PATCH /api/v1/payroll/pay-group-assignments/{assignment_id}`  `[perms: payroll:edit]`
+- `GET /api/v1/payroll/pay-groups`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/pay-groups`  `[perms: payroll:add]`
+- `GET /api/v1/payroll/pay-groups/{group_id}/periods`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/philhealth-brackets/`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/philhealth-brackets/`  `[perms: payroll:add]`
 - `DELETE /api/v1/payroll/philhealth-brackets/{bracket_id}`  `[perms: payroll:delete]`
 - `PATCH /api/v1/payroll/philhealth-brackets/{bracket_id}`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/philhealth/calculate`
+- `GET /api/v1/payroll/policies`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/policies`  `[perms: payroll:add]`
+- `POST /api/v1/payroll/policies/{policy_id}/confirm`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/runs`  `[perms: payroll:view]`
+- `GET /api/v1/payroll/runs/attendance-calculation-preview`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/runs/generate`  `[perms: payroll:add]`
+- `GET /api/v1/payroll/runs/preflight`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/runs/prepare-attendance-draft`  `[perms: payroll:add]`
 - `POST /api/v1/payroll/runs/preview`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/runs/status`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/runs/{run_id}`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/runs/{run_id}/approve`  `[perms: payroll:edit]`
+- `GET /api/v1/payroll/runs/{run_id}/delivery-status`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/runs/{run_id}/delivery/{job_id}/address`  `[perms: payroll:edit]`
+- `POST /api/v1/payroll/runs/{run_id}/delivery/{job_id}/resend`  `[perms: payroll:edit]`
+- `GET /api/v1/payroll/runs/{run_id}/entries/{entry_id}/payslip.pdf`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/runs/{run_id}/entries/{entry_id}/review`  `[perms: payroll:edit]`
+- `POST /api/v1/payroll/runs/{run_id}/finalize`  `[perms: payroll:approve]`
 - `GET /api/v1/payroll/runs/{run_id}/payslips`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/runs/{run_id}/rebuild-attendance-draft`  `[perms: payroll:edit]`
+- `POST /api/v1/payroll/runs/{run_id}/start-review`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/runs/{run_id}/void`  `[perms: payroll:edit]`
+- `POST /api/v1/payroll/salaries/bulk/commit`  `[perms: payroll:add]`
+- `POST /api/v1/payroll/salaries/bulk/increment/commit`  `[perms: payroll:edit]`
+- `POST /api/v1/payroll/salaries/bulk/increment/preview`  `[perms: payroll:view]`
+- `POST /api/v1/payroll/salaries/bulk/preflight`  `[perms: payroll:add]`
 - `DELETE /api/v1/payroll/salaries/{salary_id}`  `[perms: payroll:delete]`
 - `GET /api/v1/payroll/salaries/{salary_id}`  `[perms: payroll:view]`
 - `PATCH /api/v1/payroll/salaries/{salary_id}`  `[perms: payroll:edit]`
+- `GET /api/v1/payroll/salary-roster`  `[perms: payroll:view]`
 - `GET /api/v1/payroll/sss-brackets/`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/sss-brackets/`  `[perms: payroll:add]`
 - `DELETE /api/v1/payroll/sss-brackets/{bracket_id}`  `[perms: payroll:delete]`
@@ -399,7 +445,7 @@ is omitted here, as are `config` (engine/settings) and `email-templates`.
 - `reports`: routes.py
 - `user`: models.py, schemas.py, routes/, services.py, selectors.py
 
-## Frontend features (`frontendv3/src/features/`): 38 features
+## Frontend features (`frontendv3/src/features/`): 39 features
 
 API columns are modules imported from `@/lib/api/*` (grep-based, per-verified
 reliable in the source tree's single-line import style) with plumbing
@@ -420,7 +466,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `dtr-adjustments`: api `daily-time-records`, `dtr-adjustments`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
 - `emp-tasks`: api `emp-tasks`, `employee-projects`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
 - `employee-projects`: api `employee-projects`, `employees`, `projects`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
-- `employees`: api `employees`, `save-error`; flags: route, form, test
+- `employees`: api `employees`, `leave-policies`, `payroll`, `save-error`; flags: route, form, test
 - `holidays`: api `holidays`; flags: route, form, test
 - `leave-calendar`: api `employees`, `leave-ledger`; flags: route, test
 - `leave-enrollment`: api `employees`, `leave-policies`, `save-error`; flags: test
@@ -434,6 +480,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `payroll`: api `departments`, `employees`, `payroll`, `save-error`; flags: route, test
 - `payroll-config`: api `auth`, `payroll-config`, `save-error`; flags: route, form, test
 - `payroll-runs`: api `payroll`; flags: route, test
+- `payroll-settings`: api `employees`, `payroll`; flags: test
 - `phases`: api `phases`, `save-error`, `subdivisions`; flags: route, form, test
 - `positions`: api `departments`, `positions`; flags: route, form, test
 - `project-types`: api `project-types`; flags: route, form
@@ -441,12 +488,12 @@ reliable in the source tree's single-line import style) with plumbing
 - `roles`: api `roles`, `save-error`; flags: route, form, test
 - `salary`: api `employees`, `payroll`, `save-error`; flags: form, test
 - `settings`: api `none`; flags: route, form
-- `shifts`: api `shifts`; flags: route, form
+- `shifts`: api `employees`, `shifts`; flags: route, form
 - `subdivisions`: api `blocks`, `categories`, `lots`, `phases`, `project-types`, `projects`, `save-error`, `subdivisions`; flags: route, form, test
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 25 revisions, single head `8c12ab55d901`
+## Migration chain (oldest -> newest): 53 revisions, single head `2a3b4c5d6e7f`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -476,6 +523,34 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 23. `3f0e3e733925` - change employee_salary unique constraint to include effective_date
 24. `7ab12cd44e91` - add partial unique index for DTR import idempotency (QA-01)
 25. `8c12ab55d901` - Add durable payroll generation fingerprint.
+26. `1b2c3d4e5f60` - Create effective-dated employee shift assignments.
+27. `2c3d4e5f6071` - Add a Manila-calendar work date to attendance records.
+28. `3d4e5f607182` - Persist idempotency fingerprints for atomic DTR imports.
+29. `4e5f60718293` - Record bounded overtime review decisions on attendance records.
+30. `5f60718293a4` - Add effective pay groups and versioned payroll policies.
+31. `6a718293a4b5` - Add immutable multi-interval attendance revisions.
+32. `7b8293a4b5c6` - Record idempotent identities for atomic, explicit salary batches.
+33. `8c93a4b5c6d7` - Enforce one active daily attendance record per employee and work date.
+34. `9d04b5c6d7e8` - Add payroll review snapshots and durable payslip-delivery outbox.
+35. `67e279f8c3cc` - Add monthly payroll contribution ledger
+36. `7c8d9e0f1a2b` - Add compensation-to-MSC mapping fields to SSS schedules.
+37. `8d9e0f1a2b3c` - Record source references and seed BIR Annex E when no schedule exists.
+38. `9e0f1a2b3c4d` - Seed the published 2025 SSS employer and employee contribution schedule.
+39. `a0f1a2b3c4d5` - Seed published PhilHealth and Pag-IBIG mandatory schedules when absent.
+40. `b1c2d3e4f5a6` - Store reviewed employee tax classification and opening YTD amounts.
+41. `c2d3e4f5a6b7` - Track the date covered by opening tax-year balances.
+42. `e7f8a9b0c1d2` - Store prior-employer periods used by cumulative-average tax.
+43. `f3a4b5c6d7e8` - Add idempotency records for explicit pay-group batches.
+44. `ab4c5d6e7f80` - Add explicit combined holiday and rest-day pay factors.
+45. `bc5d6e7f8091` - Add verified benefit records for annual BIR exemption reconciliation.
+46. `cd6e7f8091a2` - Add employer identity needed for payroll tax certificates.
+47. `de7f8091a2b3` - Track BIR de minimis benefit category and supporting evidence.
+48. `ef8091a2b3c4` - Store reconciled de minimis category opening balances.
+49. `f1a2b3c4d5e6` - Add reviewed, tax-year-scoped identity for Form 2316.
+50. `1a2b3c4d5e6f` - Allow only one correction to reverse each contribution ledger row.
+51. `2b3c4d5e6f70` - Require contribution corrections to stay within their source scope.
+52. `3c4d5e6f7a8b` - Seed the verified PhilHealth direct-contributor schedule for 2026.
+53. `2a3b4c5d6e7f` - Add evidence and limits for day-based de minimis benefits.
 
 ### Migration anomalies (static findings, report-only)
 
@@ -483,9 +558,11 @@ Derived by `scripts/gen-map.sh` from the migration source text only. These
 are NOT defects proven by running anything: each needs human review before
 any action. Historical migration files are never modified by the generator.
 
-6 finding(s):
+8 finding(s):
 
 - `3009113137ba` (add notification and audit_log tables): `upgrade()` contains no `op.*` call (effectively a no-op migration; its child may carry the intended work)
+- `9e0f1a2b3c4d` (Seed the published 2025 SSS employer and employee contribution schedule.): `upgrade()` contains no `op.*` call (effectively a no-op migration; its child may carry the intended work)
+- `a0f1a2b3c4d5` (Seed published PhilHealth and Pag-IBIG mandatory schedules when absent.): `upgrade()` contains no `op.*` call (effectively a no-op migration; its child may carry the intended work)
 - `3f0e3e733925` (change employee_salary unique constraint to include effective_date), `f176e167c8e7` (change employee_salary unique constraint to include effective_date): identical normalized `upgrade()` constraint-operation signature
 - `54ff6e36652b` (add_payroll_tables): description mentions table creation but `upgrade()` contains no `op.create_table` call
 - `7286295e0903` (add employee core and org structure tables): creates native enum type(s) `employeestatus` in `upgrade()` with no matching `DROP TYPE` in its `downgrade()` (downgrade leaves the postgres type orphaned; enum cleanup would need a follow-up migration or explicit ops runbook)
@@ -508,7 +585,7 @@ Backend domains with no same-named frontend feature: `audit`, `employee`, `item`
 routers for ~16 resources that each have their own frontend feature, and
 `attendance`/`leave`/`rbac` back multiple differently-named feature screens.)
 
-Frontend features with no same-named backend domain: `apps`, `blocks`, `categories`, `chats`, `daily-time-records`, `departments`, `divisions`, `dtr-adjustments`, `emp-tasks`, `employee-projects`, `employees`, `holidays`, `leave-calendar`, `leave-enrollment`, `leave-ledger`, `leave-policies`, `leave-requests`, `lots`, `model-types`, `models`, `owners`, `payroll-config`, `payroll-runs`, `phases`, `positions`, `project-types`, `projects`, `roles`, `salary`, `settings`, `shifts`, `subdivisions`, `tasks`, `users`
+Frontend features with no same-named backend domain: `apps`, `blocks`, `categories`, `chats`, `daily-time-records`, `departments`, `divisions`, `dtr-adjustments`, `emp-tasks`, `employee-projects`, `employees`, `holidays`, `leave-calendar`, `leave-enrollment`, `leave-ledger`, `leave-policies`, `leave-requests`, `lots`, `model-types`, `models`, `owners`, `payroll-config`, `payroll-runs`, `payroll-settings`, `phases`, `positions`, `project-types`, `projects`, `roles`, `salary`, `settings`, `shifts`, `subdivisions`, `tasks`, `users`
 (Many map to a differently-named backend domain, e.g. all `leave-*`/`holidays`
 features hit `app/leave/`, and the CRUD screens under `app/employee/`;
 `apps`/`chats`/`tasks`/`settings`/`users` are unwired template-demo features.)

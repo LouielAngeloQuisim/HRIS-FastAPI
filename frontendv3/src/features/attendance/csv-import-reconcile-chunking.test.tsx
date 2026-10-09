@@ -8,6 +8,8 @@ import { userEvent } from 'vitest/browser'
 import { renderWithClient } from '@/test-utils/providers'
 import { AttendanceCsvImportWizard, __resetRecoverableSlotForTests } from './components/csv-import/attendance-csv-wizard'
 
+vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
+
 const { apiPostMock, toastErrorMock } = vi.hoisted(() => ({
   apiPostMock: vi.fn(),
   toastErrorMock: vi.fn(),
@@ -24,6 +26,8 @@ vi.mock('sonner', () => ({
 }))
 
 const RECONCILE_URL = '/daily-time-records/reconcile-imports'
+const PREFLIGHT_URL = '/daily-time-records/import-batches/preflight'
+const COMMIT_URL = '/daily-time-records/import-batches/commit'
 
 function csvRows(n: number): string {
   const lines = ['employee_code,login_date,logout_date,shift_code']
@@ -33,14 +37,18 @@ function csvRows(n: number): string {
   return lines.join('\n')
 }
 
-/** Import `n` rows, every POST dying with an ambiguous 5xx -> all UNKNOWN. */
+/** Preflight `n` rows, then lose the one atomic commit response -> all UNKNOWN. */
 async function importAllUnknown(view: Awaited<ReturnType<typeof renderWithClient>>, n: number) {
-  apiPostMock.mockRejectedValue({ response: { status: 502 } })
+  apiPostMock.mockImplementation((url: string) => {
+    if (url === PREFLIGHT_URL) return Promise.resolve({ data: { valid: true, issues: [], excluded: [] } })
+    if (url === COMMIT_URL) return Promise.reject({ response: { status: 502 } })
+    return Promise.resolve({ data: {} })
+  })
   await userEvent.fill(view.getByPlaceholder(/employee_code/), csvRows(n))
   await userEvent.click(view.getByRole('button', { name: new RegExp(`^Import ${n} Records$`, 'i') }))
-  await vi.waitFor(() => { expect(apiPostMock).toHaveBeenCalledTimes(n) })
-  // Drop the import POSTs from the call log; reconcile asserts below only
-  // look at the /reconcile-imports requests.
+  await vi.waitFor(() => { expect(apiPostMock).toHaveBeenCalledTimes(2) })
+  // Drop preflight/commit calls; reconcile assertions below inspect only
+  // bounded pair requests.
   apiPostMock.mockReset()
 }
 

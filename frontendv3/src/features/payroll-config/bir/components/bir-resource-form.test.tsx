@@ -69,6 +69,7 @@ describe('BIRResourceForm validation', () => {
           base_tax: '0',
           excess_rate: '0',
           effective_date: '2025-01-01',
+          source_reference: null,
           is_active: true,
           is_deleted: false,
           created_at: null,
@@ -114,4 +115,17 @@ it('shows a clear numeric error, preserves the value and prevents a rejected sub
   await expect.element(screen.getByText('Enter 0 or a positive value.')).toBeVisible()
   await expect.element(screen.getByTestId('bir-bracket_min-input')).toHaveValue(-1)
   expect(createMock).not.toHaveBeenCalled()
+})
+
+it('keeps source attribution optional and submits secure HTTPS references', async () => {
+  createMock.mockResolvedValue({})
+  const screen = await render(<BIRResourceForm item={null} open={true} onClose={() => {}} />)
+  await userEvent.selectOptions(screen.getByLabelText(/Period/i), 'monthly')
+  await userEvent.fill(screen.getByLabelText(/Bracket Min/i), '0')
+  await userEvent.fill(screen.getByLabelText(/Base Tax/i), '0')
+  await userEvent.fill(screen.getByLabelText(/Excess Rate/i), '0')
+  await userEvent.fill(screen.getByLabelText(/Effective Date/i), '2026-01-01')
+  await userEvent.fill(screen.getByLabelText(/Source reference URL/i), 'https://www.bir.gov.ph/example')
+  await userEvent.click(screen.getByRole('button', { name: /Create/i }))
+  expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ source_reference: 'https://www.bir.gov.ph/example' }))
 })

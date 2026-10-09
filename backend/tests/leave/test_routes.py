@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords
-from app.leave.models import LeavePolicy
+from app.leave.models import LeavePolicy, LeaveRequest
 from app.user.models import User
 
 API = settings.API_V1_STR
@@ -356,6 +356,62 @@ class TestValidation:
             headers=superuser_token_headers,
         )
         assert r.status_code == 422, r.text
+
+    def test_partial_hours_cannot_be_ambiguous_across_multiple_dates(
+        self,
+        client: TestClient,
+        db: Session,
+        superuser_token_headers,
+        employee: EmployeeRecords,
+        policy: LeavePolicy,
+    ) -> None:
+        r = client.post(
+            f"{API}/leave-requests/",
+            json={
+                "employee_id": str(employee.id),
+                "policy_id": str(policy.id),
+                "date_start": "2026-09-07",
+                "date_end": "2026-09-08",
+                "requested_hours": "3.00",
+            },
+            headers=superuser_token_headers,
+        )
+        assert r.status_code == 422, r.text
+        assert "single date" in r.json()["detail"].lower()
+        assert (
+            db.exec(
+                select(LeaveRequest).where(LeaveRequest.employee_id == employee.id)
+            ).first()
+            is None
+        )
+
+    def test_partial_hours_must_resolve_to_whole_minutes(
+        self,
+        client: TestClient,
+        db: Session,
+        superuser_token_headers,
+        employee: EmployeeRecords,
+        policy: LeavePolicy,
+    ) -> None:
+        r = client.post(
+            f"{API}/leave-requests/",
+            json={
+                "employee_id": str(employee.id),
+                "policy_id": str(policy.id),
+                "date_start": "2026-09-07",
+                "date_end": "2026-09-07",
+                "requested_hours": "4.01",
+            },
+            headers=superuser_token_headers,
+        )
+        assert r.status_code == 422, r.text
+        assert "whole number of minutes" in r.text
+        assert (
+            db.exec(
+                select(LeaveRequest).where(LeaveRequest.employee_id == employee.id)
+            ).first()
+            is None
+        )
 
     def test_overlap_returns_422(
         self, client: TestClient, superuser_token_headers,

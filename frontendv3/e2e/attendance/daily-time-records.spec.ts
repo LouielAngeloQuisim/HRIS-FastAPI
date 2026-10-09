@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures'
-import { createParent, waitForWrite, assertWrite } from '../helpers/crud-journey'
+import { assignEmployeeShift, createParent, waitForWrite, assertWrite } from '../helpers/crud-journey'
 import { DailyTimeRecordsPage } from '../pages/daily-time-records.page'
 
 test.describe('Daily Time Records E2E', () => {
@@ -31,12 +31,14 @@ test('imports a punch through the UI then edits and deletes it', async ({ page, 
  await loginAsAdmin()
  const unique = Date.now().toString(36)
  const employee = await createParent(page, 'employees', { employee_code: 'I' + unique, first_name: 'Import', last_name: unique, birthdate: '1990-01-01' })
+ await assignEmployeeShift(page, employee.id)
  await page.goto('/daily-time-records')
  await page.getByTestId('import-dtr-csv-button').click()
- await page.getByPlaceholder(/employee_code/).fill('employee_code,login_date,logout_date\n' + employee.employee_code + ',2026-10-02T08:00:00Z,2026-10-02T17:00:00Z')
- const importing = waitForWrite(page, 'daily-time-records', 'POST')
+ await page.getByPlaceholder(/employee_code/).fill('employee_code,login_date,logout_date\n' + employee.employee_code + ',2026-10-02T00:00:00Z,2026-10-02T09:00:00Z')
+ const importing = waitForWrite(page, 'daily-time-records/import-batches/commit', 'POST')
  await page.getByRole('button', { name: 'Import 1 Records', exact: true }).click()
- const created = await assertWrite(await importing, 201)
+ const committed = await assertWrite(await importing, 200)
+ const created = committed.records[0]
  await expect(page.getByText('1 succeeded')).toBeVisible()
  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).first().click()
  await page.getByTestId('edit-daily-time-record-button-' + created.id).click()

@@ -5,6 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from pydantic import field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
 from app.leave.models import (
@@ -31,6 +32,7 @@ class LeavePolicyBase(SQLModel):
     carry_over_max_days: Decimal | None = Field(default=None)
     carry_over_expires_on: date | None = Field(default=None)
     is_paid: bool = Field(default=True)
+    tax_exempt_unused_vacation_leave: bool = Field(default=False)
     eligible_departments: list[uuid.UUID] = Field(default_factory=list)
     gender_scope: GenderScope = Field(default=GenderScope.ALL)
     marital_status_scope: MaritalStatusScope = Field(default=MaritalStatusScope.ALL)
@@ -38,7 +40,11 @@ class LeavePolicyBase(SQLModel):
 
 
 class LeavePolicyCreate(LeavePolicyBase):
-    pass
+    @model_validator(mode="after")
+    def tax_exempt_policy_must_be_paid(self) -> "LeavePolicyCreate":
+        if self.tax_exempt_unused_vacation_leave and not self.is_paid:
+            raise ValueError("Unused-vacation tax-exempt policy must be paid")
+        return self
 
 
 class LeavePolicyUpdate(SQLModel):
@@ -53,6 +59,7 @@ class LeavePolicyUpdate(SQLModel):
     carry_over_max_days: Decimal | None = Field(default=None)
     carry_over_expires_on: date | None = Field(default=None)
     is_paid: bool | None = Field(default=None)
+    tax_exempt_unused_vacation_leave: bool | None = Field(default=None)
     eligible_departments: list[uuid.UUID] | None = Field(default=None)
     gender_scope: GenderScope | None = Field(default=None)
     marital_status_scope: MaritalStatusScope | None = Field(default=None)
@@ -116,6 +123,18 @@ class LeaveRequestBase(SQLModel):
     requested_hours: Decimal | None = Field(default=None)
     reason: str | None = Field(default=None, max_length=1024)
     document_ref: str | None = Field(default=None, max_length=255)
+
+    @field_validator("requested_hours")
+    @classmethod
+    def validate_requested_hours(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return value
+        if value <= 0:
+            raise ValueError("requested_hours must be greater than zero")
+        minutes = value * Decimal(60)
+        if minutes != minutes.to_integral_value():
+            raise ValueError("requested_hours must resolve to a whole number of minutes")
+        return value
 
 
 class LeaveRequestCreate(LeaveRequestBase):
@@ -228,6 +247,8 @@ class HolidayConfigBase(SQLModel):
     observe_weekend_as: ObserveWeekendAs | None = Field(default=None)
     multiplier_regular: Decimal | None = Field(default=None)
     multiplier_overtime: Decimal | None = Field(default=None)
+    multiplier_regular_rest_day: Decimal | None = Field(default=None, ge=1)
+    multiplier_overtime_rest_day: Decimal | None = Field(default=None, ge=1)
     is_recurring: bool = Field(default=True)
     is_active: bool = Field(default=True)
 
@@ -245,6 +266,8 @@ class HolidayConfigUpdate(SQLModel):
     observe_weekend_as: ObserveWeekendAs | None = Field(default=None)
     multiplier_regular: Decimal | None = Field(default=None)
     multiplier_overtime: Decimal | None = Field(default=None)
+    multiplier_regular_rest_day: Decimal | None = Field(default=None, ge=1)
+    multiplier_overtime_rest_day: Decimal | None = Field(default=None, ge=1)
     is_recurring: bool | None = Field(default=None)
     is_active: bool | None = Field(default=None)
 

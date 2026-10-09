@@ -36,13 +36,23 @@ class DtrAdjustment(SQLModel, table=True):
     employee_id: uuid.UUID = Field(
         default=None, foreign_key="employee_records.id", index=True, ondelete="CASCADE"
     )
-    original_login_date: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
-    original_logout_date: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
-    adjusted_login_date: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
-    adjusted_logout_date: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    original_login_date: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    original_logout_date: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    adjusted_login_date: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    adjusted_logout_date: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore
     reason: str | None = Field(default=None, max_length=1024)
     status: str = Field(default="PENDING", max_length=16, index=True)
-    adjusted_date: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    adjusted_date: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore
     created_by: uuid.UUID | None = Field(
         default=None, foreign_key="user.id", index=True, ondelete="SET NULL"
     )
@@ -51,11 +61,14 @@ class DtrAdjustment(SQLModel, table=True):
     )
     is_deleted: bool = Field(default=False)
     deleted_at: datetime | None = Field(
-        default=None, sa_type=DateTime(timezone=True)  # type: ignore
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
     )
     created_at: datetime | None = Field(
-        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)  # type: ignore
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
     )
     updated_at: datetime | None = Field(
-        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)  # type: ignore
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
     )

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useSSSBrackets } from '@/lib/api/payroll-config'
+import type { SSSBracketPublic } from '@/lib/api/types'
 import { useCan } from '@/context/permissions-provider'
 import { Button } from '@/components/ui/button'
-import { SSSResourceForm } from './components/sss-resource-form'
 import { ResourceDeleteDialog } from './components/resource-delete-dialog'
-import type { SSSBracketPublic } from '@/lib/api/types'
+import { SSSResourceForm } from './components/sss-resource-form'
 
 export default function SSSConfigPage() {
   const [page] = useState(1)
@@ -14,7 +14,10 @@ export default function SSSConfigPage() {
   const canEdit = useCan('sss_config', 'edit')
   const canDelete = useCan('sss_config', 'delete')
 
-  const { data, isPending, isError, refetch } = useSSSBrackets((page - 1) * pageSize, pageSize)
+  const { data, isPending, isError, refetch } = useSSSBrackets(
+    (page - 1) * pageSize,
+    pageSize
+  )
 
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<SSSBracketPublic | null>(null)
@@ -24,7 +27,9 @@ export default function SSSConfigPage() {
   if (!canView) {
     return (
       <div className='flex flex-1 flex-col items-center justify-center gap-4'>
-        <p className='text-muted-foreground'>You do not have permission to view SSS config.</p>
+        <p className='text-muted-foreground'>
+          You do not have permission to view SSS config.
+        </p>
       </div>
     )
   }
@@ -34,11 +39,13 @@ export default function SSSConfigPage() {
       <div className='flex items-center justify-between'>
         <div>
           <h1 className='text-2xl font-bold'>SSS Configuration</h1>
-          <p className='text-muted-foreground'>{data?.count ?? 0} bracket records</p>
+          <p className='text-muted-foreground'>
+            {data?.count ?? 0} bracket records
+          </p>
         </div>
         {canCreate && (
           <Button
-            data-testid="add-sss-button"
+            data-testid='add-sss-button'
             onClick={() => {
               setEditing(null)
               setOpen(true)
@@ -51,8 +58,17 @@ export default function SSSConfigPage() {
       {isPending && <p className='text-sm text-muted-foreground'>Loading...</p>}
       {isError && (
         <div className='flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-12 text-center'>
-          <p className='text-sm text-muted-foreground'>Failed to load SSS brackets.</p>
-          <button type='button' onClick={() => refetch()} className='text-sm font-medium text-primary underline underline-offset-4' data-testid="retry-button">Try again</button>
+          <p className='text-sm text-muted-foreground'>
+            Failed to load SSS brackets.
+          </p>
+          <button
+            type='button'
+            onClick={() => refetch()}
+            className='text-sm font-medium text-primary underline underline-offset-4'
+            data-testid='retry-button'
+          >
+            Try again
+          </button>
         </div>
       )}
       {data && (
@@ -60,8 +76,9 @@ export default function SSSConfigPage() {
           <table className='w-full text-sm'>
             <thead>
               <tr className='border-b bg-muted/50'>
-                <th className='p-2 text-left'>MSC Min</th>
-                <th className='p-2 text-left'>MSC Max</th>
+                <th className='p-2 text-left'>Compensation Min</th>
+                <th className='p-2 text-left'>Compensation Max</th>
+                <th className='p-2 text-left'>Mapped MSC</th>
                 <th className='p-2 text-left'>Employer SS</th>
                 <th className='p-2 text-left'>Employer EC</th>
                 <th className='p-2 text-left'>Employer MPF</th>
@@ -73,14 +90,56 @@ export default function SSSConfigPage() {
             </thead>
             <tbody>
               {data.data.map((item) => (
-                <tr key={item.id} className='border-b last:border-0 hover:bg-muted/50'>
-                  <td className='p-2'>{Number(item.msc_min).toLocaleString()}</td>
-                  <td className='p-2'>{Number(item.msc_max).toLocaleString()}</td>
-                  <td className='p-2'>₱{Number(item.employer_ss).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td className='p-2'>₱{Number(item.employer_ec).toLocaleString()}</td>
-                  <td className='p-2'>₱{Number(item.employer_mpf).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td className='p-2'>₱{Number(item.employee_ss).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td className='p-2'>₱{Number(item.employee_mpf).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <tr
+                  key={item.id}
+                  className='border-b last:border-0 hover:bg-muted/50'
+                >
+                  <td className='p-2'>
+                    {item.compensation_min === null
+                      ? '—'
+                      : Number(item.compensation_min).toLocaleString()}
+                  </td>
+                  <td className='p-2'>
+                    {item.compensation_max === null
+                      ? 'No upper limit'
+                      : Number(item.compensation_max).toLocaleString()}
+                  </td>
+                  <td className='p-2'>
+                    {item.monthly_salary_credit === null
+                      ? 'Not configured'
+                      : `₱${Number(item.monthly_salary_credit).toLocaleString()}`}
+                  </td>
+                  <td className='p-2'>
+                    ₱
+                    {Number(item.employer_ss).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </td>
+                  <td className='p-2'>
+                    ₱{Number(item.employer_ec).toLocaleString()}
+                  </td>
+                  <td className='p-2'>
+                    ₱
+                    {Number(item.employer_mpf).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </td>
+                  <td className='p-2'>
+                    ₱
+                    {Number(item.employee_ss).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </td>
+                  <td className='p-2'>
+                    ₱
+                    {Number(item.employee_mpf).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </td>
                   <td className='p-2'>{item.effective_date}</td>
                   <td className='p-2 text-right'>
                     {canEdit && (

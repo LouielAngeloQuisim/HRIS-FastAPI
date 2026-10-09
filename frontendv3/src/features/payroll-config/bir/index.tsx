@@ -66,6 +66,7 @@ export default function BIRConfigPage() {
                 <th className='p-2 text-left'>Base Tax</th>
                 <th className='p-2 text-left'>Excess Rate</th>
                 <th className='p-2 text-left'>Effective Date</th>
+                <th className='p-2 text-left'>Source</th>
                 <th className='p-2 text-right'>Actions</th>
               </tr>
             </thead>
@@ -78,6 +79,20 @@ export default function BIRConfigPage() {
                   <td className='p-2'>{Number(item.base_tax).toLocaleString()}</td>
                   <td className='p-2'>{item.excess_rate}%</td>
                   <td className='p-2'>{item.effective_date}</td>
+                  <td className='p-2'>
+                    {item.source_reference?.startsWith('https://') ? (
+                      <a
+                        href={item.source_reference}
+                        target='_blank'
+                        rel='noreferrer'
+                        className='text-primary underline underline-offset-4'
+                      >
+                        View source
+                      </a>
+                    ) : (
+                      <span className='text-muted-foreground'>No source recorded</span>
+                    )}
+                  </td>
                   <td className='p-2 text-right'>
                     {canEdit && (
                       <Button

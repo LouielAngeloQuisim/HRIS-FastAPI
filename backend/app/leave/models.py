@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     TypeDecorator,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlmodel import Field, SQLModel
@@ -172,6 +173,7 @@ class LeavePolicy(SQLModel, table=True):
     )
     carry_over_expires_on: date | None = Field(default=None)
     is_paid: bool = Field(default=True)
+    tax_exempt_unused_vacation_leave: bool = Field(default=False)
     eligible_departments: list[uuid.UUID] = Field(
         default_factory=list, sa_type=JSON
     )
@@ -326,6 +328,15 @@ class LeaveLedgerEntry(SQLModel, table=True):
     __table_args__ = (
         Index("ix_ledger_employee_policy_year", "employee_id", "policy_id", "leave_year"),
         Index("ix_ledger_source", "source"),
+        Index(
+            "uq_ledger_payroll_tax_benefit_reference",
+            "reference",
+            unique=True,
+            postgresql_where=text(
+                "reference LIKE 'PayrollTaxBenefit:%' OR "
+                "reference LIKE 'PayrollTaxBenefitReversal:%'"
+            ),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -387,6 +398,12 @@ class HolidayConfig(SQLModel, table=True):
         default=None, sa_column=Numeric(6, 3)
     )
     multiplier_overtime: Decimal | None = Field(  # type: ignore
+        default=None, sa_column=Numeric(6, 3)
+    )
+    multiplier_regular_rest_day: Decimal | None = Field(  # type: ignore
+        default=None, sa_column=Numeric(6, 3)
+    )
+    multiplier_overtime_rest_day: Decimal | None = Field(  # type: ignore
         default=None, sa_column=Numeric(6, 3)
     )
     is_recurring: bool = Field(default=True)

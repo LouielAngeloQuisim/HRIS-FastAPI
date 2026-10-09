@@ -18,7 +18,10 @@ from typing import Any
 from pydantic import GetCoreSchemaHandler
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
+    Column,
     DateTime,
+    ForeignKeyConstraint,
     Index,
     Numeric,
     String,
@@ -126,7 +129,7 @@ class LoanType(_StrEnum):
 
 
 class SSSBracket(SQLModel, table=True):
-    """SSS contribution bracket row (fixed peso amounts per MSC range).
+    """SSS schedule row mapping monthly compensation to MSC and contributions.
 
     Source: SSS Circular 2024-006 (15% total = 10% employer SS + 5% employee SS,
     EC employer-paid ₱10-30, MPF split above ₱20,000 MSC). MSC range ₱5,000-₱35,000.
@@ -140,6 +143,12 @@ class SSSBracket(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     msc_min: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
     msc_max: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
+    # Legacy fields above describe MSC ranges, not the employee compensation
+    # ranges used by the employer schedule. Keep them for stored-data/API
+    # compatibility, but require these fields for all new calculations.
+    compensation_min: Decimal | None = Field(default=None, sa_column=Numeric(12, 2))  # type: ignore
+    compensation_max: Decimal | None = Field(default=None, sa_column=Numeric(12, 2))  # type: ignore
+    monthly_salary_credit: Decimal | None = Field(default=None, sa_column=Numeric(12, 2))  # type: ignore
     employer_ss: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
     employer_ec: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
     employer_mpf: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
@@ -205,7 +214,7 @@ class PagIBIGBracket(SQLModel, table=True):
 class BIRBracket(SQLModel, table=True):
     """BIR withholding tax bracket row (TRAIN, per payment period).
 
-    Source: BIR RR 11-2018 as amended (2023-2025 adjusted brackets). ``period``
+    Source: BIR RR 11-2018 Annex E (effective 2023 onward). ``period``
     selects the daily/weekly/semi_monthly/monthly table; ``bracket_max`` is
     nullable for the open-ended top bracket. Tax = base_tax + excess × rate.
     """
@@ -226,6 +235,7 @@ class BIRBracket(SQLModel, table=True):
     base_tax: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
     excess_rate: Decimal = Field(sa_column=Numeric(6, 3))  # type: ignore
     effective_date: date
+    source_reference: str | None = Field(default=None, max_length=512)
     is_active: bool = Field(default=True)
     is_deleted: bool = Field(default=False)
     deleted_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
@@ -237,12 +247,14 @@ class BIRBracket(SQLModel, table=True):
 
 
 class EmployeeSalary(SQLModel, table=True):
-    """Employee salary configuration with rate and non-taxable allowances.
+    """Employee salary configuration with effective-dated rates and allowances.
 
     Supports multiple rate periods via ``effective_date`` (mid-period rate
     changes pro-rate days before/on the effective date), pay_type
-    (monthly/daily/hourly), and the non-taxable allowance set (de minimis caps,
-    13th-month exempt portion ≤ ₱90,000/yr).
+    (monthly/daily/hourly), a legacy-named fixed monthly cash allowance,
+    and a separately classified de minimis benefit map. The legacy allowance
+    is taxable only when the confirmed payroll policy explicitly applies the
+    supported fixed-allowance rule.
     """
 
     __tablename__ = "employee_salary"
@@ -265,6 +277,8 @@ class EmployeeSalary(SQLModel, table=True):
     )
     overtime_rate: Decimal = Field(default=Decimal("0.000"), sa_column=Numeric(6, 3))  # type: ignore
     absent_penalty_rate: Decimal = Field(default=Decimal("0.000"), sa_column=Numeric(6, 3))  # type: ignore
+    # Legacy column/API name; this is not evidence that the allowance qualifies
+    # for an income-tax exemption.
     non_taxable_allowance: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(12, 2))  # type: ignore
     de_minimis_monthly: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
     thirteenth_month_exempt_portion: Decimal = Field(
@@ -275,6 +289,331 @@ class EmployeeSalary(SQLModel, table=True):
     deleted_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
     created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
     updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+
+
+class EmployeeTaxYearDeclaration(SQLModel, table=True):
+    """Verified employee tax classification and year-to-date opening figures.
+
+    These figures are supplied during payroll onboarding or when consolidating
+    a previous employer's BIR Form 2316. They are an opening balance, not a
+    substitute for the system's own finalized payroll ledger.
+    """
+
+    __tablename__ = "employee_tax_year_declaration"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "tax_year", name="uq_employee_tax_year_declaration"),
+        CheckConstraint("tax_year >= 2000 AND tax_year <= 2200", name="ck_employee_tax_year_range"),
+        CheckConstraint("tax_classification IN ('ordinary', 'minimum_wage_earner')", name="ck_employee_tax_classification"),
+        CheckConstraint("taxable_compensation_ytd >= 0 AND tax_withheld_ytd >= 0", name="ck_employee_tax_ytd_nonnegative"),
+        CheckConstraint(
+            "opening_benefits_exempt_ytd >= 0 AND opening_benefits_exempt_ytd <= 90000",
+            name="ck_employee_tax_opening_benefits_nonnegative",
+        ),
+        CheckConstraint(
+            "opening_pay_period_count >= 0 AND opening_pay_period_count <= 366",
+            name="ck_employee_tax_opening_period_count",
+        ),
+        CheckConstraint(
+            "opening_unused_vacation_leave_days_ytd IS NULL OR "
+            "opening_unused_vacation_leave_days_ytd BETWEEN 0 AND 12",
+            name="ck_employee_tax_unused_vacation_days_ytd",
+        ),
+        CheckConstraint(
+            "opening_pay_period_type IS NULL OR opening_pay_period_type IN ('daily', 'weekly', 'semi_monthly', 'monthly')",
+            name="ck_employee_tax_opening_period_type",
+        ),
+        Index("ix_employee_tax_year_declaration_year", "tax_year"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    employee_id: uuid.UUID = Field(foreign_key="employee_records.id", ondelete="CASCADE", index=True)
+    tax_year: int
+    tax_classification: str = Field(default="ordinary", max_length=32)
+    opening_as_of: date | None = None
+    taxable_compensation_ytd: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(14, 2))  # type: ignore
+    tax_withheld_ytd: Decimal = Field(default=Decimal("0.00"), sa_column=Numeric(14, 2))  # type: ignore
+    opening_pay_period_count: int = Field(default=0, ge=0)
+    opening_pay_period_type: str | None = Field(default=None, max_length=16)
+    previous_employer_included: bool = Field(default=False)
+    # Legacy certificate-only columns are retained for migration compatibility.
+    # They are not exposed by payroll APIs or used in payroll calculations.
+    employee_tin: str | None = Field(default=None, max_length=32)
+    employee_rdo_code: str | None = Field(default=None, max_length=8)
+    employee_registered_address: str | None = Field(default=None, max_length=512)
+    employee_registered_postal_code: str | None = Field(default=None, max_length=10)
+    employee_local_home_address: str | None = Field(default=None, max_length=512)
+    employee_local_postal_code: str | None = Field(default=None, max_length=10)
+    previous_employer_tin: str | None = Field(default=None, max_length=32)
+    previous_employer_name: str | None = Field(default=None, max_length=255)
+    previous_employer_address: str | None = Field(default=None, max_length=512)
+    previous_employer_postal_code: str | None = Field(default=None, max_length=10)
+    previous_employer_period_from: date | None = None
+    previous_employer_period_to: date | None = None
+    certificate_identity_verified: bool = Field(default=False)
+    certificate_identity_source: str | None = Field(default=None, max_length=512)
+    certificate_identity_verified_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    certificate_identity_verified_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    opening_benefits_exempt_ytd: Decimal = Field(
+        default=Decimal("0.00"), sa_column=Numeric(14, 2)  # type: ignore
+    )
+    opening_benefits_reconciled: bool = Field(default=False)
+    opening_de_minimis_annual_ytd: dict[str, str] = Field(default_factory=dict, sa_type=JSON)
+    opening_de_minimis_monthly_ytd: dict[str, str] = Field(default_factory=dict, sa_type=JSON)
+    opening_unused_vacation_leave_days_ytd: int | None = Field(default=None, ge=0, le=12)
+    is_verified: bool = Field(default=False)
+    source_reference: str | None = Field(default=None, max_length=512)
+    verified_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    verified_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+    updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+
+
+class EmployeeTaxBenefit(SQLModel, table=True):
+    """Immutable paid benefits that use BIR's shared annual exemption ceiling."""
+
+    __tablename__ = "employee_tax_benefit"
+    __table_args__ = (
+        CheckConstraint("tax_year >= 2000 AND tax_year <= 2200", name="ck_employee_tax_benefit_year"),
+        CheckConstraint(
+            "(correction_of_id IS NULL AND gross_amount > 0 AND correction_reason IS NULL) OR "
+            "(correction_of_id IS NOT NULL AND gross_amount < 0 AND length(trim(correction_reason)) > 0)",
+            name="ck_employee_tax_benefit_correction_shape",
+        ),
+        CheckConstraint(
+            "(benefit_type IN ('thirteenth_month', 'other_benefit') AND de_minimis_category IS NULL) OR "
+            "(benefit_type = 'de_minimis' AND de_minimis_category IN "
+            "('medical_cash_dependents', 'rice_subsidy', 'uniform_clothing', "
+            "'actual_medical_assistance', 'laundry_allowance', 'achievement_award', "
+            "'christmas_anniversary_gift', 'cba_productivity_incentive', "
+            "'daily_meal_ot_night', 'monetized_unused_vacation_leave'))",
+            name="ck_employee_tax_benefit_classification",
+        ),
+        CheckConstraint(
+            "(de_minimis_category = 'daily_meal_ot_night' AND qualifying_days IS NOT NULL "
+            "AND qualifying_days BETWEEN 1 AND 366 AND regional_daily_minimum_wage IS NOT NULL "
+            "AND regional_daily_minimum_wage > 0 AND region_code IS NOT NULL "
+            "AND length(trim(region_code)) > 0 AND wage_order_reference IS NOT NULL "
+            "AND length(trim(wage_order_reference)) > 0 AND qualifying_work_dates IS NOT NULL "
+            "AND wage_order_effective_from IS NOT NULL AND "
+            "(wage_order_effective_to IS NULL OR wage_order_effective_to >= wage_order_effective_from) "
+            "AND vacation_leave_policy_id IS NULL) OR "
+            "(de_minimis_category = 'monetized_unused_vacation_leave' AND qualifying_days IS NOT NULL "
+            "AND qualifying_days BETWEEN 1 AND 366 "
+            "AND regional_daily_minimum_wage IS NULL AND region_code IS NULL AND wage_order_reference IS NULL "
+            "AND qualifying_work_dates IS NULL AND wage_order_effective_from IS NULL "
+            "AND wage_order_effective_to IS NULL AND vacation_leave_policy_id IS NOT NULL) OR "
+            "(de_minimis_category NOT IN ('daily_meal_ot_night', 'monetized_unused_vacation_leave') "
+            "AND qualifying_days IS NULL AND regional_daily_minimum_wage IS NULL "
+            "AND region_code IS NULL AND wage_order_reference IS NULL AND qualifying_work_dates IS NULL "
+            "AND wage_order_effective_from IS NULL AND wage_order_effective_to IS NULL "
+            "AND vacation_leave_policy_id IS NULL) OR "
+            "(de_minimis_category IS NULL AND qualifying_days IS NULL AND regional_daily_minimum_wage IS NULL "
+            "AND region_code IS NULL AND wage_order_reference IS NULL AND qualifying_work_dates IS NULL "
+            "AND wage_order_effective_from IS NULL AND wage_order_effective_to IS NULL "
+            "AND vacation_leave_policy_id IS NULL)",
+            name="ck_employee_tax_benefit_day_evidence_shape",
+        ),
+        Index("ix_employee_tax_benefit_employee_year_date", "employee_id", "tax_year", "paid_on"),
+        UniqueConstraint("correction_of_id", name="uq_employee_tax_benefit_correction_of"),
+        UniqueConstraint(
+            "employee_id",
+            "tax_year",
+            "benefit_type",
+            "source_reference",
+            name="uq_employee_tax_benefit_source_reference",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    employee_id: uuid.UUID = Field(foreign_key="employee_records.id", ondelete="CASCADE")
+    tax_year: int
+    paid_on: date
+    benefit_type: str = Field(max_length=32)
+    de_minimis_category: str | None = Field(default=None, max_length=40)
+    eligibility_evidence: list[str] = Field(default_factory=list, sa_type=JSON)
+    qualifying_days: int | None = None
+    qualifying_work_dates: list[str] | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
+    vacation_leave_policy_id: uuid.UUID | None = Field(
+        default=None, foreign_key="leave_policy.id", ondelete="RESTRICT"
+    )
+    eligibility_snapshot: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
+    regional_daily_minimum_wage: Decimal | None = Field(
+        default=None, sa_column=Numeric(12, 2)
+    )  # type: ignore
+    region_code: str | None = Field(default=None, max_length=32)
+    wage_order_reference: str | None = Field(default=None, max_length=512)
+    wage_order_effective_from: date | None = None
+    wage_order_effective_to: date | None = None
+    gross_amount: Decimal = Field(sa_column=Numeric(14, 2))  # type: ignore
+    source_reference: str = Field(max_length=512)
+    correction_of_id: uuid.UUID | None = Field(
+        default=None, foreign_key="employee_tax_benefit.id", ondelete="RESTRICT"
+    )
+    correction_reason: str | None = Field(default=None, max_length=512)
+    created_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+
+
+class PayrollEmployerProfile(SQLModel, table=True):
+    """Legacy certificate-identity table retained for migration compatibility."""
+
+    __tablename__ = "payroll_employer_profile"
+    __table_args__ = (
+        CheckConstraint("id = 'default'", name="ck_payroll_employer_profile_singleton"),
+    )
+
+    id: str = Field(default="default", primary_key=True, max_length=16)
+    tin_number: str | None = Field(default=None, max_length=32)
+    registered_name: str | None = Field(default=None, max_length=255)
+    registered_address: str | None = Field(default=None, max_length=512)
+    postal_code: str | None = Field(default=None, max_length=10)
+    rdo_code: str | None = Field(default=None, max_length=8)
+    employer_type: str | None = Field(default=None, max_length=16)
+    signatory_name: str | None = Field(default=None, max_length=255)
+    signatory_title: str | None = Field(default=None, max_length=128)
+    source_reference: str | None = Field(default=None, max_length=512)
+    is_verified: bool = Field(default=False)
+    verified_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    verified_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    updated_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
+class PayrollPayGroup(SQLModel, table=True):
+    """Company-defined payroll cadence and pay-date policy."""
+
+    __tablename__ = "payroll_pay_group"
+    __table_args__ = (UniqueConstraint("code", name="uq_payroll_pay_group_code"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    code: str = Field(max_length=32)
+    name: str = Field(max_length=128)
+    cadence: CutoffType = Field(
+        default=CutoffType.MONTHLY,
+        sa_type=_EnumAsString(CutoffType, "cutofftype"),
+    )  # type: ignore
+    # For semi-monthly: configured inclusive first and second period end days.
+    first_period_end_day: int | None = Field(default=None, ge=1, le=30)
+    second_period_end_day: int | None = Field(default=None, ge=1, le=31)
+    payment_offset_days: int = Field(default=0, ge=0, le=60)
+    weekend_rule: str = Field(default="next_business_day", max_length=32)
+    is_active: bool = Field(default=True)
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
+class EmployeePayGroupAssignment(SQLModel, table=True):
+    """Effective-dated pay group membership, independent of salary basis."""
+
+    __tablename__ = "employee_pay_group_assignment"
+    __table_args__ = (
+        UniqueConstraint(
+            "employee_id", "effective_from", name="uq_employee_pay_group_assignment_start"
+        ),
+        Index(
+            "ix_employee_pay_group_assignment_employee_dates",
+            "employee_id",
+            "effective_from",
+            "effective_to",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    employee_id: uuid.UUID = Field(
+        foreign_key="employee_records.id", index=True, ondelete="CASCADE"
+    )
+    pay_group_id: uuid.UUID = Field(
+        foreign_key="payroll_pay_group.id", index=True, ondelete="RESTRICT"
+    )
+    effective_from: date
+    effective_to: date | None = None
+    assigned_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
+class EmployeeSalaryBulkBatch(SQLModel, table=True):
+    """Idempotency record for an explicitly selected atomic salary batch."""
+
+    __tablename__ = "employee_salary_bulk_batch"
+
+    id: uuid.UUID = Field(primary_key=True)
+    payload_fingerprint: str = Field(max_length=64)
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    result_salary_ids: list[str] = Field(default_factory=list, sa_type=JSON)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
+class EmployeePayGroupBulkBatch(SQLModel, table=True):
+    """Idempotency record for an explicitly selected pay-group batch."""
+
+    __tablename__ = "employee_pay_group_bulk_batch"
+
+    id: uuid.UUID = Field(primary_key=True)
+    payload_fingerprint: str = Field(max_length=64)
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    result_assignment_ids: list[str] = Field(default_factory=list, sa_type=JSON)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
+class PayrollPolicyVersion(SQLModel, table=True):
+    """Immutable version of company payroll calculation rules."""
+
+    __tablename__ = "payroll_policy_version"
+    __table_args__ = (
+        UniqueConstraint("version", name="uq_payroll_policy_version"),
+        Index("ix_payroll_policy_version_effective", "effective_from", "effective_to"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    version: int
+    effective_from: date
+    effective_to: date | None = None
+    policy: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    confirmed: bool = Field(default=False)
+    confirmed_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    confirmed_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
 
 
 # --- Payroll run lifecycle (B4B.2b/2c) --------------------------------------------------
@@ -288,6 +627,20 @@ class PayrollRun(SQLModel, table=True):
     """
 
     generation_fingerprint: str | None = Field(default=None, max_length=64)
+    workflow_status: str = Field(default="draft", max_length=32)
+    pay_group_id: uuid.UUID | None = Field(
+        default=None, foreign_key="payroll_pay_group.id", ondelete="RESTRICT", index=True
+    )
+    policy_version_id: uuid.UUID | None = Field(
+        default=None, foreign_key="payroll_policy_version.id", ondelete="RESTRICT", index=True
+    )
+    payment_date: date | None = None
+    input_fingerprint: str | None = Field(default=None, max_length=64)
+    finalized_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    finalized_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    frozen_snapshot: dict[str, Any] | None = Field(default=None, sa_type=JSON)
 
     __tablename__ = "payroll_run"
     __table_args__ = (Index("ix_payroll_run_created_by", "created_by"),)
@@ -333,6 +686,16 @@ class PayrollEntry(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    review_state: str = Field(default="ready", max_length=16)
+    reviewed_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    reviewed_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    review_reason: str | None = Field(default=None, max_length=1024)
+    calculation_version: str | None = Field(default=None, max_length=64)
+    input_fingerprint: str | None = Field(default=None, max_length=64)
+    input_snapshot: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    blockers: list[dict[str, str]] = Field(default_factory=list, sa_type=JSON)
     payroll_run_id: uuid.UUID | None = Field(
         default=None, foreign_key="payroll_run.id", ondelete="CASCADE"
     )
@@ -354,6 +717,127 @@ class PayrollEntry(SQLModel, table=True):
     is_readonly: bool = Field(default=False)
     is_deleted: bool = Field(default=False)
     deleted_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+    updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
+
+
+class PayrollContributionLedger(SQLModel, table=True):
+    """Immutable monthly statutory contribution collection record.
+
+    Sequence zero is the single regular collection for an employee/scheme/month.
+    Later rows are reasoned corrections and never overwrite the finalized amount.
+    A row is written in the same transaction as its finalized payroll entry.
+    """
+
+    __tablename__ = "payroll_contribution_ledger"
+    __table_args__ = (
+        UniqueConstraint(
+            "employee_id",
+            "scheme",
+            "contribution_month",
+            "sequence",
+            name="uq_payroll_contribution_employee_scheme_month_sequence",
+        ),
+        UniqueConstraint(
+            "payroll_entry_id",
+            "scheme",
+            "sequence",
+            name="uq_payroll_contribution_entry_scheme_sequence",
+        ),
+        UniqueConstraint(
+            "reverses_id",
+            name="uq_payroll_contribution_single_reversal",
+        ),
+        UniqueConstraint(
+            "id",
+            "employee_id",
+            "scheme",
+            "contribution_month",
+            name="uq_payroll_contribution_reversal_scope",
+        ),
+        ForeignKeyConstraint(
+            ["reverses_id", "employee_id", "scheme", "contribution_month"],
+            [
+                "payroll_contribution_ledger.id",
+                "payroll_contribution_ledger.employee_id",
+                "payroll_contribution_ledger.scheme",
+                "payroll_contribution_ledger.contribution_month",
+            ],
+            name="fk_payroll_contribution_reversal_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "scheme IN ('sss', 'philhealth', 'pagibig')",
+            name="ck_payroll_contribution_scheme",
+        ),
+        CheckConstraint(
+            "(sequence = 0 AND adjustment_reason IS NULL AND reverses_id IS NULL) OR "
+            "(sequence > 0 AND adjustment_reason IS NOT NULL AND reverses_id IS NOT NULL)",
+            name="ck_payroll_contribution_adjustment_reason",
+        ),
+        Index(
+            "ix_payroll_contribution_employee_month",
+            "employee_id",
+            "contribution_month",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    employee_id: uuid.UUID = Field(
+        foreign_key="employee_records.id", ondelete="RESTRICT", index=True
+    )
+    payroll_entry_id: uuid.UUID = Field(
+        foreign_key="payroll_entry.id", ondelete="RESTRICT", index=True
+    )
+    scheme: str = Field(max_length=16)
+    contribution_month: date
+    sequence: int = Field(default=0, ge=0)
+    monthly_basis: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
+    employee_amount: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
+    employer_amount: Decimal = Field(sa_column=Numeric(12, 2))  # type: ignore
+    calculation_snapshot: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    source_references: list[str] = Field(default_factory=list, sa_type=JSON)
+    adjustment_reason: str | None = Field(default=None, max_length=1024)
+    reverses_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="payroll_contribution_ledger.id",
+        ondelete="RESTRICT",
+    )
+    created_by: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore
+
+
+class PayrollDeliveryOutbox(SQLModel, table=True):
+    """Durable delivery work created atomically with payroll finalization."""
+
+    __tablename__ = "payroll_delivery_outbox"
+    __table_args__ = (
+        UniqueConstraint(
+            "payroll_entry_id", "document_version", name="uq_payroll_delivery_document"
+        ),
+        Index("ix_payroll_delivery_due", "status", "next_attempt_at"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    payroll_entry_id: uuid.UUID = Field(
+        foreign_key="payroll_entry.id", ondelete="RESTRICT", index=True
+    )
+    document_version: int = Field(default=1, ge=1)
+    recipient_snapshot: str | None = Field(default=None, max_length=320)
+    content_snapshot: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    status: str = Field(default="scheduled", max_length=16)
+    attempts: int = Field(default=0, ge=0)
+    next_attempt_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    claimed_until: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    last_error_code: str | None = Field(default=None, max_length=64)
+    last_action_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
+    last_action_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
+    last_action_reason: str | None = Field(default=None, max_length=1024)
+    sent_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore
     created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
     updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore
 

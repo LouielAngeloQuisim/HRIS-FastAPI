@@ -43,11 +43,31 @@ class TestHolidayConfigCrud:
                 "name": "Independence Day",
                 "month_day": "06-12",
                 "type": "regular",
+                "multiplier_regular_rest_day": "2.600",
+                "multiplier_overtime_rest_day": "3.380",
             },
             headers=superuser_token_headers,
         )
         assert r.status_code == 201, r.text
         assert r.json()["name"] == "Independence Day"
+        assert r.json()["multiplier_regular_rest_day"] == "2.600"
+        assert r.json()["multiplier_overtime_rest_day"] == "3.380"
+
+    def test_rest_day_multiplier_must_be_at_least_one(
+        self, client: TestClient, superuser_token_headers: dict[str, str]
+    ) -> None:
+        response = client.post(
+            f"{API}/holidays/",
+            json={
+                "code": f"BADFACTOR-{uuid.uuid4().hex[:6]}",
+                "name": "Invalid factor",
+                "month_day": "06-12",
+                "type": "regular",
+                "multiplier_regular_rest_day": "0.9",
+            },
+            headers=superuser_token_headers,
+        )
+        assert response.status_code == 422, response.text
 
     def test_list_holiday_configs(
         self, client: TestClient, superuser_token_headers, holiday_config: HolidayConfig,
@@ -123,16 +143,16 @@ class TestHolidayInstance:
             f"{API}/holidays/instances",
             json={
                 "config_id": str(sat_config.id),
-                "observed_date": "2026-12-25",  # Friday (observed)
-                "raw_date": "2026-12-26",       # Saturday (actual)
-                "leave_year": 2026,
+                "observed_date": "2037-12-25",  # Friday (observed)
+                "raw_date": "2037-12-26",       # Saturday (actual)
+                "leave_year": 2037,
             },
             headers=superuser_token_headers,
         )
         assert r.status_code == 201, r.text
         body = r.json()
-        assert body["observed_date"] == "2026-12-25"
-        assert body["raw_date"] == "2026-12-26"
+        assert body["observed_date"] == "2037-12-25"
+        assert body["raw_date"] == "2037-12-26"
 
     def test_list_instances(
         self, client: TestClient, superuser_token_headers, holiday_config: HolidayConfig,

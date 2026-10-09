@@ -24,6 +24,8 @@ vi.mock('@/lib/api/daily-time-records', () => ({
   useDailyTimeRecords: (...args: unknown[]) => useDailyTimeRecordsMock(...args),
   useApproveOvertime: () => useApproveOvertimeMock(),
   useRejectOvertime: () => useRejectOvertimeMock(),
+  useDtrIntervals: () => ({ data: [], isPending: false, isError: false }),
+  useReplaceDtrIntervals: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 
 vi.mock('@/components/layout/header', () => ({
@@ -83,6 +85,30 @@ describe('DailyTimeRecordsPage', () => {
 
     const screen = await render(<DailyTimeRecordsPage />)
     await expect.element(screen.getByText('No records found.')).toBeVisible()
+  })
+
+  it('sends employee and Manila date filters to the query hook', async () => {
+    useDailyTimeRecordsMock.mockReturnValue({
+      data: { data: [], count: 0 },
+      isPending: false,
+      isError: false,
+      refetch,
+    })
+
+    const screen = await render(<DailyTimeRecordsPage />)
+    await userEvent.fill(screen.getByRole('textbox', { name: 'Filter by employee code' }), 'EMP-204')
+    await userEvent.fill(screen.getByLabelText('Filter from date'), '2026-08-01')
+    await userEvent.fill(screen.getByLabelText('Filter to date'), '2026-08-15')
+
+    await expect.poll(() => useDailyTimeRecordsMock.mock.calls.slice(-1)[0]).toEqual([
+      1,
+      500,
+      undefined,
+      '2026-08-01',
+      '2026-08-15',
+      'EMP-204',
+    ])
+    await expect.element(screen.getByRole('button', { name: 'Clear filters' })).toBeVisible()
   })
 
   it('renders rows from mocked API without client-side recomputation', async () => {

@@ -170,6 +170,12 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     EMAILS_FROM_EMAIL: EmailStr | None = None
     EMAILS_FROM_NAME: str | None = None
+    # Payslip delivery stays opt-in until HR has accepted parallel payroll
+    # comparisons and the production mail configuration is verified.
+    PAYSLIP_DELIVERY_ENABLED: bool = False
+    # Payroll finalization stays opt-in until the calculation rules and parallel
+    # HR-approved sample comparison have been accepted for the employer.
+    PAYROLL_FINALIZATION_ENABLED: bool = False
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:

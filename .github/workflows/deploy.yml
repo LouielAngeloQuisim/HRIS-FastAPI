@@ -98,7 +98,7 @@ jobs:
             ls -t "$HOME"/backups/pre-deploy-*.sql.gz | tail -n +8 | xargs -r rm --
             $C run --rm -T --no-deps backend bash scripts/prestart.sh
             $C up -d --remove-orphans
-            for service in backend frontend traefik; do
+            for service in backend frontend traefik payroll-delivery; do
               cid=$($C ps -q "$service")
               s=starting
               for i in $(seq 1 36); do

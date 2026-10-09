@@ -1,13 +1,14 @@
 """Read-only query helpers for attendance resources (design §1)."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
+from sqlalchemy import or_
 from sqlmodel import Session, col, func, select
 from sqlmodel.sql.expression import SelectOfScalar
 
-from app.attendance.models import DailyTimeRecord, Shift
+from app.attendance.models import DailyTimeRecord, EmployeeShiftAssignment, Shift
 from app.common.types import ModelT
 from app.employee.models import EmployeeRecords
 
@@ -37,9 +38,7 @@ def get_list(
         base = base.where(model.employee_id == employee_id_filter)  # type: ignore[attr-defined]
 
     count_statement: SelectOfScalar[int] = (
-        select(func.count())
-        .select_from(model)
-        .where(col(model.is_deleted) == False)  # noqa: E712
+        select(func.count()).select_from(model).where(col(model.is_deleted) == False)  # noqa: E712
     )
     if filter_column is not None:
         count_statement = count_statement.where(filter_column == filter_value)
@@ -49,20 +48,20 @@ def get_list(
         )
     count = session.exec(count_statement).one()
 
-    statement = (
-        base.order_by(col(model.created_at).desc())
-        .offset(skip)
-        .limit(limit)
-    )
+    statement = base.order_by(col(model.created_at).desc()).offset(skip).limit(limit)
     rows = session.exec(statement).all()
     return list(rows), count
 
 
-def get_by_id(*, session: Session, model: type[ModelT], obj_id: uuid.UUID) -> ModelT | None:
+def get_by_id(
+    *, session: Session, model: type[ModelT], obj_id: uuid.UUID
+) -> ModelT | None:
     return session.get(model, obj_id)
 
 
-def get_active_by_id(*, session: Session, model: type[ModelT], obj_id: uuid.UUID) -> ModelT | None:
+def get_active_by_id(
+    *, session: Session, model: type[ModelT], obj_id: uuid.UUID
+) -> ModelT | None:
     """Fetch a non-deleted row by PK, or None."""
     row = session.get(model, obj_id)
     if row is None or getattr(row, "is_deleted", False):
@@ -126,7 +125,9 @@ def get_shift_by_code(*, session: Session, code: str) -> Shift | None:
     ).first()
 
 
-def get_employee_by_id(*, session: Session, employee_id: uuid.UUID) -> EmployeeRecords | None:
+def get_employee_by_id(
+    *, session: Session, employee_id: uuid.UUID
+) -> EmployeeRecords | None:
     """Fetch a non-deleted employee by PK, or None."""
     row = session.get(EmployeeRecords, employee_id)
     if row is None or getattr(row, "is_deleted", False):
@@ -144,7 +145,26 @@ def get_employee_by_code(*, session: Session, code: str) -> EmployeeRecords | No
     ).first()
 
 
-def get_employee_id_for_user(*, session: Session, user_id: uuid.UUID) -> uuid.UUID | None:
+def get_employee_shift_assignment(
+    *, session: Session, employee_id: uuid.UUID, work_date: date
+) -> EmployeeShiftAssignment | None:
+    """Return the single active shift assignment covering a local work date."""
+    return session.exec(
+        select(EmployeeShiftAssignment).where(
+            EmployeeShiftAssignment.employee_id == employee_id,
+            EmployeeShiftAssignment.is_deleted == False,  # noqa: E712
+            EmployeeShiftAssignment.effective_from <= work_date,
+            or_(
+                col(EmployeeShiftAssignment.effective_to).is_(None),
+                col(EmployeeShiftAssignment.effective_to) >= work_date,
+            ),
+        )
+    ).first()
+
+
+def get_employee_id_for_user(
+    *, session: Session, user_id: uuid.UUID
+) -> uuid.UUID | None:
     """Return the EmployeeRecords.id for a user, or None if no employee record is linked.
 
     Used by the DTR list route to scope results to the caller's own records

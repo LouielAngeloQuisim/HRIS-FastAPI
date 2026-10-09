@@ -58,8 +58,15 @@ def test_inactive_configuration_is_not_used_by_calculator(db: Session, slug: str
     db.commit()
     calculators = {'bir': calculate_bir_tax, 'pagibig': calculate_pagibig_employee_share, 'philhealth': calculate_philhealth_employee_share}
     if slug == 'bir':
-        amount = calculators[slug](db, Decimal('150000'), 'monthly', '2026-02-01')
+        # The official active Annex E table remains authoritative; this newly
+        # created inactive row must not override it for the same period.
+        assert calculators[slug](db, Decimal('150000'), 'monthly', '2026-02-01') == Decimal('29375.05')
+    elif slug == 'philhealth':
+        # The active 2026 schedule remains authoritative; this newly-created
+        # inactive row must not replace it.
+        assert calculators[slug](db, Decimal('20000'), '2026-02-01') == Decimal('500.00')
     else:
-        amount = calculators[slug](db, Decimal('20000'), '2026-02-01')
-    assert amount == Decimal('0.00')
+        # The seeded 2024 schedule remains effective; an inactive 2026 row
+        # must not replace the employee's capped share.
+        assert calculators[slug](db, Decimal('20000'), '2026-02-01') == Decimal('200.00')
     assert db.get(model, row.id) is not None

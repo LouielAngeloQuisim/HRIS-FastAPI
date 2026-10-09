@@ -69,6 +69,7 @@ const formSchema = z.object({
   carry_over_max_days: z.string().optional(),
   carry_over_expires_on: z.string().optional(),
   is_paid: z.boolean().optional(),
+  tax_exempt_unused_vacation_leave: z.boolean().optional(),
   eligible_departments: z.array(z.string()).optional(),
   gender_scope: z.string().max(6).optional().or(z.literal('')),
   marital_status_scope: z.string().max(9).optional().or(z.literal('')),
@@ -94,6 +95,7 @@ const DEFAULTS = {
   carry_over_max_days: '',
   carry_over_expires_on: '',
   is_paid: true,
+  tax_exempt_unused_vacation_leave: false,
   eligible_departments: [],
   gender_scope: 'all',
   marital_status_scope: 'all',
@@ -119,6 +121,7 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
     carry_over_max_days: initialData?.carry_over_max_days ?? '',
     carry_over_expires_on: initialData?.carry_over_expires_on ?? '',
     is_paid: initialData?.is_paid ?? true,
+    tax_exempt_unused_vacation_leave: initialData?.tax_exempt_unused_vacation_leave ?? false,
     eligible_departments: initialData?.eligible_departments ?? [],
     gender_scope: initialData?.gender_scope ?? 'all',
     marital_status_scope: initialData?.marital_status_scope ?? 'all',
@@ -155,6 +158,7 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
         carry_over_max_days: data.carry_over_max_days || undefined,
         carry_over_expires_on: data.carry_over_expires_on || undefined,
         is_paid: data.is_paid,
+        tax_exempt_unused_vacation_leave: data.tax_exempt_unused_vacation_leave,
         eligible_departments: data.eligible_departments || [],
         gender_scope: (data.gender_scope as GenderScope) || 'all',
         marital_status_scope: (data.marital_status_scope as MaritalStatusScope) || 'all',
@@ -419,6 +423,27 @@ export function LeavePolicyForm({ open, onClose, initialData }: Props) {
                         />
                       </FormControl>
                       <FormLabel className='mb-0'>Paid Leave</FormLabel>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='tax_exempt_unused_vacation_leave'
+                  render={({ field }) => (
+                    <FormItem className='flex flex-row items-start gap-3'>
+                      <FormControl>
+                        <input
+                          type='checkbox'
+                          checked={Boolean(field.value)}
+                          onChange={(e) => field.onChange(e.target.checked)}
+                          data-testid='policy-form-tax-exempt-vacation-checkbox'
+                        />
+                      </FormControl>
+                      <div>
+                        <FormLabel className='mb-0'>Qualifies as unused vacation leave for BIR exemption</FormLabel>
+                        <p className='text-xs text-muted-foreground'>Enable only for a paid vacation-leave policy whose balance is maintained in the leave ledger.</p>
+                      </div>
                       <FormMessage />
                     </FormItem>
                   )}

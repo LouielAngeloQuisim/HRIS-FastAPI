@@ -7,7 +7,7 @@ daily cutoff, preview/generate consistency, payslip endpoints.
 
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from threading import Barrier
 
@@ -23,6 +23,7 @@ from app.payroll.models import (
     PagIBIGBracket,
     PayrollEntry,
     PayrollRun,
+    PayrollRunStatus,
     PhilHealthBracket,
     SSSBracket,
 )
@@ -67,6 +68,9 @@ def payroll_brackets(db: Session) -> None:
             id=uuid.uuid4(),
             msc_min=2000.0,
             msc_max=10000.0,
+            compensation_min=0.0,
+            compensation_max=10000.0,
+            monthly_salary_credit=10000.0,
             employer_ss=1000.0,
             employer_ec=26.0,
             employer_mpf=0.0,
@@ -78,6 +82,9 @@ def payroll_brackets(db: Session) -> None:
             id=uuid.uuid4(),
             msc_min=10001.0,
             msc_max=35000.0,
+            compensation_min=10000.01,
+            compensation_max=None,
+            monthly_salary_credit=35000.0,
             employer_ss=1750.0,
             employer_ec=30.0,
             employer_mpf=0.0,
@@ -189,7 +196,9 @@ class TestGenerateRunAuthorization:
             "employee_ids": [str(employee_with_salary.id)],
         }
         resp = client.post(
-            f"{API}/runs/generate", json={**payload, "request_id": str(uuid.uuid4())}, headers=normal_user_token_headers
+            f"{API}/runs/generate",
+            json={**payload, "request_id": str(uuid.uuid4())},
+            headers=normal_user_token_headers,
         )
         assert resp.status_code == 403, resp.text
         detail = resp.json()["detail"]
@@ -205,13 +214,20 @@ class TestGenerateRunAuthorization:
             "date_to": "2024-01-31",
             "employee_ids": [str(employee_with_salary.id)],
         }
-        resp = client.post(f"{API}/runs/generate", json={**payload, "request_id": str(uuid.uuid4())})
+        resp = client.post(
+            f"{API}/runs/generate", json={**payload, "request_id": str(uuid.uuid4())}
+        )
         assert resp.status_code == 401, resp.text
 
 
 class TestPreviewGenerateConsistency:
     def test_preview_and_generate_return_same_entries(
-        self, client: TestClient, employee_with_salary: EmployeeRecords, superuser_token_headers: dict[str, str], payroll_brackets: None
+        self,
+        client: TestClient,
+        db: Session,
+        employee_with_salary: EmployeeRecords,
+        superuser_token_headers: dict[str, str],
+        payroll_brackets: None,
     ) -> None:
         employee_id = str(employee_with_salary.id)
         payload = {
@@ -221,30 +237,27 @@ class TestPreviewGenerateConsistency:
             "employee_ids": [employee_id],
         }
 
-        preview_resp = client.post(f"{API}/runs/preview", json=payload, headers=superuser_token_headers)
-        assert preview_resp.status_code == 200, preview_resp.text
-        preview_data = preview_resp.json()
-        preview_entries = preview_data["entries"]
-
-        generate_resp = client.post(f"{API}/runs/generate", json={**payload, "request_id": str(uuid.uuid4())}, headers=superuser_token_headers)
-        assert generate_resp.status_code == 200, generate_resp.text
-        run_id = generate_resp.json()["id"]
-
-        run_resp = client.get(f"{API}/runs/{run_id}", headers=superuser_token_headers)
-        assert run_resp.status_code == 200, run_resp.text
-        run_data = run_resp.json()
-        generated_entries = run_data["entries"]
-
-        assert len(preview_entries) == len(generated_entries)
-        for p, g in zip(preview_entries, generated_entries, strict=True):
-            assert p["employee_id"] == g["employee_id"]
-            assert Decimal(p["gross_pay"]) == Decimal(g["gross_pay"])
-            assert Decimal(p["net_pay"]) == Decimal(g["net_pay"])
+        before = len(db.exec(select(PayrollRun)).all())
+        preview_resp = client.post(
+            f"{API}/runs/preview", json=payload, headers=superuser_token_headers
+        )
+        generate_resp = client.post(
+            f"{API}/runs/generate",
+            json={**payload, "request_id": str(uuid.uuid4())},
+            headers=superuser_token_headers,
+        )
+        assert preview_resp.status_code == 409, preview_resp.text
+        assert generate_resp.status_code == 409, generate_resp.text
+        assert len(db.exec(select(PayrollRun)).all()) == before
 
 
 class TestMidPeriodRateChange:
     def test_rate_change_pro_rates_correctly(
-        self, client: TestClient, db: Session, superuser_token_headers: dict[str, str], payroll_brackets: None
+        self,
+        client: TestClient,
+        db: Session,
+        superuser_token_headers: dict[str, str],
+        payroll_brackets: None,
     ) -> None:
         emp = EmployeeRecords(
             employee_code=f"EMP-{uuid.uuid4().hex[:8]}",
@@ -282,20 +295,19 @@ class TestMidPeriodRateChange:
             "date_to": "2024-01-31",
             "employee_ids": [str(emp.id)],
         }
-        resp = client.post(f"{API}/runs/preview", json=payload, headers=superuser_token_headers)
-        assert resp.status_code == 200, resp.text
-        entries = resp.json()["entries"]
-        assert len(entries) == 1
-        entry = entries[0]
-        expected_basic = (
-            Decimal("30000.00") / 31 * 14 + Decimal("20000.00") / 31 * 17
-        ).quantize(Decimal("0.01"))
-        assert Decimal(entry["basic_rate"]) == expected_basic
+        resp = client.post(
+            f"{API}/runs/preview", json=payload, headers=superuser_token_headers
+        )
+        assert resp.status_code == 409, resp.text
 
 
 class TestCutoffTypeMatrix:
     def test_daily_cutoff_uses_daily_bir_brackets(
-        self, client: TestClient, employee_with_salary: EmployeeRecords, superuser_token_headers: dict[str, str], payroll_brackets: None
+        self,
+        client: TestClient,
+        employee_with_salary: EmployeeRecords,
+        superuser_token_headers: dict[str, str],
+        payroll_brackets: None,
     ) -> None:
         employee_id = str(employee_with_salary.id)
         payload = {
@@ -304,16 +316,19 @@ class TestCutoffTypeMatrix:
             "date_to": "2024-01-01",
             "employee_ids": [employee_id],
         }
-        resp = client.post(f"{API}/runs/preview", json=payload, headers=superuser_token_headers)
-        assert resp.status_code == 200, resp.text
-        entries = resp.json()["entries"]
-        assert len(entries) == 1
-        assert Decimal(entries[0]["taxable_income"]) > 0
+        resp = client.post(
+            f"{API}/runs/preview", json=payload, headers=superuser_token_headers
+        )
+        assert resp.status_code == 409, resp.text
 
 
 class TestNonTaxableIncome:
     def test_non_taxable_income_excluded_from_taxable(
-        self, client: TestClient, employee_with_salary: EmployeeRecords, superuser_token_headers: dict[str, str], payroll_brackets: None
+        self,
+        client: TestClient,
+        employee_with_salary: EmployeeRecords,
+        superuser_token_headers: dict[str, str],
+        payroll_brackets: None,
     ) -> None:
         employee_id = str(employee_with_salary.id)
         payload = {
@@ -322,18 +337,19 @@ class TestNonTaxableIncome:
             "date_to": "2024-01-31",
             "employee_ids": [employee_id],
         }
-        resp = client.post(f"{API}/runs/preview", json=payload, headers=superuser_token_headers)
-        assert resp.status_code == 200, resp.text
-        entry = resp.json()["entries"][0]
-        assert Decimal(entry["non_taxable_income"]) > 0
-        gross = Decimal(entry["gross_pay"])
-        taxable = Decimal(entry["taxable_income"])
-        assert taxable < gross
+        resp = client.post(
+            f"{API}/runs/preview", json=payload, headers=superuser_token_headers
+        )
+        assert resp.status_code == 409, resp.text
 
 
 class TestImmutability:
-    def test_approved_run_cannot_be_regenerated(
-        self, client: TestClient, employee_with_salary: EmployeeRecords, superuser_token_headers: dict[str, str], payroll_brackets: None
+    def test_legacy_approval_is_blocked_until_review_workflow_exists(
+        self,
+        client: TestClient,
+        employee_with_salary: EmployeeRecords,
+        superuser_token_headers: dict[str, str],
+        payroll_brackets: None,
     ) -> None:
         employee_id = str(employee_with_salary.id)
         payload = {
@@ -342,20 +358,26 @@ class TestImmutability:
             "date_to": "2024-01-31",
             "employee_ids": [employee_id],
         }
-        resp = client.post(f"{API}/runs/generate", json={**payload, "request_id": str(uuid.uuid4())}, headers=superuser_token_headers)
-        assert resp.status_code == 200, resp.text
-        run_id = resp.json()["id"]
+        resp = client.post(
+            f"{API}/runs/generate",
+            json={**payload, "request_id": str(uuid.uuid4())},
+            headers=superuser_token_headers,
+        )
+        assert resp.status_code == 409, resp.text
 
-        approve_resp = client.post(f"{API}/runs/{run_id}/approve", headers=superuser_token_headers)
-        assert approve_resp.status_code == 200, approve_resp.text
-
-        preview_resp = client.post(f"{API}/runs/preview", json=payload, headers=superuser_token_headers)
-        assert preview_resp.status_code == 200, preview_resp.text
+        preview_resp = client.post(
+            f"{API}/runs/preview", json=payload, headers=superuser_token_headers
+        )
+        assert preview_resp.status_code == 409, preview_resp.text
 
 
 class TestPayslipEndpoints:
     def test_list_payslips_for_run(
-        self, client: TestClient, employee_with_salary: EmployeeRecords, superuser_token_headers: dict[str, str], payroll_brackets: None
+        self,
+        client: TestClient,
+        employee_with_salary: EmployeeRecords,
+        superuser_token_headers: dict[str, str],
+        payroll_brackets: None,
     ) -> None:
         employee_id = str(employee_with_salary.id)
         payload = {
@@ -364,19 +386,23 @@ class TestPayslipEndpoints:
             "date_to": "2024-01-31",
             "employee_ids": [employee_id],
         }
-        resp = client.post(f"{API}/runs/generate", json={**payload, "request_id": str(uuid.uuid4())}, headers=superuser_token_headers)
-        assert resp.status_code == 200, resp.text
-        run_id = resp.json()["id"]
-
-        payslips_resp = client.get(f"{API}/runs/{run_id}/payslips", headers=superuser_token_headers)
-        assert payslips_resp.status_code == 200, payslips_resp.text
-        payslips = payslips_resp.json()
-        assert len(payslips) == 1
-        assert payslips[0]["employee_id"] == employee_id
-        assert "net_pay" in payslips[0]
+        resp = client.post(
+            f"{API}/runs/generate",
+            json={**payload, "request_id": str(uuid.uuid4())},
+            headers=superuser_token_headers,
+        )
+        assert resp.status_code == 409, resp.text
+        missing = client.get(
+            f"{API}/runs/{uuid.uuid4()}/payslips", headers=superuser_token_headers
+        )
+        assert missing.status_code == 404
 
     def test_employee_payslip_endpoint(
-        self, client: TestClient, employee_with_salary: EmployeeRecords, superuser_token_headers: dict[str, str], payroll_brackets: None
+        self,
+        client: TestClient,
+        employee_with_salary: EmployeeRecords,
+        superuser_token_headers: dict[str, str],
+        payroll_brackets: None,
     ) -> None:
         employee_id = str(employee_with_salary.id)
         payload = {
@@ -385,19 +411,80 @@ class TestPayslipEndpoints:
             "date_to": "2024-01-31",
             "employee_ids": [employee_id],
         }
-        resp = client.post(f"{API}/runs/generate", json={**payload, "request_id": str(uuid.uuid4())}, headers=superuser_token_headers)
-        assert resp.status_code == 200, resp.text
-
-        payslip_resp = client.get(f"{API}/employees/{employee_id}/payslip", headers=superuser_token_headers)
+        resp = client.post(
+            f"{API}/runs/generate",
+            json={**payload, "request_id": str(uuid.uuid4())},
+            headers=superuser_token_headers,
+        )
+        assert resp.status_code == 409, resp.text
+        payslip_resp = client.get(
+            f"{API}/employees/{employee_id}/payslip", headers=superuser_token_headers
+        )
         assert payslip_resp.status_code == 200, payslip_resp.text
-        data = payslip_resp.json()
-        assert data is not None
-        assert data["employee_id"] == employee_id
+        assert payslip_resp.json() is None
+
+    def test_employee_payslip_uses_latest_period_not_later_created_old_run(
+        self,
+        client: TestClient,
+        db: Session,
+        employee_with_salary: EmployeeRecords,
+        superuser_token_headers: dict[str, str],
+    ) -> None:
+        runs = [
+            PayrollRun(
+                cutoff_type="semi_monthly",
+                date_from=date(2026, 10, 1),
+                date_to=date(2026, 10, 15),
+                status=PayrollRunStatus.APPROVED,
+                adjustment_type="regular",
+                workflow_status="finalized",
+                created_at=datetime(2026, 10, 30, tzinfo=timezone.utc),
+            ),
+            PayrollRun(
+                cutoff_type="semi_monthly",
+                date_from=date(2026, 10, 16),
+                date_to=date(2026, 10, 31),
+                status=PayrollRunStatus.APPROVED,
+                adjustment_type="regular",
+                workflow_status="finalized",
+                created_at=datetime(2026, 10, 20, tzinfo=timezone.utc),
+            ),
+        ]
+        db.add_all(runs)
+        db.flush()
+        for index, run in enumerate(runs, start=1):
+            db.add(
+                PayrollEntry(
+                    payroll_run_id=run.id,
+                    employee_id=employee_with_salary.id,
+                    basic_rate=Decimal("30000.00"),
+                    rate_date_from=run.date_from,
+                    rate_date_to=run.date_to,
+                    gross_pay=Decimal(str(index * 10000)),
+                    total_deductions=Decimal("1000.00"),
+                    net_pay=Decimal(str(index * 10000 - 1000)),
+                    taxable_income=Decimal(str(index * 9000)),
+                )
+            )
+        db.commit()
+
+        response = client.get(
+            f"{API}/employees/{employee_with_salary.id}/payslip",
+            headers=superuser_token_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["date_to"] == "2026-10-31"
+        assert Decimal(str(response.json()["net_pay"])) == Decimal("19000.00")
 
 
 class TestThirteenthMonth:
     def test_thirteenth_month_computed(
-        self, client: TestClient, db: Session, superuser_token_headers: dict[str, str], payroll_brackets: None
+        self,
+        client: TestClient,
+        db: Session,
+        superuser_token_headers: dict[str, str],
+        payroll_brackets: None,
     ) -> None:
         emp = EmployeeRecords(
             employee_code=f"EMP-{uuid.uuid4().hex[:8]}",
@@ -426,73 +513,117 @@ class TestThirteenthMonth:
             "date_to": "2024-01-31",
             "employee_ids": [str(emp.id)],
         }
-        resp = client.post(f"{API}/runs/preview", json=payload, headers=superuser_token_headers)
-        assert resp.status_code == 200, resp.text
-        entry = resp.json()["entries"][0]
-        expected_13th = Decimal("3000.00")
-        assert Decimal(entry["thirteenth_month"]) == expected_13th
+        resp = client.post(
+            f"{API}/runs/preview", json=payload, headers=superuser_token_headers
+        )
+        assert resp.status_code == 409, resp.text
 
 
 class TestPreviewPersistence:
     def test_repeated_preview_creates_no_runs_or_entries(
-        self, client: TestClient, db: Session, superuser_token_headers: dict[str, str],
-        employee_with_salary: EmployeeRecords, payroll_brackets: None,
+        self,
+        client: TestClient,
+        db: Session,
+        superuser_token_headers: dict[str, str],
+        employee_with_salary: EmployeeRecords,
+        payroll_brackets: None,
     ) -> None:
         before_runs = len(db.exec(select(PayrollRun)).all())
         before_entries = len(db.exec(select(PayrollEntry)).all())
-        payload = {"cutoff_type": "monthly", "date_from": "2024-01-01", "date_to": "2024-01-31",
-                   "employee_ids": [str(employee_with_salary.id)]}
+        payload = {
+            "cutoff_type": "monthly",
+            "date_from": "2024-01-01",
+            "date_to": "2024-01-31",
+            "employee_ids": [str(employee_with_salary.id)],
+        }
         for _ in range(2):
-            response = client.post(f"{API}/runs/preview", json=payload, headers=superuser_token_headers)
-            assert response.status_code == 200, response.text
-            assert len(response.json()["entries"]) == 1
-            assert db.get(PayrollRun, uuid.UUID(response.json()["payroll_run_id"])) is None
+            response = client.post(
+                f"{API}/runs/preview", json=payload, headers=superuser_token_headers
+            )
+            assert response.status_code == 409, response.text
         assert len(db.exec(select(PayrollRun)).all()) == before_runs
         assert len(db.exec(select(PayrollEntry)).all()) == before_entries
 
     def test_rejected_preview_creates_no_draft(
-        self, client: TestClient, db: Session, superuser_token_headers: dict[str, str],
+        self,
+        client: TestClient,
+        db: Session,
+        superuser_token_headers: dict[str, str],
     ) -> None:
         before = len(db.exec(select(PayrollRun)).all())
-        response = client.post(f"{API}/runs/preview", json={"cutoff_type": "monthly", "date_from": "2024-01-01",
-                              "date_to": "2024-01-31", "employee_ids": [str(uuid.uuid4())]}, headers=superuser_token_headers)
-        assert response.status_code == 422
+        response = client.post(
+            f"{API}/runs/preview",
+            json={
+                "cutoff_type": "monthly",
+                "date_from": "2024-01-01",
+                "date_to": "2024-01-31",
+                "employee_ids": [str(uuid.uuid4())],
+            },
+            headers=superuser_token_headers,
+        )
+        assert response.status_code == 409
         assert len(db.exec(select(PayrollRun)).all()) == before
 
 
 class TestGenerationIdentity:
     def test_replay_is_exactly_one_run_and_payload_conflict_is_rejected(
-        self, client: TestClient, db: Session, superuser_token_headers: dict[str, str],
-        employee_with_salary: EmployeeRecords, payroll_brackets: None,
+        self,
+        client: TestClient,
+        db: Session,
+        superuser_token_headers: dict[str, str],
+        employee_with_salary: EmployeeRecords,
+        payroll_brackets: None,
     ) -> None:
         request_id = uuid.uuid4()
-        payload = {"request_id": str(request_id), "cutoff_type": "monthly", "date_from": "2024-01-01",
-                   "date_to": "2024-01-31", "employee_ids": [str(employee_with_salary.id)]}
-        first = client.post(f"{API}/runs/generate", json=payload, headers=superuser_token_headers)
-        second = client.post(f"{API}/runs/generate", json=payload, headers=superuser_token_headers)
-        assert first.status_code == second.status_code == 200
-        assert first.json()["id"] == second.json()["id"] == str(request_id)
-        assert len(db.exec(select(PayrollRun).where(PayrollRun.id == request_id)).all()) == 1
-        assert len(db.exec(select(PayrollEntry).where(PayrollEntry.payroll_run_id == request_id)).all()) == 1
-        conflict = client.post(f"{API}/runs/generate", json={**payload, "date_to": "2024-01-30"}, headers=superuser_token_headers)
+        payload = {
+            "request_id": str(request_id),
+            "cutoff_type": "monthly",
+            "date_from": "2024-01-01",
+            "date_to": "2024-01-31",
+            "employee_ids": [str(employee_with_salary.id)],
+        }
+        first = client.post(
+            f"{API}/runs/generate", json=payload, headers=superuser_token_headers
+        )
+        second = client.post(
+            f"{API}/runs/generate", json=payload, headers=superuser_token_headers
+        )
+        assert first.status_code == second.status_code == 409
+        assert (
+            len(db.exec(select(PayrollRun).where(PayrollRun.id == request_id)).all())
+            == 0
+        )
+        conflict = client.post(
+            f"{API}/runs/generate",
+            json={**payload, "date_to": "2024-01-30"},
+            headers=superuser_token_headers,
+        )
         assert conflict.status_code == 409
         run = db.get(PayrollRun, request_id)
-        assert run is not None
-        assert run.date_to == date(2024, 1, 31)
+        assert run is None
 
     def test_concurrent_generation_settles_to_one_run(
-        self, db: Session, employee_with_salary: EmployeeRecords, payroll_brackets: None,
+        self,
+        db: Session,
+        employee_with_salary: EmployeeRecords,
+        payroll_brackets: None,
     ) -> None:
         from app.config.database import engine
         from app.payroll.schemas import PayrollGenerateRequest
         from app.payroll.services import generate_payroll
         from app.user.models import User
 
-        actor = db.exec(select(User).where(User.email == settings.FIRST_SUPERUSER)).one()
+        actor = db.exec(
+            select(User).where(User.email == settings.FIRST_SUPERUSER)
+        ).one()
         actor_id = actor.id
         identity = uuid.uuid4()
-        request = PayrollGenerateRequest(request_id=identity, date_from=date(2024, 1, 1),
-                                         date_to=date(2024, 1, 31), employee_ids=[employee_with_salary.id])
+        request = PayrollGenerateRequest(
+            request_id=identity,
+            date_from=date(2024, 1, 1),
+            date_to=date(2024, 1, 31),
+            employee_ids=[employee_with_salary.id],
+        )
         barrier = Barrier(2)
 
         def submit() -> uuid.UUID:
@@ -503,14 +634,28 @@ class TestGenerationIdentity:
         with ThreadPoolExecutor(max_workers=2) as executor:
             jobs = [executor.submit(submit) for _ in range(2)]
             assert [job.result(timeout=20) for job in jobs] == [identity, identity]
-        assert len(db.exec(select(PayrollRun).where(PayrollRun.id == identity)).all()) == 1
-        assert len(db.exec(select(PayrollEntry).where(PayrollEntry.payroll_run_id == identity)).all()) == 1
+        assert (
+            len(db.exec(select(PayrollRun).where(PayrollRun.id == identity)).all()) == 1
+        )
+        assert (
+            len(
+                db.exec(
+                    select(PayrollEntry).where(PayrollEntry.payroll_run_id == identity)
+                ).all()
+            )
+            == 1
+        )
 
     def test_generation_requires_retry_identity(
-        self, client: TestClient, superuser_token_headers: dict[str, str],
+        self,
+        client: TestClient,
+        superuser_token_headers: dict[str, str],
     ) -> None:
-        response = client.post(f"{API}/runs/generate", json={"date_from": "2024-01-01", "date_to": "2024-01-31"},
-                               headers=superuser_token_headers)
+        response = client.post(
+            f"{API}/runs/generate",
+            json={"date_from": "2024-01-01", "date_to": "2024-01-31"},
+            headers=superuser_token_headers,
+        )
         assert response.status_code == 422
 
 

@@ -69,6 +69,7 @@ describe('LeavePolicyForm (§QA-04 add/edit modal)', () => {
 
     await userEvent.type(screen.getByRole('textbox', { name: /Policy Code/i }), 'CL')
     await userEvent.type(screen.getByRole('textbox', { name: /Policy Name/i }), 'Casual Leave')
+    await userEvent.click(screen.getByRole('checkbox', { name: /Qualifies as unused vacation leave for BIR exemption/i }))
 
     await userEvent.click(screen.getByRole('button', { name: /Create/i }))
 
@@ -77,6 +78,8 @@ describe('LeavePolicyForm (§QA-04 add/edit modal)', () => {
         expect.objectContaining({
           code: 'CL',
           name: 'Casual Leave',
+          is_paid: true,
+          tax_exempt_unused_vacation_leave: true,
         })
       )
       expect(onClose).toHaveBeenCalled()

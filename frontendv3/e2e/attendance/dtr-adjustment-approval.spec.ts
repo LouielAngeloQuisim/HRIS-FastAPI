@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures'
-import { apiUrl, createParent } from '../helpers/crud-journey'
+import { apiUrl, assignEmployeeShift, createParent } from '../helpers/crud-journey'
 
 /**
  * QA-03 — DTR adjustment approval flow end-to-end.
@@ -52,6 +52,7 @@ test.describe('DTR adjustment approval E2E (QA-03)', () => {
   test('approve persists uppercase APPROVED across reload, recomputes the DTR, and removes the action buttons', async ({ page }) => {
     const unique = Date.now().toString(36)
     const employee = await createParent(page, 'employees', { employee_code: 'AD' + unique, first_name: 'Approve', last_name: unique, birthdate: '1990-01-01' })
+    await assignEmployeeShift(page, employee.id)
     const dtr = await createParent(page, 'daily-time-records', { employee_id: employee.id, login_date: '2026-09-15T08:00:00', logout_date: '2026-09-15T17:00:00' })
 
     const adjustment = await page.goto('/dtr-adjustments').then(async () => {
@@ -84,6 +85,7 @@ test.describe('DTR adjustment approval E2E (QA-03)', () => {
   test('reject persists uppercase REJECTED across reload and leaves the DTR unchanged', async ({ page }) => {
     const unique = Date.now().toString(36)
     const employee = await createParent(page, 'employees', { employee_code: 'RD' + unique, first_name: 'Reject', last_name: unique, birthdate: '1990-01-01' })
+    await assignEmployeeShift(page, employee.id)
     const dtr = await createParent(page, 'daily-time-records', { employee_id: employee.id, login_date: '2026-09-15T08:00:00', logout_date: '2026-09-15T17:00:00' })
 
     await page.goto('/dtr-adjustments')

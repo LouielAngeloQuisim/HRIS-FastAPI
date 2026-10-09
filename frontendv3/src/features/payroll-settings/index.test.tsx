@@ -3,15 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import PayrollSettingsPage from './index'
 
-const { can, setup, createPolicy, employees, periods, profile, saveProfile, verifyProfile } = vi.hoisted(() => ({
+const { can, setup, createPolicy, employees, periods } = vi.hoisted(() => ({
   can: vi.fn(() => true),
   setup: vi.fn(),
   createPolicy: vi.fn(),
   employees: vi.fn(),
   periods: vi.fn(),
-  profile: vi.fn(),
-  saveProfile: vi.fn(),
-  verifyProfile: vi.fn(),
 }))
 
 vi.mock('@/context/permissions-provider', () => ({
@@ -20,7 +17,6 @@ vi.mock('@/context/permissions-provider', () => ({
 vi.mock('@/lib/api/payroll', () => ({
   usePayrollSetup: () => setup(),
   usePayGroupPeriods: (...args: unknown[]) => periods(...args),
-  usePayrollEmployerProfile: () => profile(),
 }))
 vi.mock('@/lib/api/employees', () => ({
   useEmployees: (...args: unknown[]) => employees(...args),
@@ -41,14 +37,7 @@ describe('Payroll settings monthly salary policy', () => {
     })
     employees.mockReturnValue({ data: { data: [] } })
     periods.mockReturnValue({ data: [], isError: false })
-    profile.mockReturnValue({
-      profile: { data: null, isError: false },
-      save: { mutateAsync: saveProfile, isPending: false },
-      verify: { mutateAsync: verifyProfile, isPending: false },
-    })
     createPolicy.mockResolvedValue({ id: 'policy-1' })
-    saveProfile.mockResolvedValue({ id: 'default' })
-    verifyProfile.mockResolvedValue({ id: 'default', is_verified: true })
   })
 
   it('submits the explicit monthly salary proration rule in a new policy draft', async () => {
@@ -100,59 +89,8 @@ describe('Payroll settings monthly salary policy', () => {
     )
   })
 
-  it('saves the employer identity required by payroll certificates', async () => {
+  it('shows payroll policy settings without certificate identity setup', async () => {
     const screen = await renderWithClient(<PayrollSettingsPage />)
-    await userEvent.fill(screen.getByRole('textbox', { name: 'Employer TIN' }), '123-456-789-000')
-    await userEvent.fill(screen.getByRole('textbox', { name: 'Registered employer name' }), 'Example Company Inc.')
-    await userEvent.fill(screen.getByRole('textbox', { name: 'Registered address' }), '1 Sample Street, Manila')
-    await userEvent.fill(screen.getByRole('textbox', { name: 'Postal code' }), '1000')
-    await userEvent.fill(screen.getByRole('textbox', { name: 'RDO code' }), '039')
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Employer type' }), 'main')
-    await userEvent.fill(screen.getByRole('textbox', { name: 'Authorized signatory name' }), 'Payroll Officer')
-    await userEvent.fill(screen.getByRole('textbox', { name: 'Authorized signatory title' }), 'HR Manager')
-    await userEvent.fill(screen.getByRole('textbox', { name: 'Source note for employer details' }), 'Company registration certificate reviewed')
-    await userEvent.click(screen.getByRole('button', { name: 'Save employer details' }))
-
-    expect(saveProfile).toHaveBeenCalledWith({
-      tin_number: '123-456-789-000',
-      registered_name: 'Example Company Inc.',
-      registered_address: '1 Sample Street, Manila',
-      postal_code: '1000',
-      rdo_code: '039',
-      employer_type: 'main',
-      signatory_name: 'Payroll Officer',
-      signatory_title: 'HR Manager',
-      source_reference: 'Company registration certificate reviewed',
-    })
-  })
-
-  it('requires an authorized approver action to verify saved employer details', async () => {
-    profile.mockReturnValue({
-      profile: {
-        data: {
-          id: 'default',
-          tin_number: '123-456-789-000',
-          registered_name: 'Example Company Inc.',
-          registered_address: '1 Sample Street, Manila',
-          postal_code: '1000',
-          rdo_code: '039',
-          employer_type: 'main',
-          signatory_name: 'Payroll Officer',
-          signatory_title: 'HR Manager',
-          source_reference: 'Company registration certificate reviewed',
-          is_verified: false,
-          verified_by: null,
-          verified_at: null,
-          updated_by: null,
-          updated_at: null,
-        },
-        isError: false,
-      },
-      save: { mutateAsync: saveProfile, isPending: false },
-      verify: { mutateAsync: verifyProfile, isPending: false },
-    })
-    const screen = await renderWithClient(<PayrollSettingsPage />)
-    await userEvent.click(screen.getByRole('button', { name: 'Verify employer details' }))
-    expect(verifyProfile).toHaveBeenCalledOnce()
+    await expect.element(screen.getByTestId('payroll-policy-json')).toBeVisible()
   })
 })

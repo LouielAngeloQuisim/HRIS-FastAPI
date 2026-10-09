@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
 from app.leave.models import (
@@ -32,6 +32,7 @@ class LeavePolicyBase(SQLModel):
     carry_over_max_days: Decimal | None = Field(default=None)
     carry_over_expires_on: date | None = Field(default=None)
     is_paid: bool = Field(default=True)
+    tax_exempt_unused_vacation_leave: bool = Field(default=False)
     eligible_departments: list[uuid.UUID] = Field(default_factory=list)
     gender_scope: GenderScope = Field(default=GenderScope.ALL)
     marital_status_scope: MaritalStatusScope = Field(default=MaritalStatusScope.ALL)
@@ -39,7 +40,11 @@ class LeavePolicyBase(SQLModel):
 
 
 class LeavePolicyCreate(LeavePolicyBase):
-    pass
+    @model_validator(mode="after")
+    def tax_exempt_policy_must_be_paid(self) -> "LeavePolicyCreate":
+        if self.tax_exempt_unused_vacation_leave and not self.is_paid:
+            raise ValueError("Unused-vacation tax-exempt policy must be paid")
+        return self
 
 
 class LeavePolicyUpdate(SQLModel):
@@ -54,6 +59,7 @@ class LeavePolicyUpdate(SQLModel):
     carry_over_max_days: Decimal | None = Field(default=None)
     carry_over_expires_on: date | None = Field(default=None)
     is_paid: bool | None = Field(default=None)
+    tax_exempt_unused_vacation_leave: bool | None = Field(default=None)
     eligible_departments: list[uuid.UUID] | None = Field(default=None)
     gender_scope: GenderScope | None = Field(default=None)
     marital_status_scope: MaritalStatusScope | None = Field(default=None)

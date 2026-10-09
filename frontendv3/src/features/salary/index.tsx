@@ -4,6 +4,7 @@ import { useEmployees } from '@/lib/api/employees'
 import {
   useBulkPayGroupAssignments,
   useBulkSalary,
+  useBulkSalaryIncrement,
   useEmployeeSalaries,
   usePayGroupList,
   useSalaryRoster,
@@ -33,6 +34,9 @@ export default function SalaryPage() {
   const canEdit = useCan('payroll', 'edit')
 
   const [employeePage, setEmployeePage] = useState(1)
+  const [incrementPage, setIncrementPage] = useState(1)
+  const [incrementSearch, setIncrementSearch] = useState('')
+  const [appliedIncrementSearch, setAppliedIncrementSearch] = useState('')
   const pageSize = 500
   const { data: employeesData, isPending: employeesPending } = useEmployees(
     1,
@@ -55,7 +59,14 @@ export default function SalaryPage() {
   const [editing, setEditing] = useState<EmployeeSalaryPublic | null>(null)
   const [missingSalaryOnly, setMissingSalaryOnly] = useState(false)
   const salaryRoster = useSalaryRoster(missingSalaryOnly)
+  const incrementSalaryRoster = useSalaryRoster(
+    false,
+    (incrementPage - 1) * pageSize,
+    pageSize,
+    appliedIncrementSearch
+  )
   const bulk = useBulkSalary()
+  const increment = useBulkSalaryIncrement()
   const payGroups = usePayGroupList()
   const payGroupBulk = useBulkPayGroupAssignments()
   const [bulkSelected, setBulkSelected] = useState<Record<string, boolean>>({})
@@ -72,6 +83,16 @@ export default function SalaryPage() {
   >({})
   const [bulkEffectiveDate, setBulkEffectiveDate] = useState('')
   const [bulkBatchId, setBulkBatchId] = useState(crypto.randomUUID())
+  const [incrementSelected, setIncrementSelected] = useState<Record<string, boolean>>({})
+  const [incrementAmount, setIncrementAmount] = useState('50.00')
+  const [incrementDate, setIncrementDate] = useState('')
+  const [incrementBatchId, setIncrementBatchId] = useState(crypto.randomUUID())
+  const [incrementPreview, setIncrementPreview] = useState<{
+    batchId: string
+    valid: boolean
+    changes: Array<{ employee_id: string; employee_code: string; employee_name: string; current_rate: string; proposed_rate: string; pay_type: string }>
+    issues: Array<{ employee_id: string; code: string; message: string }>
+  } | null>(null)
   const [payGroupSelected, setPayGroupSelected] = useState<
     Record<string, (typeof employees)[number]>
   >({})
@@ -117,6 +138,20 @@ export default function SalaryPage() {
     () => employeeOptions.filter((emp) => bulkSelected[emp.id]),
     [employeeOptions, bulkSelected]
   )
+  const selectedIncrementIds = useMemo(
+    () => Object.entries(incrementSelected).filter(([, selected]) => selected).map(([id]) => id),
+    [incrementSelected]
+  )
+  const incrementEmployeeOptions = useMemo(
+    () => (incrementSalaryRoster.data?.data ?? []).map(row => ({
+          id: row.employee_id,
+          employee_code: row.employee_code,
+          first_name: row.first_name,
+          last_name: row.last_name,
+        })),
+    [incrementSalaryRoster.data?.data]
+  )
+  const incrementEmployeeCount = incrementSalaryRoster.data?.count ?? 0
   const activeEmployees = useMemo(
     () =>
       bulkEmployees.filter((employee) => employee.employee_status === 'Active'),
@@ -165,6 +200,46 @@ export default function SalaryPage() {
   })
 
   const resetBulkBatch = () => setBulkBatchId(crypto.randomUUID())
+  const resetIncrementPreview = () => {
+    setIncrementBatchId(crypto.randomUUID())
+    setIncrementPreview(null)
+  }
+  const incrementRequest = () => ({
+    batch_id: incrementBatchId,
+    effective_date: incrementDate,
+    increment: incrementAmount,
+    employee_ids: selectedIncrementIds,
+  })
+  const handleIncrementPreview = async () => {
+    try {
+      const result = await increment.preview.mutateAsync(incrementRequest())
+      setIncrementPreview({
+        batchId: result.batch_id,
+        valid: result.valid,
+        changes: result.changes,
+        issues: result.issues,
+      })
+      if (result.valid) toast.success(`${result.changes.length} salary changes are ready to review.`)
+      else toast.error(`${result.issues.length} salary increment issue(s) found.`)
+    } catch (error) {
+      setIncrementPreview(null)
+      toast.error(saveErrorMessage(error))
+    }
+  }
+  const handleIncrementSearch = () => {
+    setIncrementPage(1)
+    setAppliedIncrementSearch(incrementSearch.trim())
+  }
+  const handleIncrementCommit = async () => {
+    try {
+      const result = await increment.commit.mutateAsync(incrementRequest())
+      toast.success(`${result.salaries.length} salary increments saved${result.replayed ? ' (recovered saved result)' : ''}.`)
+      setIncrementSelected({})
+      resetIncrementPreview()
+    } catch (error) {
+      toast.error(`${saveErrorMessage(error)} Keep the same selection and retry with the same batch ID if the result is uncertain.`)
+    }
+  }
   const handleBulkPreflight = async () => {
     try {
       const result = await bulk.preflight.mutateAsync(bulkRequest())
@@ -271,6 +346,10 @@ export default function SalaryPage() {
               onChange={(event) => {
                 setMissingSalaryOnly(event.target.checked)
                 setSelectedEmployeeId(undefined)
+                setBulkSelected({})
+                setIncrementSelected({})
+                setIncrementPage(1)
+                resetIncrementPreview()
               }}
             />
             Only employees without an effective salary
@@ -313,6 +392,54 @@ export default function SalaryPage() {
             </SelectContent>
           </Select>
         </div>
+        {canEdit && (
+          <section className='space-y-3 rounded-lg border p-4' aria-label='Bulk salary increment'>
+            <div>
+              <h3 className='font-semibold'>Bulk salary increase</h3>
+              <p className='text-sm text-muted-foreground'>Select employees explicitly, choose an effective date and a shared increase. The amount is added to each selected employee’s existing rate: for example, ₱50 per month, per day or per hour according to that employee’s salary basis. The preview shows each current and proposed rate; allowances and overtime rates stay unchanged.</p>
+            </div>
+            <div className='flex flex-wrap items-end gap-3'>
+              <label className='grid gap-1 text-sm'>Filter employees by code or name
+                <input aria-label='Salary increment employee search' value={incrementSearch} onChange={event => setIncrementSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') handleIncrementSearch() }} className='h-9 rounded-md border bg-background px-3' placeholder='Employee code or name' />
+              </label>
+              <Button type='button' variant='outline' data-testid='salary-increment-search' onClick={handleIncrementSearch}>Apply filter</Button>
+              <label className='grid gap-1 text-sm'>Increase per existing rate (PHP)
+                <input aria-label='Salary increase amount' type='number' min='0.01' step='0.01' value={incrementAmount} onChange={event => { setIncrementAmount(event.target.value); resetIncrementPreview() }} className='h-9 rounded-md border bg-background px-3' />
+              </label>
+              <label className='grid gap-1 text-sm'>Effective date
+                <input aria-label='Salary increase effective date' type='date' value={incrementDate} onChange={event => { setIncrementDate(event.target.value); resetIncrementPreview() }} className='h-9 rounded-md border bg-background px-3' />
+              </label>
+              <span className='text-sm text-muted-foreground'>{selectedIncrementIds.length} employees explicitly selected</span>
+              {selectedIncrementIds.length > 200 ? (
+                <span role='alert' className='text-sm text-destructive'>A salary increment batch can include at most 200 employees. Remove some selections before continuing.</span>
+              ) : null}
+            </div>
+            {incrementEmployeeCount > pageSize ? (
+              <div className='flex items-center gap-2 text-sm'>
+                <Button type='button' variant='outline' data-testid='salary-increment-previous-page' disabled={incrementPage <= 1 || incrementSalaryRoster.isPending} onClick={() => setIncrementPage(page => Math.max(1, page - 1))}>Previous employees</Button>
+                <span>Page {incrementPage} of {Math.max(1, Math.ceil(incrementEmployeeCount / pageSize))}; selections remain checked across pages.</span>
+                <Button type='button' variant='outline' data-testid='salary-increment-next-page' disabled={incrementSalaryRoster.isPending || incrementPage * pageSize >= incrementEmployeeCount} onClick={() => setIncrementPage(page => page + 1)}>Next employees</Button>
+              </div>
+            ) : null}
+            <div className='max-h-64 overflow-auto rounded border'>
+              {incrementEmployeeOptions.map(emp => (
+                <label key={emp.id} className='flex items-center gap-2 border-b p-2 text-sm last:border-b-0'>
+                  <input aria-label={`Select ${emp.employee_code} for increase`} type='checkbox' checked={Boolean(incrementSelected[emp.id])} onChange={event => { setIncrementSelected(current => ({ ...current, [emp.id]: event.target.checked })); resetIncrementPreview() }} />
+                  <span>{emp.employee_code} — {emp.first_name} {emp.last_name}</span>
+                </label>
+              ))}
+              {!incrementEmployeeOptions.length ? <p className='p-3 text-sm text-muted-foreground'>{incrementSalaryRoster.isPending ? 'Loading employees…' : 'No employees match the current salary roster filter.'}</p> : null}
+            </div>
+            <div className='flex flex-wrap gap-2'>
+              <Button type='button' variant='outline' data-testid='salary-increment-preview' disabled={!selectedIncrementIds.length || selectedIncrementIds.length > 200 || !incrementDate || !Number.isFinite(Number(incrementAmount)) || Number(incrementAmount) <= 0 || increment.preview.isPending || increment.commit.isPending} onClick={handleIncrementPreview}>{increment.preview.isPending ? 'Calculating…' : 'Preview increase'}</Button>
+              <Button type='button' data-testid='salary-increment-commit' disabled={!incrementPreview?.valid || incrementPreview.batchId !== incrementBatchId || increment.commit.isPending} onClick={handleIncrementCommit}>{increment.commit.isPending ? 'Saving…' : increment.commit.isError ? 'Retry same batch' : 'Apply selected increase'}</Button>
+            </div>
+            {incrementPreview?.changes.map(change => {
+              return <p key={change.employee_id} className='text-sm'>{change.employee_code} — {change.employee_name}: ₱{change.current_rate} → ₱{change.proposed_rate} ({change.pay_type})</p>
+            })}
+            {incrementPreview?.issues.map(issue => <p key={`${issue.employee_id}-${issue.code}`} role='alert' className='text-sm text-destructive'>{incrementEmployeeOptions.find(row => row.id === issue.employee_id)?.employee_code ?? issue.employee_id}: {issue.message}</p>)}
+          </section>
+        )}
         {canAdd && (
           <section
             className='space-y-3 rounded-lg border p-4'
@@ -399,6 +526,7 @@ export default function SalaryPage() {
               <Button
                 type='button'
                 variant='outline'
+                data-testid='pay-group-next-page'
                 disabled={
                   bulkEmployeesPending ||
                   employeePage * pageSize >= (bulkEmployeesData?.count ?? 0)

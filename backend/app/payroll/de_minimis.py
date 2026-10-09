@@ -12,20 +12,22 @@ option (P333/month), rather than mixing monthly and semester ceilings.
 "Achievement award" requires evidence of the prescribed written plan.
 "Actual medical assistance" requires source documentation. CBA and
 productivity incentives share one annual ceiling.
-"daily_meal_ot_night" is deliberately rejected here because its 30% cap
-depends on the applicable regional statutory minimum wage and eligible days;
-callers must use a future region-aware implementation instead of guessing.
-"Monetized unused vacation leave" is also excluded because the ceiling is in
-days and needs leave-ledger evidence, not merely a monetary amount.
+Daily meal allowance has a per-region, per-eligible-day cap and is handled by
+``calculate_daily_meal_exemption`` with a reviewed wage-order source. Monetized
+private-sector unused vacation leave has a twelve-day annual limit and is
+handled by ``calculate_unused_vacation_leave_exemption`` with reconciled day
+balances; neither may be treated as a flat monetary ceiling.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation
 
 CENT = Decimal("0.01")
 OTHER_BENEFITS_ANNUAL_EXEMPTION = Decimal("90000.00")
+UNUSED_VACATION_LEAVE_EXEMPT_DAYS = 12
+DAILY_MEAL_ALLOWANCE_WAGE_FACTOR = Decimal("0.30")
 
 # category: (period, ceiling, required evidence flag)
 _CAPS: dict[str, tuple[str, Decimal, str | None]] = {
@@ -62,6 +64,14 @@ class DeMinimisResult:
     category_excess: dict[str, Decimal]
     other_benefits_exempt: Decimal
     taxable_excess: Decimal
+
+
+@dataclass(frozen=True)
+class DeMinimisDayResult:
+    eligible_exempt: Decimal
+    category_excess: Decimal
+    qualifying_days: int
+    exempt_days: int
 
 
 def _amount(value: object, *, field: str) -> Decimal:
@@ -143,4 +153,70 @@ def calculate_de_minimis_allocation(
         category_excess=excess,
         other_benefits_exempt=other_exempt,
         taxable_excess=taxable,
+    )
+
+
+def calculate_daily_meal_exemption(
+    *,
+    gross_amount: Decimal,
+    regional_daily_minimum_wage: Decimal,
+    qualifying_days: int,
+    evidence_verified: bool,
+) -> DeMinimisDayResult:
+    """Apply RR 29-2025's 30% regional daily minimum-wage limit per day."""
+    gross = _amount(gross_amount, field="gross_amount")
+    wage = _amount(regional_daily_minimum_wage, field="regional_daily_minimum_wage")
+    if wage <= 0:
+        raise DeMinimisInputError("A positive regional minimum wage is required")
+    if qualifying_days < 1 or qualifying_days > 366:
+        raise DeMinimisInputError("qualifying_days must be between 1 and 366")
+    if not evidence_verified:
+        raise DeMinimisInputError(
+            "Daily meal allowance requires verified overtime/night-shift and wage-order evidence"
+        )
+    cap = (wage * DAILY_MEAL_ALLOWANCE_WAGE_FACTOR * qualifying_days).quantize(
+        CENT, rounding=ROUND_DOWN
+    )
+    exempt = min(gross, cap).quantize(CENT)
+    return DeMinimisDayResult(
+        eligible_exempt=exempt,
+        category_excess=(gross - exempt).quantize(CENT),
+        qualifying_days=qualifying_days,
+        exempt_days=qualifying_days if exempt > 0 else 0,
+    )
+
+
+def calculate_unused_vacation_leave_exemption(
+    *,
+    gross_amount: Decimal,
+    qualifying_days: int,
+    prior_exempt_days: int,
+    evidence_verified: bool,
+) -> DeMinimisDayResult:
+    """Apply the annual twelve-day private-sector unused-vacation limit.
+
+    A payment record represents a single uniform daily rate. Any current days
+    beyond the annual remaining allowance are taxable as other benefits.
+    """
+    gross = _amount(gross_amount, field="gross_amount")
+    if qualifying_days < 1 or qualifying_days > 366:
+        raise DeMinimisInputError("qualifying_days must be between 1 and 366")
+    if prior_exempt_days < 0 or prior_exempt_days > UNUSED_VACATION_LEAVE_EXEMPT_DAYS:
+        raise DeMinimisInputError("prior_exempt_days must be between 0 and 12")
+    if not evidence_verified:
+        raise DeMinimisInputError(
+            "Monetized unused vacation leave requires verified unused leave balance evidence"
+        )
+    exempt_days = min(
+        qualifying_days,
+        max(0, UNUSED_VACATION_LEAVE_EXEMPT_DAYS - prior_exempt_days),
+    )
+    exempt = (gross * Decimal(exempt_days) / Decimal(qualifying_days)).quantize(
+        CENT, rounding=ROUND_HALF_UP
+    )
+    return DeMinimisDayResult(
+        eligible_exempt=exempt,
+        category_excess=(gross - exempt).quantize(CENT),
+        qualifying_days=qualifying_days,
+        exempt_days=exempt_days if exempt > 0 else 0,
     )

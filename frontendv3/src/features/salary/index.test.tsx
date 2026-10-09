@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
     data: { data: [] as SalaryPageEmployee[], count: 0 },
     isPending: false,
   })),
+  salaryRoster: vi.fn((_missing: boolean, _skip: number, _limit: number, _search: string) => ({
+    data: { data: [] as Array<{ employee_id: string; employee_code: string; first_name: string; last_name: string; employee_status: string; has_effective_salary: boolean }>, count: 0 },
+  })),
   preflight: vi.fn(
     async (request: { batch_id: string; employee_ids: string[] }) => ({
       batch_id: request.batch_id,
@@ -39,6 +42,30 @@ const mocks = vi.hoisted(() => ({
       })),
     })
   ),
+  incrementPreview: vi.fn(async (request: { batch_id: string; employee_ids: string[] }) => ({
+    batch_id: request.batch_id,
+    valid: true,
+    replayed: false,
+    issues: [],
+    changes: request.employee_ids.map(employee_id => ({
+      employee_id,
+      employee_code: 'E001',
+      employee_name: 'Jane Doe',
+      current_salary_id: `salary-${employee_id}`,
+      current_rate: '15000.00',
+      proposed_rate: '15050.00',
+      pay_type: 'monthly' as const,
+    })),
+    salaries: [],
+  })),
+  incrementCommit: vi.fn(async (request: { batch_id: string }) => ({
+    batch_id: request.batch_id,
+    valid: true,
+    replayed: false,
+    issues: [],
+    changes: [],
+    salaries: [{ id: 'salary-new', employee_id: 'employee-1', basic_rate: '15050.00' }],
+  })),
 }))
 
 vi.mock('@/components/layout/header', () => ({ Header: () => <div /> }))
@@ -59,10 +86,15 @@ vi.mock('@/lib/api/payroll', () => ({
     isError: false,
     refetch: vi.fn(),
   }),
-  useSalaryRoster: () => ({ data: { data: [], count: 0 } }),
+  useSalaryRoster: (missing: boolean, skip = 0, limit = 500, search = '') =>
+    mocks.salaryRoster(missing, skip, limit, search),
   useBulkSalary: () => ({
     preflight: { mutateAsync: vi.fn(), isPending: false },
     commit: { mutateAsync: vi.fn(), isPending: false },
+  }),
+  useBulkSalaryIncrement: () => ({
+    preview: { mutateAsync: mocks.incrementPreview, isPending: false },
+    commit: { mutateAsync: mocks.incrementCommit, isPending: false, isError: false },
   }),
   usePayGroupList: () => ({
     data: [
@@ -86,6 +118,69 @@ vi.mock('@/lib/api/payroll', () => ({
     commit: { mutateAsync: mocks.commit, isPending: false, isError: false },
   }),
 }))
+
+it('previews and applies a shared increase only to explicitly selected employees', async () => {
+  mocks.canView.mockReturnValue(true)
+  mocks.employees.mockReturnValue({
+    data: {
+      data: [{ id: 'employee-1', employee_code: 'E001', first_name: 'Jane', last_name: 'Doe', employee_status: 'Active' }],
+      count: 1,
+    },
+    isPending: false,
+  })
+  mocks.salaryRoster.mockReturnValue({
+    data: { data: [{ employee_id: 'employee-1', employee_code: 'E001', first_name: 'Jane', last_name: 'Doe', employee_status: 'Active', has_effective_salary: true }], count: 1 },
+  })
+  const screen = await renderWithClient(<SalaryPage />)
+  await userEvent.fill(screen.getByLabelText('Salary increment employee search'), 'E001')
+  await userEvent.click(screen.getByTestId('salary-increment-search'))
+  expect(mocks.salaryRoster).toHaveBeenLastCalledWith(false, 0, 500, 'E001')
+  await userEvent.click(screen.getByLabelText('Select E001 for increase'))
+  await userEvent.fill(screen.getByLabelText('Salary increase effective date'), '2026-11-01')
+  await userEvent.fill(screen.getByLabelText('Salary increase amount'), '50.00')
+
+  const commit = screen.getByTestId('salary-increment-commit')
+  await expect.element(commit).toBeDisabled()
+  await userEvent.click(screen.getByTestId('salary-increment-preview'))
+  await expect.element(screen.getByText(/₱15000.00 → ₱15050.00/)).toBeVisible()
+  await expect.element(commit).not.toBeDisabled()
+  await userEvent.click(commit)
+  expect(mocks.incrementCommit).toHaveBeenCalledWith(expect.objectContaining({
+    effective_date: '2026-11-01',
+    increment: '50.00',
+    employee_ids: ['employee-1'],
+  }))
+})
+
+it('retains salary-increment selections across employee pages', async () => {
+  mocks.canView.mockReturnValue(true)
+  mocks.employees.mockImplementation((page = 1) => ({
+    data: {
+      data: page === 1
+        ? [{ id: 'employee-1', employee_code: 'E001', first_name: 'Jane', last_name: 'Doe', employee_status: 'Active' }]
+        : [{ id: 'employee-2', employee_code: 'E002', first_name: 'John', last_name: 'Doe', employee_status: 'Active' }],
+      count: 501,
+    },
+    isPending: false,
+  }))
+  mocks.salaryRoster.mockImplementation((_missing, skip) => ({
+    data: {
+      data: skip === 0
+        ? [{ employee_id: 'employee-1', employee_code: 'E001', first_name: 'Jane', last_name: 'Doe', employee_status: 'Active', has_effective_salary: true }]
+        : [{ employee_id: 'employee-2', employee_code: 'E002', first_name: 'John', last_name: 'Doe', employee_status: 'Active', has_effective_salary: true }],
+      count: 501,
+    },
+  }))
+  const screen = await renderWithClient(<SalaryPage />)
+  await userEvent.click(screen.getByLabelText('Select E001 for increase'))
+  await userEvent.click(screen.getByTestId('salary-increment-next-page'))
+  await userEvent.click(screen.getByLabelText('Select E002 for increase'))
+  await userEvent.fill(screen.getByLabelText('Salary increase effective date'), '2026-11-01')
+  await userEvent.click(screen.getByTestId('salary-increment-preview'))
+  expect(mocks.incrementPreview).toHaveBeenLastCalledWith(expect.objectContaining({
+    employee_ids: ['employee-1', 'employee-2'],
+  }))
+})
 
 it('keeps hook order stable when payroll view permission changes', async () => {
   mocks.canView.mockReturnValue(false)
@@ -179,7 +274,7 @@ it('keeps explicit selections while paging through the employee roster', async (
     '2026-11-01'
   )
   await userEvent.click(screen.getByLabelText('Assign E001'))
-  await userEvent.click(screen.getByRole('button', { name: 'Next employees' }))
+  await userEvent.click(screen.getByTestId('pay-group-next-page'))
   await expect.element(screen.getByLabelText('Assign E002')).toBeVisible()
   await userEvent.click(screen.getByLabelText('Assign E002'))
   await expect

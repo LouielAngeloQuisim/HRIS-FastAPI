@@ -249,24 +249,13 @@ class EmployeeTaxYearDeclarationUpdate(SQLModel):
     opening_pay_period_count: int = Field(default=0, ge=0, le=366)
     opening_pay_period_type: Literal["daily", "weekly", "semi_monthly", "monthly"] | None = None
     previous_employer_included: bool = False
-    employee_tin: str | None = Field(default=None, max_length=32)
-    employee_rdo_code: str | None = Field(default=None, max_length=8)
-    employee_registered_address: str | None = Field(default=None, max_length=512)
-    employee_registered_postal_code: str | None = Field(default=None, max_length=10)
-    employee_local_home_address: str | None = Field(default=None, max_length=512)
-    employee_local_postal_code: str | None = Field(default=None, max_length=10)
-    previous_employer_tin: str | None = Field(default=None, max_length=32)
-    previous_employer_name: str | None = Field(default=None, max_length=255)
-    previous_employer_address: str | None = Field(default=None, max_length=512)
-    previous_employer_postal_code: str | None = Field(default=None, max_length=10)
     previous_employer_period_from: date | None = None
     previous_employer_period_to: date | None = None
-    certificate_identity_verified: bool = False
-    certificate_identity_source: str | None = Field(default=None, max_length=512)
     opening_benefits_exempt_ytd: Decimal = Field(default=Decimal("0.00"), ge=0, le=90000, max_digits=14, decimal_places=2)
     opening_benefits_reconciled: bool = False
     opening_de_minimis_annual_ytd: dict[str, str] = Field(default_factory=dict)
     opening_de_minimis_monthly_ytd: dict[str, str] = Field(default_factory=dict)
+    opening_unused_vacation_leave_days_ytd: int | None = Field(default=None, ge=0, le=12)
     source_reference: str | None = Field(default=None, max_length=512)
     is_verified: bool = False
 
@@ -275,57 +264,10 @@ class EmployeeTaxYearDeclarationUpdate(SQLModel):
         if self.previous_employer_period_from and self.previous_employer_period_to:
             if self.previous_employer_period_from > self.previous_employer_period_to:
                 raise ValueError("previous-employer period start must not follow its end")
-        if self.previous_employer_included:
-            previous_identity = (
-                self.previous_employer_tin,
-                self.previous_employer_name,
-                self.previous_employer_address,
-                self.previous_employer_postal_code,
-                self.previous_employer_period_from,
-                self.previous_employer_period_to,
-            )
-            if any(previous_identity) and not all(previous_identity):
-                raise ValueError(
-                    "Previous-employer certificate identity requires TIN, name, address, postal code and covered dates"
-                )
-        elif any(
-            (
-                self.previous_employer_tin,
-                self.previous_employer_name,
-                self.previous_employer_address,
-                self.previous_employer_postal_code,
-                self.previous_employer_period_from,
-                self.previous_employer_period_to,
-            )
+        if not self.previous_employer_included and any(
+            (self.previous_employer_period_from, self.previous_employer_period_to)
         ):
             raise ValueError("Previous-employer details require previous_employer_included")
-        if self.certificate_identity_verified:
-            required_identity = (
-                self.employee_tin,
-                self.employee_rdo_code,
-                self.employee_registered_address,
-                self.employee_registered_postal_code,
-                self.employee_local_home_address,
-                self.employee_local_postal_code,
-                self.certificate_identity_source,
-            )
-            if any(not (value.strip() if isinstance(value, str) else value) for value in required_identity):
-                raise ValueError(
-                    "Certificate identity verification requires employee TIN, RDO, registered/local addresses and postal codes, and a source note"
-                )
-            if self.previous_employer_included and not all(
-                (
-                    self.previous_employer_tin,
-                    self.previous_employer_name,
-                    self.previous_employer_address,
-                    self.previous_employer_postal_code,
-                    self.previous_employer_period_from,
-                    self.previous_employer_period_to,
-                )
-            ):
-                raise ValueError(
-                    "Certificate identity verification requires complete previous-employer details"
-                )
         annual_categories = {
             "uniform_clothing",
             "actual_medical_assistance",
@@ -353,6 +295,8 @@ class EmployeeTaxYearDeclarationUpdate(SQLModel):
                     raise ValueError(f"{field_name}.{category} must be finite and non-negative")
         if (self.opening_de_minimis_annual_ytd or self.opening_de_minimis_monthly_ytd) and not self.opening_benefits_reconciled:
             raise ValueError("Opening de minimis amounts require benefit reconciliation")
+        if self.opening_unused_vacation_leave_days_ytd is not None and not self.opening_benefits_reconciled:
+            raise ValueError("Opening unused vacation leave days require benefit reconciliation")
         if self.previous_employer_included or self.opening_benefits_exempt_ytd > 0:
             if set(self.opening_de_minimis_annual_ytd) != annual_categories or set(
                 self.opening_de_minimis_monthly_ytd
@@ -369,8 +313,6 @@ class EmployeeTaxYearDeclarationPublic(EmployeeTaxYearDeclarationUpdate):
     tax_year: int
     verified_by: uuid.UUID | None = None
     verified_at: datetime | None = None
-    certificate_identity_verified_by: uuid.UUID | None = None
-    certificate_identity_verified_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -387,12 +329,26 @@ class EmployeeTaxBenefitCreate(SQLModel):
         "achievement_award",
         "christmas_anniversary_gift",
         "cba_productivity_incentive",
+        "daily_meal_ot_night",
+        "monetized_unused_vacation_leave",
     ] | None = None
     eligibility_evidence: list[Literal[
         "actual_medical_documentation",
         "written_non_discriminatory_award_plan",
         "cba_or_productivity_incentive_evidence",
+        "approved_overtime_or_night_shift_records",
+        "unused_vacation_leave_balance_verified",
     ]] = Field(default_factory=list)
+    qualifying_days: int | None = Field(default=None, ge=1, le=366)
+    qualifying_work_dates: list[date] | None = Field(default=None, max_length=366)
+    vacation_leave_policy_id: uuid.UUID | None = None
+    regional_daily_minimum_wage: Decimal | None = Field(
+        default=None, gt=0, max_digits=12, decimal_places=2
+    )
+    region_code: str | None = Field(default=None, min_length=2, max_length=32)
+    wage_order_reference: str | None = Field(default=None, min_length=3, max_length=512)
+    wage_order_effective_from: date | None = None
+    wage_order_effective_to: date | None = None
     gross_amount: Decimal = Field(max_digits=14, decimal_places=2)
     source_reference: str = Field(min_length=3, max_length=512)
     correction_of_id: uuid.UUID | None = None
@@ -406,6 +362,7 @@ class EmployeeTaxBenefitCreate(SQLModel):
             "actual_medical_assistance": "actual_medical_documentation",
             "achievement_award": "written_non_discriminatory_award_plan",
             "cba_productivity_incentive": "cba_or_productivity_incentive_evidence",
+            "daily_meal_ot_night": "approved_overtime_or_night_shift_records",
         }
         required_evidence = conditional_evidence.get(self.de_minimis_category or "")
         if required_evidence and required_evidence not in self.eligibility_evidence:
@@ -414,36 +371,68 @@ class EmployeeTaxBenefitCreate(SQLModel):
             )
         if self.benefit_type != "de_minimis" and self.eligibility_evidence:
             raise ValueError("eligibility_evidence applies only to de minimis records")
+        regional_values = (
+            self.regional_daily_minimum_wage,
+            self.region_code,
+            self.wage_order_reference,
+        )
+        if self.de_minimis_category == "daily_meal_ot_night":
+            if self.vacation_leave_policy_id is not None:
+                raise ValueError("Vacation leave policy applies only to monetized vacation leave")
+            if (
+                self.qualifying_days is None
+                or any(not value for value in regional_values)
+                or self.wage_order_effective_from is None
+            ):
+                raise ValueError(
+                    "Daily meal allowance requires eligible days, region, daily minimum wage, wage-order source, and its effective start date"
+                )
+            if (
+                self.wage_order_effective_to is not None
+                and self.wage_order_effective_to < self.wage_order_effective_from
+            ):
+                raise ValueError("Wage-order effective end date cannot precede its start date")
+            if (
+                self.qualifying_work_dates is None
+                or len(self.qualifying_work_dates) != self.qualifying_days
+                or len(set(self.qualifying_work_dates)) != len(self.qualifying_work_dates)
+                or any(day > self.paid_on or day.year != self.paid_on.year for day in self.qualifying_work_dates)
+                or any(day < self.wage_order_effective_from for day in self.qualifying_work_dates)
+                or any(
+                    self.wage_order_effective_to is not None
+                    and day > self.wage_order_effective_to
+                    for day in self.qualifying_work_dates
+                )
+            ):
+                raise ValueError(
+                    "Daily meal allowance requires unique attendance dates within the payment year and wage-order effective dates, on or before payment"
+                )
+        elif self.de_minimis_category == "monetized_unused_vacation_leave":
+            if self.qualifying_days is None or self.vacation_leave_policy_id is None:
+                raise ValueError("Monetized unused vacation leave requires eligible days and a verified vacation leave policy")
+            if any(value is not None for value in regional_values):
+                raise ValueError("Regional wage fields apply only to daily meal allowance")
+            if self.qualifying_work_dates is not None or self.wage_order_effective_from is not None or self.wage_order_effective_to is not None:
+                raise ValueError("Attendance and wage-order dates apply only to daily meal allowance")
+        elif (
+            self.qualifying_days is not None
+            or self.qualifying_work_dates is not None
+            or self.wage_order_effective_from is not None
+            or self.wage_order_effective_to is not None
+            or any(value is not None for value in regional_values)
+            or self.vacation_leave_policy_id is not None
+        ):
+            raise ValueError("Day and regional wage evidence is unsupported for this category")
         return self
 
 
 class EmployeeTaxBenefitPublic(EmployeeTaxBenefitCreate):
+    eligibility_snapshot: dict[str, Any] | None = None
     id: uuid.UUID
     employee_id: uuid.UUID
     tax_year: int
     created_by: uuid.UUID | None = None
     created_at: datetime | None = None
-
-
-class PayrollEmployerProfileUpdate(SQLModel):
-    tin_number: str | None = Field(default=None, max_length=32)
-    registered_name: str | None = Field(default=None, max_length=255)
-    registered_address: str | None = Field(default=None, max_length=512)
-    postal_code: str | None = Field(default=None, max_length=10)
-    rdo_code: str | None = Field(default=None, max_length=8)
-    employer_type: Literal["main", "secondary"] | None = None
-    signatory_name: str | None = Field(default=None, max_length=255)
-    signatory_title: str | None = Field(default=None, max_length=128)
-    source_reference: str | None = Field(default=None, max_length=512)
-
-
-class PayrollEmployerProfilePublic(PayrollEmployerProfileUpdate):
-    id: str
-    is_verified: bool = False
-    verified_by: uuid.UUID | None = None
-    verified_at: datetime | None = None
-    updated_by: uuid.UUID | None = None
-    updated_at: datetime | None = None
 
 
 class PayrollSalaryRosterItem(SQLModel):
@@ -534,11 +523,43 @@ class EmployeeSalaryBulkRequest(SQLModel):
     rows: list[EmployeeSalaryBulkRow] = Field(min_length=1, max_length=500)
 
 
+class EmployeeSalaryIncrementRequest(SQLModel):
+    batch_id: uuid.UUID
+    effective_date: date
+    increment: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    employee_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_employees(self) -> "EmployeeSalaryIncrementRequest":
+        if len(set(self.employee_ids)) != len(self.employee_ids):
+            raise ValueError("Select each employee only once")
+        return self
+
+
+class EmployeeSalaryIncrementPreview(SQLModel):
+    employee_id: uuid.UUID
+    employee_code: str
+    employee_name: str
+    current_salary_id: uuid.UUID
+    current_rate: Decimal
+    proposed_rate: Decimal
+    pay_type: PayType
+
+
 class EmployeeSalaryBulkIssue(SQLModel):
     row_index: int
     employee_id: uuid.UUID
     code: str
     message: str
+
+
+class EmployeeSalaryIncrementResult(SQLModel):
+    batch_id: uuid.UUID
+    valid: bool
+    replayed: bool = False
+    issues: list[EmployeeSalaryBulkIssue] = Field(default_factory=list)
+    changes: list[EmployeeSalaryIncrementPreview] = Field(default_factory=list)
+    salaries: list[EmployeeSalaryPublic] = Field(default_factory=list)
 
 
 class EmployeeSalaryBulkPreflight(SQLModel):

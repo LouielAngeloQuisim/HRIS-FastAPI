@@ -1761,7 +1761,7 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
             "pagibig": "200.00",
         }
         assert "termination_monthly_contribution_timing_unavailable" not in blocker_codes
-        assert "bir_2316_termination_delivery_unavailable" in blocker_codes
+        assert "bir_2316_termination_delivery_unavailable" not in blocker_codes
     else:
         # The year-end test intentionally has no 2026 contribution schedules.
         # It exercises annual BIR math from the available provisional taxable
@@ -1813,7 +1813,7 @@ def test_final_pay_period_uses_annualized_tax_and_opening_balance(
     [
         (
             "ordinary",
-            "QA reviewed Form 2316",
+            "QA reviewed prior payroll tax records",
             "35000.00",
             PayType.MONTHLY,
             False,

@@ -5,6 +5,8 @@ import pytest
 from app.payroll.de_minimis import (
     DeMinimisInputError,
     calculate_de_minimis_allocation,
+    calculate_daily_meal_exemption,
+    calculate_unused_vacation_leave_exemption,
 )
 
 
@@ -105,3 +107,62 @@ def test_first_day_accepts_prior_same_day_payments_from_the_ledger() -> None:
     )
     assert result.eligible_exempt["rice_subsidy"] == Decimal("500.00")
     assert result.category_excess["rice_subsidy"] == Decimal("500.00")
+
+
+def test_daily_meal_exemption_uses_regional_wage_times_verified_days() -> None:
+    result = calculate_daily_meal_exemption(
+        gross_amount=Decimal("500.00"),
+        regional_daily_minimum_wage=Decimal("610.00"),
+        qualifying_days=2,
+        evidence_verified=True,
+    )
+    assert result.eligible_exempt == Decimal("366.00")
+    assert result.category_excess == Decimal("134.00")
+
+
+@pytest.mark.parametrize(
+    ("wage", "days", "verified"),
+    [(Decimal("0"), 1, True), (Decimal("610"), 0, True), (Decimal("610"), 1, False)],
+)
+def test_daily_meal_exemption_fails_closed_without_valid_inputs(
+    wage: Decimal, days: int, verified: bool
+) -> None:
+    with pytest.raises(DeMinimisInputError):
+        calculate_daily_meal_exemption(
+            gross_amount=Decimal("100"),
+            regional_daily_minimum_wage=wage,
+            qualifying_days=days,
+            evidence_verified=verified,
+        )
+
+
+def test_unused_vacation_exemption_allocates_only_remaining_days() -> None:
+    result = calculate_unused_vacation_leave_exemption(
+        gross_amount=Decimal("9000.00"),
+        qualifying_days=3,
+        prior_exempt_days=11,
+        evidence_verified=True,
+    )
+    assert result.eligible_exempt == Decimal("3000.00")
+    assert result.category_excess == Decimal("6000.00")
+    assert result.exempt_days == 1
+
+    next_payment = calculate_unused_vacation_leave_exemption(
+        gross_amount=Decimal("6000.00"),
+        qualifying_days=3,
+        prior_exempt_days=12,
+        evidence_verified=True,
+    )
+    assert next_payment.eligible_exempt == Decimal("0.00")
+    assert next_payment.category_excess == Decimal("6000.00")
+    assert next_payment.exempt_days == 0
+
+
+def test_unused_vacation_exemption_requires_verified_balance() -> None:
+    with pytest.raises(DeMinimisInputError, match="verified unused leave"):
+        calculate_unused_vacation_leave_exemption(
+            gross_amount=Decimal("1000"),
+            qualifying_days=1,
+            prior_exempt_days=0,
+            evidence_verified=False,
+        )

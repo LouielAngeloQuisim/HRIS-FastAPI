@@ -1294,6 +1294,7 @@ export interface LeavePolicyBase {
   carry_over_max_days?: string | null
   carry_over_expires_on?: string | null
   is_paid?: boolean | null
+  tax_exempt_unused_vacation_leave?: boolean | null
   eligible_departments?: string[] | null
   gender_scope?: GenderScope | null
   marital_status_scope?: MaritalStatusScope | null
@@ -1314,6 +1315,7 @@ export interface LeavePolicyUpdate {
   carry_over_max_days?: string | null
   carry_over_expires_on?: string | null
   is_paid?: boolean | null
+  tax_exempt_unused_vacation_leave?: boolean | null
   eligible_departments?: string[] | null
   gender_scope?: GenderScope | null
   marital_status_scope?: MaritalStatusScope | null

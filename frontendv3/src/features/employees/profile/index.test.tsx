@@ -53,6 +53,14 @@ type TaxBenefitMock = {
   benefit_type: 'thirteenth_month' | 'other_benefit' | 'de_minimis'
   de_minimis_category?: string | null
   eligibility_evidence?: string[]
+  qualifying_days?: number | null
+  regional_daily_minimum_wage?: string | null
+  region_code?: string | null
+  wage_order_reference?: string | null
+  wage_order_effective_from?: string | null
+  wage_order_effective_to?: string | null
+  vacation_leave_policy_id?: string | null
+  eligibility_snapshot?: Record<string, unknown> | null
   gross_amount: string
   source_reference: string
   correction_of_id: string | null
@@ -116,6 +124,15 @@ vi.mock('@/lib/api/payroll', () => ({
 }))
 
 vi.mock('@/context/permissions-provider', () => ({ useCan: () => true }))
+
+vi.mock('@/lib/api/leave-policies', () => ({
+  useLeavePolicies: () => ({
+    data: { data: [] },
+    isPending: false,
+    isError: false,
+    isSuccess: true,
+  }),
+}))
 
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ employeeId: 'emp-1' }),
@@ -208,62 +225,18 @@ describe('EmployeeProfile', () => {
     )
     await userEvent.fill(
       screen.getByLabelText(/Source \/ review note/i),
-      'Form 2316 reviewed'
-    )
-    await userEvent.fill(
-      screen.getByLabelText(/^Employee TIN$/i),
-      '123-456-789-000'
-    )
-    await userEvent.fill(screen.getByLabelText(/Employee RDO code/i), '039')
-    await userEvent.fill(
-      screen.getByLabelText(/^Registered address$/i),
-      '1 Test Street'
-    )
-    await userEvent.fill(
-      screen.getByLabelText(/Registered address ZIP code/i),
-      '1100'
-    )
-    await userEvent.fill(
-      screen.getByLabelText(/^Local home address$/i),
-      '2 Home Street'
-    )
-    await userEvent.fill(
-      screen.getByLabelText(/Local home address ZIP code/i),
-      '1100'
-    )
-    await userEvent.fill(
-      screen.getByLabelText(/Identity supporting source/i),
-      'Employee tax record and proof of address reviewed'
+      'Prior payroll tax records reviewed'
     )
     await userEvent.click(
       screen.getByLabelText(/Figures include a previous employer/i)
     )
     await userEvent.fill(
-      screen.getByLabelText(/Previous employer TIN/i),
-      '987-654-321-000'
-    )
-    await userEvent.fill(
-      screen.getByLabelText(/Previous employer name/i),
-      'Prior Test Employer Inc.'
-    )
-    await userEvent.fill(
-      screen.getByLabelText(/Previous employer address$/i),
-      '3 Business Street'
-    )
-    await userEvent.fill(
-      screen.getByLabelText(/Previous employer ZIP code/i),
-      '1000'
-    )
-    await userEvent.fill(
-      screen.getByLabelText(/Previous employer period from/i),
+      screen.getByLabelText(/^Covered from$/i),
       '2026-01-01'
     )
     await userEvent.fill(
-      screen.getByLabelText(/Previous employer period to/i),
+      screen.getByLabelText(/^Covered through$/i),
       '2026-03-31'
-    )
-    await userEvent.click(
-      screen.getByLabelText(/I checked the tax identity and address details/i)
     )
     await userEvent.click(
       screen.getByLabelText(
@@ -284,21 +257,8 @@ describe('EmployeeProfile', () => {
         opening_pay_period_count: 6,
         opening_pay_period_type: 'monthly',
         previous_employer_included: true,
-        employee_tin: '123-456-789-000',
-        employee_rdo_code: '039',
-        employee_registered_address: '1 Test Street',
-        employee_registered_postal_code: '1100',
-        employee_local_home_address: '2 Home Street',
-        employee_local_postal_code: '1100',
-        previous_employer_tin: '987-654-321-000',
-        previous_employer_name: 'Prior Test Employer Inc.',
-        previous_employer_address: '3 Business Street',
-        previous_employer_postal_code: '1000',
         previous_employer_period_from: '2026-01-01',
         previous_employer_period_to: '2026-03-31',
-        certificate_identity_verified: true,
-        certificate_identity_source:
-          'Employee tax record and proof of address reviewed',
         opening_benefits_exempt_ytd: '0.00',
         opening_benefits_reconciled: true,
         opening_de_minimis_annual_ytd: {
@@ -382,6 +342,53 @@ describe('EmployeeProfile', () => {
         benefit_type: 'de_minimis',
         de_minimis_category: 'actual_medical_assistance',
         eligibility_evidence: ['actual_medical_documentation'],
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('requires regional wage and approved shift evidence for meal allowance', async () => {
+    const { useEmployee } = await import('@/lib/api/employees')
+    vi.mocked(useEmployee).mockReturnValue({
+      data: mockEmployee,
+      isPending: false,
+      isError: false,
+    } as ReturnType<typeof useEmployee>)
+    const screen = await render(<EmployeeProfile />)
+    await userEvent.selectOptions(screen.getByLabelText('Benefit type'), 'de_minimis')
+    await userEvent.selectOptions(
+      screen.getByLabelText('De minimis category'),
+      'daily_meal_ot_night'
+    )
+    await userEvent.fill(screen.getByLabelText('Paid date'), '2026-07-01')
+    await userEvent.fill(
+      screen.getByLabelText(/Qualifying attendance dates/),
+      '2026-06-30, 2026-07-01'
+    )
+    await userEvent.fill(screen.getByLabelText('Regional daily minimum wage'), '610.00')
+    await userEvent.fill(screen.getByLabelText('Region code'), 'NCR')
+    await userEvent.fill(screen.getByLabelText('Wage order source reference'), 'NCR-WO-QA-01')
+    await userEvent.fill(screen.getByLabelText('Wage order effective from'), '2026-01-01')
+    await userEvent.fill(screen.getByLabelText('Gross amount paid'), '500.00')
+    await userEvent.fill(screen.getByLabelText('Payment source reference'), 'Meal voucher QA-001')
+    const submit = screen.getByRole('button', { name: 'Record paid benefit' })
+    expect(submit).toBeDisabled()
+    await userEvent.click(
+      screen.getByLabelText('Approved overtime or night-shift records verified for these days')
+    )
+    expect(submit).toBeEnabled()
+    await userEvent.click(submit)
+    expect(saveBenefit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        de_minimis_category: 'daily_meal_ot_night',
+        qualifying_days: 2,
+        qualifying_work_dates: ['2026-06-30', '2026-07-01'],
+        regional_daily_minimum_wage: '610.00',
+        region_code: 'NCR',
+        wage_order_reference: 'NCR-WO-QA-01',
+        wage_order_effective_from: '2026-01-01',
+        wage_order_effective_to: null,
+        eligibility_evidence: ['approved_overtime_or_night_shift_records'],
       }),
       expect.any(Object)
     )

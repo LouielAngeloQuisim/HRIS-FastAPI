@@ -19,6 +19,7 @@ from pydantic import GetCoreSchemaHandler
 from sqlalchemy import (
     JSON,
     CheckConstraint,
+    Column,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -313,6 +314,11 @@ class EmployeeTaxYearDeclaration(SQLModel, table=True):
             name="ck_employee_tax_opening_period_count",
         ),
         CheckConstraint(
+            "opening_unused_vacation_leave_days_ytd IS NULL OR "
+            "opening_unused_vacation_leave_days_ytd BETWEEN 0 AND 12",
+            name="ck_employee_tax_unused_vacation_days_ytd",
+        ),
+        CheckConstraint(
             "opening_pay_period_type IS NULL OR opening_pay_period_type IN ('daily', 'weekly', 'semi_monthly', 'monthly')",
             name="ck_employee_tax_opening_period_type",
         ),
@@ -329,7 +335,8 @@ class EmployeeTaxYearDeclaration(SQLModel, table=True):
     opening_pay_period_count: int = Field(default=0, ge=0)
     opening_pay_period_type: str | None = Field(default=None, max_length=16)
     previous_employer_included: bool = Field(default=False)
-    # Tax-year-scoped identity snapshot used only by the statutory certificate workflow.
+    # Legacy certificate-only columns are retained for migration compatibility.
+    # They are not exposed by payroll APIs or used in payroll calculations.
     employee_tin: str | None = Field(default=None, max_length=32)
     employee_rdo_code: str | None = Field(default=None, max_length=8)
     employee_registered_address: str | None = Field(default=None, max_length=512)
@@ -356,6 +363,7 @@ class EmployeeTaxYearDeclaration(SQLModel, table=True):
     opening_benefits_reconciled: bool = Field(default=False)
     opening_de_minimis_annual_ytd: dict[str, str] = Field(default_factory=dict, sa_type=JSON)
     opening_de_minimis_monthly_ytd: dict[str, str] = Field(default_factory=dict, sa_type=JSON)
+    opening_unused_vacation_leave_days_ytd: int | None = Field(default=None, ge=0, le=12)
     is_verified: bool = Field(default=False)
     source_reference: str | None = Field(default=None, max_length=512)
     verified_by: uuid.UUID | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL")
@@ -380,8 +388,34 @@ class EmployeeTaxBenefit(SQLModel, table=True):
             "(benefit_type = 'de_minimis' AND de_minimis_category IN "
             "('medical_cash_dependents', 'rice_subsidy', 'uniform_clothing', "
             "'actual_medical_assistance', 'laundry_allowance', 'achievement_award', "
-            "'christmas_anniversary_gift', 'cba_productivity_incentive'))",
+            "'christmas_anniversary_gift', 'cba_productivity_incentive', "
+            "'daily_meal_ot_night', 'monetized_unused_vacation_leave'))",
             name="ck_employee_tax_benefit_classification",
+        ),
+        CheckConstraint(
+            "(de_minimis_category = 'daily_meal_ot_night' AND qualifying_days IS NOT NULL "
+            "AND qualifying_days BETWEEN 1 AND 366 AND regional_daily_minimum_wage IS NOT NULL "
+            "AND regional_daily_minimum_wage > 0 AND region_code IS NOT NULL "
+            "AND length(trim(region_code)) > 0 AND wage_order_reference IS NOT NULL "
+            "AND length(trim(wage_order_reference)) > 0 AND qualifying_work_dates IS NOT NULL "
+            "AND wage_order_effective_from IS NOT NULL AND "
+            "(wage_order_effective_to IS NULL OR wage_order_effective_to >= wage_order_effective_from) "
+            "AND vacation_leave_policy_id IS NULL) OR "
+            "(de_minimis_category = 'monetized_unused_vacation_leave' AND qualifying_days IS NOT NULL "
+            "AND qualifying_days BETWEEN 1 AND 366 "
+            "AND regional_daily_minimum_wage IS NULL AND region_code IS NULL AND wage_order_reference IS NULL "
+            "AND qualifying_work_dates IS NULL AND wage_order_effective_from IS NULL "
+            "AND wage_order_effective_to IS NULL AND vacation_leave_policy_id IS NOT NULL) OR "
+            "(de_minimis_category NOT IN ('daily_meal_ot_night', 'monetized_unused_vacation_leave') "
+            "AND qualifying_days IS NULL AND regional_daily_minimum_wage IS NULL "
+            "AND region_code IS NULL AND wage_order_reference IS NULL AND qualifying_work_dates IS NULL "
+            "AND wage_order_effective_from IS NULL AND wage_order_effective_to IS NULL "
+            "AND vacation_leave_policy_id IS NULL) OR "
+            "(de_minimis_category IS NULL AND qualifying_days IS NULL AND regional_daily_minimum_wage IS NULL "
+            "AND region_code IS NULL AND wage_order_reference IS NULL AND qualifying_work_dates IS NULL "
+            "AND wage_order_effective_from IS NULL AND wage_order_effective_to IS NULL "
+            "AND vacation_leave_policy_id IS NULL)",
+            name="ck_employee_tax_benefit_day_evidence_shape",
         ),
         Index("ix_employee_tax_benefit_employee_year_date", "employee_id", "tax_year", "paid_on"),
         UniqueConstraint("correction_of_id", name="uq_employee_tax_benefit_correction_of"),
@@ -401,6 +435,23 @@ class EmployeeTaxBenefit(SQLModel, table=True):
     benefit_type: str = Field(max_length=32)
     de_minimis_category: str | None = Field(default=None, max_length=40)
     eligibility_evidence: list[str] = Field(default_factory=list, sa_type=JSON)
+    qualifying_days: int | None = None
+    qualifying_work_dates: list[str] | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
+    vacation_leave_policy_id: uuid.UUID | None = Field(
+        default=None, foreign_key="leave_policy.id", ondelete="RESTRICT"
+    )
+    eligibility_snapshot: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
+    regional_daily_minimum_wage: Decimal | None = Field(
+        default=None, sa_column=Numeric(12, 2)
+    )  # type: ignore
+    region_code: str | None = Field(default=None, max_length=32)
+    wage_order_reference: str | None = Field(default=None, max_length=512)
+    wage_order_effective_from: date | None = None
+    wage_order_effective_to: date | None = None
     gross_amount: Decimal = Field(sa_column=Numeric(14, 2))  # type: ignore
     source_reference: str = Field(max_length=512)
     correction_of_id: uuid.UUID | None = Field(
@@ -412,7 +463,7 @@ class EmployeeTaxBenefit(SQLModel, table=True):
 
 
 class PayrollEmployerProfile(SQLModel, table=True):
-    """Employer identity required for statutory payroll certificates."""
+    """Legacy certificate-identity table retained for migration compatibility."""
 
     __tablename__ = "payroll_employer_profile"
     __table_args__ = (

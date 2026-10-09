@@ -38,26 +38,13 @@ export interface EmployeeTaxYearDeclaration {
     | 'monthly'
     | null
   previous_employer_included: boolean
-  employee_tin: string | null
-  employee_rdo_code: string | null
-  employee_registered_address: string | null
-  employee_registered_postal_code: string | null
-  employee_local_home_address: string | null
-  employee_local_postal_code: string | null
-  previous_employer_tin: string | null
-  previous_employer_name: string | null
-  previous_employer_address: string | null
-  previous_employer_postal_code: string | null
   previous_employer_period_from: string | null
   previous_employer_period_to: string | null
-  certificate_identity_verified: boolean
-  certificate_identity_source: string | null
-  certificate_identity_verified_by: string | null
-  certificate_identity_verified_at: string | null
   opening_benefits_exempt_ytd: string
   opening_benefits_reconciled: boolean
   opening_de_minimis_annual_ytd: Record<string, string>
   opening_de_minimis_monthly_ytd: Record<string, string>
+  opening_unused_vacation_leave_days_ytd: number | null
   source_reference: string | null
   is_verified: boolean
   verified_by: string | null
@@ -75,24 +62,13 @@ export type EmployeeTaxYearDeclarationInput = Pick<
   | 'opening_pay_period_count'
   | 'opening_pay_period_type'
   | 'previous_employer_included'
-  | 'employee_tin'
-  | 'employee_rdo_code'
-  | 'employee_registered_address'
-  | 'employee_registered_postal_code'
-  | 'employee_local_home_address'
-  | 'employee_local_postal_code'
-  | 'previous_employer_tin'
-  | 'previous_employer_name'
-  | 'previous_employer_address'
-  | 'previous_employer_postal_code'
   | 'previous_employer_period_from'
   | 'previous_employer_period_to'
-  | 'certificate_identity_verified'
-  | 'certificate_identity_source'
   | 'opening_benefits_exempt_ytd'
   | 'opening_benefits_reconciled'
   | 'opening_de_minimis_annual_ytd'
   | 'opening_de_minimis_monthly_ytd'
+  | 'opening_unused_vacation_leave_days_ytd'
   | 'source_reference'
 > & { is_verified: boolean }
 
@@ -125,7 +101,16 @@ export interface EmployeeTaxBenefit {
   paid_on: string
   benefit_type: 'thirteenth_month' | 'other_benefit' | 'de_minimis'
   de_minimis_category: string | null
+  vacation_leave_policy_id: string | null
+  eligibility_snapshot: Record<string, unknown> | null
   eligibility_evidence: string[]
+  qualifying_days: number | null
+  qualifying_work_dates: string[] | null
+  regional_daily_minimum_wage: string | null
+  region_code: string | null
+  wage_order_reference: string | null
+  wage_order_effective_from: string | null
+  wage_order_effective_to: string | null
   gross_amount: string
   source_reference: string
   correction_of_id: string | null
@@ -139,7 +124,15 @@ export type EmployeeTaxBenefitInput = Pick<
   | 'paid_on'
   | 'benefit_type'
   | 'de_minimis_category'
+  | 'vacation_leave_policy_id'
   | 'eligibility_evidence'
+  | 'qualifying_days'
+  | 'qualifying_work_dates'
+  | 'regional_daily_minimum_wage'
+  | 'region_code'
+  | 'wage_order_reference'
+  | 'wage_order_effective_from'
+  | 'wage_order_effective_to'
   | 'gross_amount'
   | 'source_reference'
   | 'correction_of_id'
@@ -800,6 +793,30 @@ export interface SalaryBulkCommit {
   salaries: EmployeeSalaryPublic[]
 }
 
+export interface SalaryIncrementRequest {
+  batch_id: string
+  effective_date: string
+  increment: string
+  employee_ids: string[]
+}
+
+export interface SalaryIncrementResult {
+  batch_id: string
+  valid: boolean
+  replayed: boolean
+  issues: SalaryBulkIssue[]
+  changes: {
+    employee_id: string
+    employee_code: string
+    employee_name: string
+    current_salary_id: string
+    current_rate: string
+    proposed_rate: string
+    pay_type: 'hourly' | 'daily' | 'monthly'
+  }[]
+  salaries: EmployeeSalaryPublic[]
+}
+
 export interface PayrollRunPreflightEmployee {
   employee_id: string
   employee_code: string
@@ -919,16 +936,42 @@ export function useBulkSalary() {
   return { preflight, commit }
 }
 
-export function useSalaryRoster(missingSalary: boolean) {
+export function useBulkSalaryIncrement() {
+  const qc = useQueryClient()
+  const preview = useMutation({
+    mutationFn: (request: SalaryIncrementRequest) =>
+      api
+        .post<SalaryIncrementResult>('/payroll/salaries/bulk/increment/preview', request)
+        .then(response => response.data),
+  })
+  const commit = useMutation({
+    mutationFn: (request: SalaryIncrementRequest) =>
+      api
+        .post<SalaryIncrementResult>('/payroll/salaries/bulk/increment/commit', request)
+        .then(response => response.data),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['payroll-salary-roster'] })
+      await qc.invalidateQueries({ queryKey: ['salary'] })
+    },
+  })
+  return { preview, commit }
+}
+
+export function useSalaryRoster(
+  missingSalary: boolean,
+  skip = 0,
+  limit = 500,
+  search = ''
+) {
   return useQuery({
-    queryKey: ['payroll-salary-roster', missingSalary],
+    queryKey: ['payroll-salary-roster', missingSalary, skip, limit, search],
     queryFn: () =>
       api
         .get<{
           data: PayrollSalaryRosterItem[]
           count: number
         }>('/payroll/salary-roster', {
-          params: { missing_salary: missingSalary, limit: 500 },
+          params: { missing_salary: missingSalary, skip, limit, search: search || undefined },
         })
         .then((r) => r.data),
   })
@@ -1003,59 +1046,6 @@ export function usePayrollSetup() {
     createPolicy,
     confirmPolicy,
   }
-}
-
-export interface PayrollEmployerProfile {
-  id: string
-  tin_number: string | null
-  registered_name: string | null
-  registered_address: string | null
-  postal_code: string | null
-  rdo_code: string | null
-  employer_type: 'main' | 'secondary' | null
-  signatory_name: string | null
-  signatory_title: string | null
-  source_reference: string | null
-  is_verified: boolean
-  verified_by: string | null
-  verified_at: string | null
-  updated_by: string | null
-  updated_at: string | null
-}
-
-export type PayrollEmployerProfileInput = Omit<
-  PayrollEmployerProfile,
-  'id' | 'updated_by' | 'updated_at'
->
-
-export function usePayrollEmployerProfile() {
-  const qc = useQueryClient()
-  const profile = useQuery({
-    queryKey: ['payroll-employer-profile'],
-    queryFn: () =>
-      api
-        .get<PayrollEmployerProfile>('/payroll/employer-profile')
-        .then((response) => response.data),
-  })
-  const save = useMutation({
-    mutationFn: (payload: Partial<PayrollEmployerProfileInput>) =>
-      api
-        .put<PayrollEmployerProfile>('/payroll/employer-profile', payload)
-        .then((response) => response.data),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['payroll-employer-profile'] })
-    },
-  })
-  const verify = useMutation({
-    mutationFn: () =>
-      api
-        .post<PayrollEmployerProfile>('/payroll/employer-profile/verify')
-        .then((response) => response.data),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['payroll-employer-profile'] })
-    },
-  })
-  return { profile, save, verify }
 }
 
 export function usePayGroupList() {

@@ -1,13 +1,13 @@
 # Architecture Map (generated, do not hand-edit)
 Generated: 2026-10-09
-Source commit: 218752c1878c06f96c75991deba4d33a65f3be65
+Source commit: d2d6011f894da0ae5842ad738e4e6c9350525313
 Provenance: the content below was extracted from the working tree at the
 Source commit shown. When this file is itself committed, the commit that
 stores it is a DESCENDANT of the Source commit, not the Source commit.
 Regenerate this file with `bash scripts/gen-map.sh [SOURCE_COMMIT]`
 rather than editing it by hand.
 
-## Backend routes (`/api/*`): 294 endpoints in 40 groups
+## Backend routes (`/api/*`): 293 endpoints in 40 groups
 
 Grouped by top-level prefix. Format: `METHOD path  [perms: module:action]`.
 No `[perms]` tag means the route has no `require_permission` dependency:
@@ -240,7 +240,7 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 
 - `POST /api/v1/password-recovery-html-content/{email}`
 
-### `/api/v1/payroll` (87 routes)
+### `/api/v1/payroll` (86 routes)
 
 - `POST /api/v1/payroll/amortizations/{amortization_id}/pay`  `[perms: payroll:edit]`
 - `GET /api/v1/payroll/bir-brackets/`  `[perms: payroll:view]`
@@ -260,9 +260,6 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `POST /api/v1/payroll/employees/{employee_id}/tax-year-benefits/{tax_year}`  `[perms: payroll:approve]`
 - `GET /api/v1/payroll/employees/{employee_id}/tax-year-declarations/{tax_year}`  `[perms: payroll:view]`
 - `PUT /api/v1/payroll/employees/{employee_id}/tax-year-declarations/{tax_year}`  `[perms: payroll:approve]`
-- `GET /api/v1/payroll/employer-profile`  `[perms: payroll:view]`
-- `PUT /api/v1/payroll/employer-profile`  `[perms: payroll:edit]`
-- `POST /api/v1/payroll/employer-profile/verify`  `[perms: payroll:approve]`
 - `GET /api/v1/payroll/integrations`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/integrations`  `[perms: payroll:add]`
 - `DELETE /api/v1/payroll/integrations/mappings/{mapping_id}`  `[perms: payroll:delete]`
@@ -318,6 +315,8 @@ or routes protected by the route_policy whitelist instead of RBAC modules.
 - `POST /api/v1/payroll/runs/{run_id}/start-review`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/runs/{run_id}/void`  `[perms: payroll:edit]`
 - `POST /api/v1/payroll/salaries/bulk/commit`  `[perms: payroll:add]`
+- `POST /api/v1/payroll/salaries/bulk/increment/commit`  `[perms: payroll:edit]`
+- `POST /api/v1/payroll/salaries/bulk/increment/preview`  `[perms: payroll:view]`
 - `POST /api/v1/payroll/salaries/bulk/preflight`  `[perms: payroll:add]`
 - `DELETE /api/v1/payroll/salaries/{salary_id}`  `[perms: payroll:delete]`
 - `GET /api/v1/payroll/salaries/{salary_id}`  `[perms: payroll:view]`
@@ -467,7 +466,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `dtr-adjustments`: api `daily-time-records`, `dtr-adjustments`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
 - `emp-tasks`: api `emp-tasks`, `employee-projects`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
 - `employee-projects`: api `employee-projects`, `employees`, `projects`, `relationship-label-text`, `relationship-labels`, `save-error`; flags: route, form, test
-- `employees`: api `employees`, `payroll`, `save-error`; flags: route, form, test
+- `employees`: api `employees`, `leave-policies`, `payroll`, `save-error`; flags: route, form, test
 - `holidays`: api `holidays`; flags: route, form, test
 - `leave-calendar`: api `employees`, `leave-ledger`; flags: route, test
 - `leave-enrollment`: api `employees`, `leave-policies`, `save-error`; flags: test
@@ -494,7 +493,7 @@ reliable in the source tree's single-line import style) with plumbing
 - `tasks`: api `none`; flags: route, test
 - `users`: api `none`; flags: route, test
 
-## Migration chain (oldest -> newest): 52 revisions, single head `3c4d5e6f7a8b`
+## Migration chain (oldest -> newest): 53 revisions, single head `2a3b4c5d6e7f`
 
 Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 `down_revision` tokens); no `alembic history` subprocess required.
@@ -551,6 +550,7 @@ Parsed statically from `backend/alembic/versions/*.py` (`revision` /
 50. `1a2b3c4d5e6f` - Allow only one correction to reverse each contribution ledger row.
 51. `2b3c4d5e6f70` - Require contribution corrections to stay within their source scope.
 52. `3c4d5e6f7a8b` - Seed the verified PhilHealth direct-contributor schedule for 2026.
+53. `2a3b4c5d6e7f` - Add evidence and limits for day-based de minimis benefits.
 
 ### Migration anomalies (static findings, report-only)
 

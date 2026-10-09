@@ -103,7 +103,7 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   await page.goto('/payroll/salary')
   await page.getByLabel('Only employees without an effective salary').check()
   await expect(page.getByLabel(`Select ${employee.employee_code}`)).toBeVisible()
-  await page.getByLabel(`Select ${employee.employee_code}`).check()
+  await page.getByLabel(`Select ${employee.employee_code}`, { exact: true }).check()
   await page.getByLabel(`${employee.employee_code} basic rate`).fill('26000.00')
   await page.getByLabel(`${employee.employee_code} salary basis`).selectOption('monthly')
   await page.getByLabel(`${employee.employee_code} overtime rate`).fill('1.25')

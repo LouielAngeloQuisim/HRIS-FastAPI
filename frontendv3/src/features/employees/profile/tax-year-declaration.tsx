@@ -75,52 +75,22 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
   const [previousEmployer, setPreviousEmployer] = useState(
     initialData?.previous_employer_included ?? false
   )
-  const [employeeTin, setEmployeeTin] = useState(
-    initialData?.employee_tin ?? ''
-  )
-  const [employeeRdo, setEmployeeRdo] = useState(
-    initialData?.employee_rdo_code ?? ''
-  )
-  const [registeredAddress, setRegisteredAddress] = useState(
-    initialData?.employee_registered_address ?? ''
-  )
-  const [registeredPostal, setRegisteredPostal] = useState(
-    initialData?.employee_registered_postal_code ?? ''
-  )
-  const [localAddress, setLocalAddress] = useState(
-    initialData?.employee_local_home_address ?? ''
-  )
-  const [localPostal, setLocalPostal] = useState(
-    initialData?.employee_local_postal_code ?? ''
-  )
-  const [previousEmployerTin, setPreviousEmployerTin] = useState(
-    initialData?.previous_employer_tin ?? ''
-  )
-  const [previousEmployerName, setPreviousEmployerName] = useState(
-    initialData?.previous_employer_name ?? ''
-  )
-  const [previousEmployerAddress, setPreviousEmployerAddress] = useState(
-    initialData?.previous_employer_address ?? ''
-  )
-  const [previousEmployerPostal, setPreviousEmployerPostal] = useState(
-    initialData?.previous_employer_postal_code ?? ''
-  )
   const [previousEmployerFrom, setPreviousEmployerFrom] = useState(
     initialData?.previous_employer_period_from ?? ''
   )
   const [previousEmployerTo, setPreviousEmployerTo] = useState(
     initialData?.previous_employer_period_to ?? ''
   )
-  const [certificateIdentityVerified, setCertificateIdentityVerified] =
-    useState(initialData?.certificate_identity_verified ?? false)
-  const [certificateIdentitySource, setCertificateIdentitySource] = useState(
-    initialData?.certificate_identity_source ?? ''
-  )
   const [openingBenefitsExemptYtd, setOpeningBenefitsExemptYtd] = useState(
     initialData?.opening_benefits_exempt_ytd ?? '0.00'
   )
   const [openingBenefitsReconciled, setOpeningBenefitsReconciled] = useState(
     initialData?.opening_benefits_reconciled ?? false
+  )
+  const [openingUnusedVacationDays, setOpeningUnusedVacationDays] = useState(
+    initialData?.opening_unused_vacation_leave_days_ytd == null
+      ? ''
+      : String(initialData.opening_unused_vacation_leave_days_ytd)
   )
   const [annualDeMinimis, setAnnualDeMinimis] = useState<
     Record<string, string>
@@ -166,32 +136,12 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
         ? openingPayPeriodType
         : null,
       previous_employer_included: previousEmployer,
-      employee_tin: employeeTin.trim() || null,
-      employee_rdo_code: employeeRdo.trim() || null,
-      employee_registered_address: registeredAddress.trim() || null,
-      employee_registered_postal_code: registeredPostal.trim() || null,
-      employee_local_home_address: localAddress.trim() || null,
-      employee_local_postal_code: localPostal.trim() || null,
-      previous_employer_tin: previousEmployer
-        ? previousEmployerTin.trim() || null
-        : null,
-      previous_employer_name: previousEmployer
-        ? previousEmployerName.trim() || null
-        : null,
-      previous_employer_address: previousEmployer
-        ? previousEmployerAddress.trim() || null
-        : null,
-      previous_employer_postal_code: previousEmployer
-        ? previousEmployerPostal.trim() || null
-        : null,
       previous_employer_period_from: previousEmployer
         ? previousEmployerFrom || null
         : null,
       previous_employer_period_to: previousEmployer
         ? previousEmployerTo || null
         : null,
-      certificate_identity_verified: certificateIdentityVerified,
-      certificate_identity_source: certificateIdentitySource.trim() || null,
       opening_benefits_exempt_ytd: openingBenefitsExemptYtd,
       opening_benefits_reconciled: openingBenefitsReconciled,
       opening_de_minimis_annual_ytd: openingBenefitsReconciled
@@ -200,6 +150,9 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
       opening_de_minimis_monthly_ytd: openingBenefitsReconciled
         ? monthlyDeMinimis
         : {},
+      opening_unused_vacation_leave_days_ytd: openingBenefitsReconciled && openingUnusedVacationDays !== ''
+        ? Number(openingUnusedVacationDays)
+        : null,
       source_reference: sourceReference.trim() || null,
       is_verified: confirmReviewed,
     })
@@ -286,164 +239,32 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
               />
               Figures include a previous employer
             </label>
-            <fieldset className='space-y-3 rounded-md border p-3'>
-              <legend className='px-1 text-sm font-medium'>
-                Form 2316 employee identity
-              </legend>
-              <p className='text-xs text-muted-foreground'>
-                These are tax-year snapshot values. Verify them against the
-                employee's BIR record and proof of address; the employee profile
-                stores only one address/ZIP.
-              </p>
-              <div className='grid gap-3 sm:grid-cols-2'>
+            {previousEmployer ? (
+              <fieldset className='grid gap-3 rounded-md border p-3 sm:grid-cols-2'>
+                <legend className='px-1 text-sm font-medium'>
+                  Previous-employer earnings period
+                </legend>
+                <p className='text-xs text-muted-foreground sm:col-span-2'>
+                  Enter only the dates covered by the prior-employer taxable-pay and withholding totals above. Keep the source document reference in the review note.
+                </p>
                 <label className='flex flex-col gap-1 text-sm'>
-                  Employee TIN
+                  Covered from
                   <Input
-                    maxLength={32}
-                    value={employeeTin}
-                    onChange={(event) => setEmployeeTin(event.target.value)}
+                    type='date'
+                    value={previousEmployerFrom}
+                    onChange={(event) => setPreviousEmployerFrom(event.target.value)}
                   />
                 </label>
                 <label className='flex flex-col gap-1 text-sm'>
-                  Employee RDO code
+                  Covered through
                   <Input
-                    maxLength={8}
-                    value={employeeRdo}
-                    onChange={(event) => setEmployeeRdo(event.target.value)}
+                    type='date'
+                    value={previousEmployerTo}
+                    onChange={(event) => setPreviousEmployerTo(event.target.value)}
                   />
                 </label>
-                <label className='flex flex-col gap-1 text-sm'>
-                  Registered address
-                  <Input
-                    maxLength={512}
-                    value={registeredAddress}
-                    onChange={(event) =>
-                      setRegisteredAddress(event.target.value)
-                    }
-                  />
-                </label>
-                <label className='flex flex-col gap-1 text-sm'>
-                  Registered address ZIP code
-                  <Input
-                    maxLength={10}
-                    value={registeredPostal}
-                    onChange={(event) =>
-                      setRegisteredPostal(event.target.value)
-                    }
-                  />
-                </label>
-                <label className='flex flex-col gap-1 text-sm'>
-                  Local home address
-                  <Input
-                    maxLength={512}
-                    value={localAddress}
-                    onChange={(event) => setLocalAddress(event.target.value)}
-                  />
-                </label>
-                <label className='flex flex-col gap-1 text-sm'>
-                  Local home address ZIP code
-                  <Input
-                    maxLength={10}
-                    value={localPostal}
-                    onChange={(event) => setLocalPostal(event.target.value)}
-                  />
-                </label>
-              </div>
-              {previousEmployer ? (
-                <div className='grid gap-3 border-t pt-3 sm:grid-cols-2'>
-                  <p className='text-xs text-muted-foreground sm:col-span-2'>
-                    Previous-employer certificate identity, as shown on the
-                    source Form 2316.
-                  </p>
-                  <label className='flex flex-col gap-1 text-sm'>
-                    Previous employer TIN
-                    <Input
-                      maxLength={32}
-                      value={previousEmployerTin}
-                      onChange={(event) =>
-                        setPreviousEmployerTin(event.target.value)
-                      }
-                    />
-                  </label>
-                  <label className='flex flex-col gap-1 text-sm'>
-                    Previous employer name
-                    <Input
-                      maxLength={255}
-                      value={previousEmployerName}
-                      onChange={(event) =>
-                        setPreviousEmployerName(event.target.value)
-                      }
-                    />
-                  </label>
-                  <label className='flex flex-col gap-1 text-sm sm:col-span-2'>
-                    Previous employer address
-                    <Input
-                      maxLength={512}
-                      value={previousEmployerAddress}
-                      onChange={(event) =>
-                        setPreviousEmployerAddress(event.target.value)
-                      }
-                    />
-                  </label>
-                  <label className='flex flex-col gap-1 text-sm'>
-                    Previous employer ZIP code
-                    <Input
-                      maxLength={10}
-                      value={previousEmployerPostal}
-                      onChange={(event) =>
-                        setPreviousEmployerPostal(event.target.value)
-                      }
-                    />
-                  </label>
-                  <label className='flex flex-col gap-1 text-sm'>
-                    Previous employer period from
-                    <Input
-                      type='date'
-                      value={previousEmployerFrom}
-                      onChange={(event) =>
-                        setPreviousEmployerFrom(event.target.value)
-                      }
-                    />
-                  </label>
-                  <label className='flex flex-col gap-1 text-sm'>
-                    Previous employer period to
-                    <Input
-                      type='date'
-                      value={previousEmployerTo}
-                      onChange={(event) =>
-                        setPreviousEmployerTo(event.target.value)
-                      }
-                    />
-                  </label>
-                </div>
-              ) : null}
-              <label className='flex flex-col gap-1 text-sm'>
-                Identity supporting source
-                <Input
-                  maxLength={512}
-                  value={certificateIdentitySource}
-                  onChange={(event) =>
-                    setCertificateIdentitySource(event.target.value)
-                  }
-                />
-              </label>
-              <label className='flex items-start gap-2 text-sm'>
-                <input
-                  type='checkbox'
-                  checked={certificateIdentityVerified}
-                  onChange={(event) =>
-                    setCertificateIdentityVerified(event.target.checked)
-                  }
-                />
-                I checked the tax identity and address details against source
-                documents.
-              </label>
-              <p className='text-xs text-muted-foreground'>
-                This verifies identity fields only. It does not generate Form
-                2316 or certify compensation totals, signatures, or tax
-                treatment.
-              </p>
-            </fieldset>
+              </fieldset>
+            ) : null}
             <label className='flex flex-col gap-1 text-sm'>
               Opening benefits already counted toward the ₱90,000 exemption
               <Input
@@ -485,6 +306,20 @@ function TaxYearDeclarationEditor({ initialData, taxYear, save }: EditorProps) {
                   opening date. These keep statutory category ceilings
                   continuous across employers and payroll history.
                 </p>
+                <label className='flex max-w-sm flex-col gap-1 text-sm'>
+                  Monetized unused-vacation days already exempted this year
+                  <Input
+                    type='number'
+                    min='0'
+                    max='12'
+                    step='1'
+                    value={openingUnusedVacationDays}
+                    onChange={(event) => setOpeningUnusedVacationDays(event.target.value)}
+                  />
+                  <span className='text-xs text-muted-foreground'>
+                    Enter the verified day count from source payroll records; leave blank only when there is no opening history to reconcile.
+                  </span>
+                </label>
                 <div className='grid gap-3 sm:grid-cols-2'>
                   {Object.entries({
                     uniform_clothing: 'Uniform/clothing · annual',

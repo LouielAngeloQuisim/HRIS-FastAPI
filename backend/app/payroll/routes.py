@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
@@ -39,7 +39,15 @@ from app.common.dependencies import CurrentUser, SessionDep
 from app.common.schemas import Message
 from app.config.settings import settings
 from app.employee.models import EmployeeRecords
-from app.leave.models import HolidayConfig, HolidayInstance, LeavePolicy, LeaveRequest
+from app.leave.models import (
+    EmployeeLeaveEnrollment,
+    HolidayConfig,
+    HolidayInstance,
+    LeaveLedgerEntry,
+    LeaveLedgerSource,
+    LeavePolicy,
+    LeaveRequest,
+)
 from app.payroll.annualized_tax import (
     calculate_annualized_compensation_tax,
     cumulative_average_required,
@@ -77,7 +85,6 @@ from app.payroll.models import (
     EmployeeTaxYearDeclaration,
     PayrollContributionLedger,
     PayrollDeliveryOutbox,
-    PayrollEmployerProfile,
     PayrollEntry,
     PayrollPayGroup,
     PayrollPolicyVersion,
@@ -112,6 +119,8 @@ from app.payroll.schemas import (
     EmployeeSalaryBulkPreflight,
     EmployeeSalaryBulkRequest,
     EmployeeSalaryCreate,
+    EmployeeSalaryIncrementRequest,
+    EmployeeSalaryIncrementResult,
     EmployeeSalaryRead,
     EmployeeSalaryUpdate,
     EmployeeTaxBenefitCreate,
@@ -140,8 +149,6 @@ from app.payroll.schemas import (
     PayrollDeliveryResendRequest,
     PayrollDeliveryStatusPublic,
     PayrollDraftRebuildRequest,
-    PayrollEmployerProfilePublic,
-    PayrollEmployerProfileUpdate,
     PayrollEntryRead,
     PayrollEntryReviewRequest,
     PayrollGenerateRequest,
@@ -619,96 +626,6 @@ def _confirmed_rest_day_factors(policy: dict[str, Any]) -> tuple[Decimal, Decima
             "Ordinary rest-day factors must be at least 1.30 regular and 1.69 overtime"
         )
     return regular, overtime
-
-
-@router.get(
-    "/employer-profile",
-    response_model=PayrollEmployerProfilePublic,
-    dependencies=[Depends(require_permission("payroll", "view"))],
-)
-def get_payroll_employer_profile(*, session: SessionDep) -> PayrollEmployerProfilePublic:
-    """Return the employer identity used on statutory payroll certificates."""
-    profile = session.get(PayrollEmployerProfile, "default")
-    if profile is None:
-        return PayrollEmployerProfilePublic(id="default")
-    return PayrollEmployerProfilePublic.model_validate(profile)
-
-
-@router.put(
-    "/employer-profile",
-    response_model=PayrollEmployerProfilePublic,
-    dependencies=[Depends(require_permission("payroll", "edit"))],
-)
-def save_payroll_employer_profile(
-    *,
-    session: SessionDep,
-    current_user: CurrentUser,
-    obj_in: PayrollEmployerProfileUpdate,
-) -> PayrollEmployerProfilePublic:
-    """Save the singleton employer identity profile; empty strings clear fields."""
-    profile = session.get(PayrollEmployerProfile, "default")
-    if profile is None:
-        profile = PayrollEmployerProfile(id="default")
-    changes = obj_in.model_dump(exclude_unset=True)
-    changed = any(
-        getattr(profile, field) != (value.strip() or None if isinstance(value, str) else value)
-        for field, value in changes.items()
-    )
-    for field, value in changes.items():
-        setattr(profile, field, value.strip() or None if isinstance(value, str) else value)
-    if changed:
-        profile.is_verified = False
-        profile.verified_by = None
-        profile.verified_at = None
-    profile.updated_by = current_user.id
-    profile.updated_at = datetime.now(timezone.utc)
-    session.add(profile)
-    session.commit()
-    session.refresh(profile)
-    return PayrollEmployerProfilePublic.model_validate(profile)
-
-
-@router.post(
-    "/employer-profile/verify",
-    response_model=PayrollEmployerProfilePublic,
-    dependencies=[Depends(require_permission("payroll", "approve"))],
-)
-def verify_payroll_employer_profile(
-    *, session: SessionDep, current_user: CurrentUser
-) -> PayrollEmployerProfilePublic:
-    """Record independent verification of all required employer certificate fields."""
-    profile = session.get(PayrollEmployerProfile, "default", with_for_update=True)
-    if profile is None:
-        raise HTTPException(status_code=409, detail="Save employer certificate details first")
-    required_fields = (
-        "tin_number",
-        "registered_name",
-        "registered_address",
-        "postal_code",
-        "rdo_code",
-        "employer_type",
-        "signatory_name",
-        "signatory_title",
-        "source_reference",
-    )
-    missing = [field for field in required_fields if not (getattr(profile, field) or "").strip()]
-    if missing:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Complete the employer profile and add a source note before verification. "
-                f"Missing fields: {', '.join(missing)}."
-            ),
-        )
-    profile.is_verified = True
-    profile.verified_by = current_user.id
-    profile.verified_at = datetime.now(timezone.utc)
-    profile.updated_by = current_user.id
-    profile.updated_at = profile.verified_at
-    session.add(profile)
-    session.commit()
-    session.refresh(profile)
-    return PayrollEmployerProfilePublic.model_validate(profile)
 
 
 def _payroll_review_counts(session: Session, run_id: uuid.UUID) -> tuple[int, int, int]:
@@ -1609,6 +1526,131 @@ def _bir_cumulative_average_was_used(
     )
 
 
+class _MealAttendanceEvidenceInvalid(ValueError):
+    """Fail-closed marker for attendance that no longer proves a BIR exemption."""
+
+
+def _verify_daily_meal_allowance_attendance(
+    *,
+    session: Session,
+    employee_id: uuid.UUID,
+    work_dates: list[date],
+) -> list[dict[str, Any]]:
+    """Require each claimed meal-allowance date to show approved OT or night work."""
+    records = session.exec(
+        select(DailyTimeRecord).where(
+            DailyTimeRecord.employee_id == employee_id,
+            col(DailyTimeRecord.work_date).in_(work_dates),
+            col(DailyTimeRecord.is_deleted).is_(False),
+        )
+    ).all()
+    by_date = {record.work_date: record for record in records}
+    zone = ZoneInfo("Asia/Manila")
+    evidence: list[dict[str, Any]] = []
+
+    for work_date in work_dates:
+        record = by_date.get(work_date)
+        if record is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"No active attendance record exists for qualifying meal-allowance date {work_date}.",
+            )
+        shift = session.get(Shift, record.shift_id) if record.shift_id else None
+        stored_intervals = session.exec(
+            select(DtrAttendanceInterval)
+            .where(
+                DtrAttendanceInterval.daily_time_record_id == record.id,
+                DtrAttendanceInterval.revision == record.interval_revision,
+            )
+            .order_by(col(DtrAttendanceInterval.sequence))
+        ).all()
+        evidence.append(
+            {
+                "record_id": str(record.id),
+                "work_date": work_date.isoformat(),
+                "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+                "interval_revision": record.interval_revision,
+                "rendered_minutes": record.rendered_minutes,
+                "overtime_minutes": record.overtime_minutes,
+                "overtime_approved_minutes": record.overtime_approved_minutes,
+                "login_at": record.login_date.isoformat() if record.login_date else None,
+                "logout_at": record.logout_date.isoformat() if record.logout_date else None,
+                "shift_id": str(record.shift_id) if record.shift_id else None,
+                "shift": (
+                    {
+                        "id": str(shift.id),
+                        "updated_at": shift.updated_at.isoformat() if shift.updated_at else None,
+                        "start_time": shift.start_time,
+                        "end_time": shift.end_time,
+                        "scheduled_minutes": shift.total_hours_minus_lunch,
+                        "unpaid_break_minutes": shift.lunch_break_duration,
+                        "days_of_week": shift.days_of_week,
+                        "is_deleted": shift.is_deleted,
+                    }
+                    if shift
+                    else None
+                ),
+                "intervals": [
+                    {
+                        "id": str(item.id),
+                        "revision": item.revision,
+                        "sequence": item.sequence,
+                        "start_at": item.start_at.isoformat(),
+                        "end_at": item.end_at.isoformat(),
+                        "created_at": item.created_at.isoformat() if item.created_at else None,
+                    }
+                    for item in stored_intervals
+                ],
+            }
+        )
+        if (record.overtime_approved_minutes or 0) > 0:
+            continue
+        if record.shift_id is None or record.rendered_minutes is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Attendance on {work_date} needs an assigned shift and calculated minutes to verify night work.",
+            )
+        if shift is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"The assigned shift for {work_date} is unavailable; night work cannot be verified.",
+            )
+        if stored_intervals:
+            intervals = [(item.start_at, item.end_at) for item in stored_intervals]
+        elif record.interval_revision > 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Attendance interval history for {work_date} is incomplete; night work cannot be verified.",
+            )
+        elif record.login_date is not None and record.logout_date is not None:
+            intervals = [(record.login_date, record.logout_date)]
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Attendance punches for {work_date} do not prove night work.",
+            )
+        try:
+            night_regular, night_overtime = allocate_night_work_minutes(
+                intervals,
+                scheduled_minutes=int(shift.total_hours_minus_lunch),
+                expected_worked_minutes=int(record.rendered_minutes),
+                approved_overtime_minutes=int(record.overtime_approved_minutes or 0),
+                unpaid_break_minutes=int(shift.lunch_break_duration),
+                zone=zone,
+            )
+        except (NightDifferentialInputError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Attendance for {work_date} cannot verify qualifying night work: {exc}",
+            ) from exc
+        if night_regular + night_overtime <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Attendance for {work_date} shows neither approved overtime nor work between 22:00 and 06:00.",
+            )
+    return evidence
+
+
 def _bir_tax_benefit_rows(
     session: Session,
     employee_id: uuid.UUID,
@@ -1617,7 +1659,9 @@ def _bir_tax_benefit_rows(
     through: date,
     opening_de_minimis_annual_ytd: dict[str, str] | None = None,
     opening_de_minimis_monthly_ytd: dict[str, str] | None = None,
-) -> list[dict[str, str]]:
+    opening_unused_vacation_leave_days_ytd: int | None = None,
+    opening_benefit_history_present: bool = False,
+) -> list[dict[str, Any]]:
     start = opening_as_of or date(tax_year, 1, 1) - timedelta(days=1)
     rows = session.exec(
         select(EmployeeTaxBenefit)
@@ -1650,42 +1694,183 @@ def _bir_tax_benefit_rows(
         category: Decimal(amount)
         for category, amount in (opening_de_minimis_annual_ytd or {}).items()
     }
-    result: list[dict[str, str]] = []
-    from app.payroll.de_minimis import calculate_de_minimis_allocation
+    result: list[dict[str, Any]] = []
+    from app.payroll.de_minimis import (
+        calculate_daily_meal_exemption,
+        calculate_de_minimis_allocation,
+        calculate_unused_vacation_leave_exemption,
+    )
+
+    unused_vacation_days_used = opening_unused_vacation_leave_days_ytd or 0
 
     for row in active_rows:
         gross = Decimal(row.gross_amount)
         category_excess = Decimal("0.00")
         category_exempt = Decimal("0.00")
+        calculation_blocker = ""
+        calculation_blocker_message = ""
+        attendance_evidence: list[dict[str, Any]] = []
+        vacation_leave_evidence: dict[str, Any] | None = None
         taxable_other_benefit = (
             gross if row.benefit_type in {"thirteenth_month", "other_benefit"}
             else Decimal("0.00")
         )
+        wage_order_dates_verified = False
+        if row.wage_order_effective_from is not None and row.qualifying_work_dates:
+            try:
+                wage_order_dates = [
+                    date.fromisoformat(day) for day in row.qualifying_work_dates
+                ]
+                wage_order_dates_verified = (
+                    len(wage_order_dates) == row.qualifying_days
+                    and len(set(wage_order_dates)) == len(wage_order_dates)
+                    and all(
+                        row.wage_order_effective_from <= work_date
+                        and (
+                            row.wage_order_effective_to is None
+                            or work_date <= row.wage_order_effective_to
+                        )
+                        for work_date in wage_order_dates
+                    )
+                )
+            except (TypeError, ValueError):
+                wage_order_dates_verified = False
         if row.benefit_type == "de_minimis":
             category = row.de_minimis_category
             if category is None:
                 raise ValueError("A de minimis record is missing its category")
             month_key = (row.paid_on.year, row.paid_on.month, category)
-            allocation = calculate_de_minimis_allocation(
-                current_paid={category: gross},
-                month_to_date_paid={
-                    category: monthly_paid.get(month_key, Decimal("0.00"))
-                },
-                year_to_date_paid={
-                    category: annual_paid.get(category, Decimal("0.00"))
-                },
-                other_benefits_exempt_remaining=Decimal("90000.00"),
-                evidence=set(row.eligibility_evidence or []),
-            )
-            category_excess = allocation.category_excess[category]
-            category_exempt = allocation.eligible_exempt[category]
+            try:
+                if category == "daily_meal_ot_night":
+                    if row.regional_daily_minimum_wage is None:
+                        raise ValueError("Regional daily minimum wage is missing")
+                    try:
+                        attendance_evidence = _verify_daily_meal_allowance_attendance(
+                            session=session,
+                            employee_id=employee_id,
+                            work_dates=[
+                                date.fromisoformat(day)
+                                for day in row.qualifying_work_dates or []
+                            ],
+                        )
+                    except HTTPException as exc:
+                        category_excess = gross
+                        calculation_blocker = "bir_meal_attendance_evidence_changed_or_unavailable"
+                        calculation_blocker_message = str(exc.detail)
+                        attendance_evidence = []
+                        raise _MealAttendanceEvidenceInvalid from exc
+                    allocation = calculate_daily_meal_exemption(
+                        gross_amount=gross,
+                        regional_daily_minimum_wage=row.regional_daily_minimum_wage,
+                        qualifying_days=int(row.qualifying_days or 0),
+                        evidence_verified=(
+                            "approved_overtime_or_night_shift_records"
+                            in (row.eligibility_evidence or [])
+                            and bool(row.region_code)
+                            and bool(row.wage_order_reference)
+                            and wage_order_dates_verified
+                        ),
+                    )
+                    category_excess = allocation.category_excess
+                    category_exempt = allocation.eligible_exempt
+                elif category == "monetized_unused_vacation_leave":
+                    if (
+                        (opening_as_of is not None or opening_benefit_history_present)
+                        and opening_unused_vacation_leave_days_ytd is None
+                    ):
+                        category_excess = gross
+                        calculation_blocker = "bir_unused_leave_opening_days_missing"
+                        calculation_blocker_message = (
+                            "Reconcile opening-year exempt monetized vacation-leave days before allocating the exemption."
+                        )
+                    else:
+                        ledger_reference = f"PayrollTaxBenefit:{row.id}"
+                        leave_debit = session.exec(
+                            select(LeaveLedgerEntry).where(
+                                LeaveLedgerEntry.employee_id == employee_id,
+                                LeaveLedgerEntry.policy_id == row.vacation_leave_policy_id,
+                                LeaveLedgerEntry.leave_year == row.tax_year,
+                                LeaveLedgerEntry.source == LeaveLedgerSource.CONSUMED,
+                                LeaveLedgerEntry.reference == ledger_reference,
+                                col(LeaveLedgerEntry.is_deleted).is_(False),
+                            )
+                        ).first()
+                        saved_evidence = row.eligibility_snapshot
+                        evidence_verified = bool(
+                            isinstance(saved_evidence, dict)
+                            and saved_evidence.get("policy_id")
+                            == str(row.vacation_leave_policy_id)
+                            and saved_evidence.get("policy_is_paid") is True
+                            and saved_evidence.get(
+                                "policy_tax_exempt_unused_vacation_leave"
+                            ) is True
+                            and saved_evidence.get("leave_year") == row.tax_year
+                            and saved_evidence.get("qualifying_days")
+                            == int(row.qualifying_days or 0)
+                            and saved_evidence.get("ledger_reference") == ledger_reference
+                            and leave_debit is not None
+                            and leave_debit.amount == -Decimal(row.qualifying_days or 0)
+                            and saved_evidence.get("enrollment_id")
+                            == str(leave_debit.enrollment_id)
+                        )
+                        vacation_leave_evidence = {
+                            "verified": evidence_verified,
+                            "snapshot": saved_evidence,
+                            "ledger_entry": (
+                                {
+                                    "id": str(leave_debit.id),
+                                    "source": str(getattr(leave_debit.source, "value", leave_debit.source)),
+                                    "amount": str(leave_debit.amount),
+                                    "reference": leave_debit.reference,
+                                    "updated_at": leave_debit.updated_at.isoformat()
+                                    if leave_debit.updated_at
+                                    else None,
+                                }
+                                if leave_debit is not None
+                                else None
+                            ),
+                        }
+                        if not evidence_verified:
+                            category_excess = gross
+                            calculation_blocker = "bir_unused_vacation_leave_balance_evidence_unavailable"
+                            calculation_blocker_message = (
+                                "A matching server-recorded leave-ledger deduction and verified vacation-policy snapshot are required before this exemption can be applied."
+                            )
+                        else:
+                            allocation = calculate_unused_vacation_leave_exemption(
+                                gross_amount=gross,
+                                qualifying_days=int(row.qualifying_days or 0),
+                                prior_exempt_days=unused_vacation_days_used,
+                                evidence_verified=True,
+                            )
+                            category_excess = allocation.category_excess
+                            category_exempt = allocation.eligible_exempt
+                            unused_vacation_days_used += allocation.exempt_days
+                else:
+                    category_allocation = calculate_de_minimis_allocation(
+                        current_paid={category: gross},
+                        month_to_date_paid={
+                            category: monthly_paid.get(month_key, Decimal("0.00"))
+                        },
+                        year_to_date_paid={
+                            category: annual_paid.get(category, Decimal("0.00"))
+                        },
+                        other_benefits_exempt_remaining=Decimal("90000.00"),
+                        evidence=set(row.eligibility_evidence or []),
+                    )
+                    category_excess = category_allocation.category_excess[category]
+                    category_exempt = category_allocation.eligible_exempt[category]
+            except (TypeError, ValueError, InvalidOperation) as exc:
+                category_excess = gross
+                if not calculation_blocker:
+                    calculation_blocker = "bir_de_minimis_evidence_invalid"
+                    calculation_blocker_message = str(exc)
             taxable_other_benefit = category_excess
-            monthly_paid[month_key] = monthly_paid.get(
-                month_key, Decimal("0.00")
-            ) + gross
-            annual_paid[category] = annual_paid.get(
-                category, Decimal("0.00")
-            ) + gross
+            if category not in {"daily_meal_ot_night", "monetized_unused_vacation_leave"}:
+                monthly_paid[month_key] = monthly_paid.get(
+                    month_key, Decimal("0.00")
+                ) + gross
+                annual_paid[category] = annual_paid.get(category, Decimal("0.00")) + gross
         result.append(
             {
                 "id": str(row.id),
@@ -1693,6 +1878,21 @@ def _bir_tax_benefit_rows(
                 "benefit_type": row.benefit_type,
                 "de_minimis_category": row.de_minimis_category or "",
                 "eligibility_evidence": ",".join(sorted(row.eligibility_evidence or [])),
+                "qualifying_days": str(row.qualifying_days or ""),
+                "qualifying_work_dates": ",".join(row.qualifying_work_dates or []),
+                "regional_daily_minimum_wage": str(row.regional_daily_minimum_wage or ""),
+                "region_code": row.region_code or "",
+                "wage_order_reference": row.wage_order_reference or "",
+                "wage_order_effective_from": row.wage_order_effective_from.isoformat()
+                if row.wage_order_effective_from
+                else "",
+                "wage_order_effective_to": row.wage_order_effective_to.isoformat()
+                if row.wage_order_effective_to
+                else "",
+                "calculation_blocker": calculation_blocker,
+                "calculation_blocker_message": calculation_blocker_message,
+                "attendance_evidence": attendance_evidence,
+                "vacation_leave_evidence": vacation_leave_evidence,
                 "gross_amount": str(gross),
                 "category_exempt_amount": str(category_exempt),
                 "category_excess_amount": str(category_excess),
@@ -1795,6 +1995,7 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
                 "opening_benefits_reconciled": tax_declaration.opening_benefits_reconciled,
                 "opening_de_minimis_annual_ytd": tax_declaration.opening_de_minimis_annual_ytd,
                 "opening_de_minimis_monthly_ytd": tax_declaration.opening_de_minimis_monthly_ytd,
+                "opening_unused_vacation_leave_days_ytd": tax_declaration.opening_unused_vacation_leave_days_ytd,
                 "opening_as_of": tax_declaration.opening_as_of.isoformat()
                 if tax_declaration.opening_as_of
                 else None,
@@ -1817,6 +2018,16 @@ def _payroll_entry_inputs_are_current(session: Session, entry: PayrollEntry) -> 
                 tax_declaration.opening_de_minimis_monthly_ytd
                 if tax_declaration
                 else None,
+                tax_declaration.opening_unused_vacation_leave_days_ytd
+                if tax_declaration
+                else None,
+                bool(
+                    tax_declaration
+                    and (
+                        tax_declaration.opening_benefits_reconciled
+                        or tax_declaration.previous_employer_included
+                    )
+                ),
             )
             if current_benefits != benefit_reference:
                 return False
@@ -5545,6 +5756,7 @@ def prepare_attendance_payroll_draft(
                 "opening_benefits_reconciled": tax_declaration.opening_benefits_reconciled,
                 "opening_de_minimis_annual_ytd": tax_declaration.opening_de_minimis_annual_ytd,
                 "opening_de_minimis_monthly_ytd": tax_declaration.opening_de_minimis_monthly_ytd,
+                "opening_unused_vacation_leave_days_ytd": tax_declaration.opening_unused_vacation_leave_days_ytd,
                 "opening_as_of": tax_declaration.opening_as_of.isoformat()
                 if tax_declaration.opening_as_of
                 else None,
@@ -5558,7 +5770,26 @@ def prepare_attendance_payroll_draft(
                 obj_in.date_to,
                 tax_declaration.opening_de_minimis_annual_ytd,
                 tax_declaration.opening_de_minimis_monthly_ytd,
+                tax_declaration.opening_unused_vacation_leave_days_ytd,
+                bool(
+                    tax_declaration.opening_benefits_reconciled
+                    or tax_declaration.previous_employer_included
+                ),
             )
+            seen_benefit_blockers = {blocker.code for blocker in blockers}
+            for benefit_row in snapshot["bir_tax_benefit_ledger"]:
+                blocker_code = benefit_row.get("calculation_blocker", "")
+                if blocker_code and blocker_code not in seen_benefit_blockers:
+                    blockers.append(
+                        PayrollPreflightBlocker(
+                            code=blocker_code,
+                            message=benefit_row.get(
+                                "calculation_blocker_message",
+                                "A de minimis benefit needs verified evidence before tax can be calculated.",
+                            ),
+                        )
+                    )
+                    seen_benefit_blockers.add(blocker_code)
         benefit_rows = snapshot.get("bir_tax_benefit_ledger", [])
         benefits_subject_to_shared_cap = sum(
             (
@@ -5822,16 +6053,6 @@ def prepare_attendance_payroll_draft(
                                     ),
                                 )
                             )
-                        if annualization_trigger == "termination_final_pay":
-                            blockers.append(
-                                PayrollPreflightBlocker(
-                                    code="bir_2316_termination_delivery_unavailable",
-                                    message=(
-                                        "BIR Form 2316 must be prepared and delivered with final compensation on termination; "
-                                        "this workflow does not yet generate or track the required certificate."
-                                    ),
-                                )
-                            )
                         opening_as_of = tax_declaration.opening_as_of
                         if (
                             opening_as_of is None
@@ -5891,6 +6112,13 @@ def prepare_attendance_payroll_draft(
                                 obj_in.date_to.year,
                                 opening_as_of,
                                 obj_in.date_to,
+                                tax_declaration.opening_de_minimis_annual_ytd,
+                                tax_declaration.opening_de_minimis_monthly_ytd,
+                                tax_declaration.opening_unused_vacation_leave_days_ytd,
+                                bool(
+                                    tax_declaration.opening_benefits_reconciled
+                                    or tax_declaration.previous_employer_included
+                                ),
                             )
                             benefits_gross = benefits_subject_to_shared_cap
                             benefits_exempt_current = min(
@@ -7806,6 +8034,121 @@ def record_employee_tax_year_benefit(
     if employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
     if obj_in.correction_of_id is None:
+        existing_source = session.exec(
+            select(EmployeeTaxBenefit.id).where(
+                EmployeeTaxBenefit.source_reference == obj_in.source_reference.strip()
+            )
+        ).first()
+        if existing_source is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="This payment source reference is already recorded; reconcile the existing benefit before retrying.",
+            )
+    vacation_policy: LeavePolicy | None = None
+    vacation_enrollment: EmployeeLeaveEnrollment | None = None
+    vacation_eligibility_snapshot: dict[str, Any] | None = None
+    if (
+        obj_in.de_minimis_category == "monetized_unused_vacation_leave"
+        and obj_in.correction_of_id is None
+    ):
+        assert obj_in.vacation_leave_policy_id is not None
+        vacation_policy = session.exec(
+            select(LeavePolicy)
+            .where(
+                LeavePolicy.id == obj_in.vacation_leave_policy_id,
+                col(LeavePolicy.is_deleted).is_(False),
+                col(LeavePolicy.is_active).is_(True),
+            )
+            .with_for_update()
+        ).first()
+        if (
+            vacation_policy is None
+            or not vacation_policy.is_paid
+            or not vacation_policy.tax_exempt_unused_vacation_leave
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Select an active paid vacation policy explicitly configured as eligible for unused-vacation monetization.",
+            )
+        vacation_enrollment = session.exec(
+            select(EmployeeLeaveEnrollment)
+            .where(
+                EmployeeLeaveEnrollment.employee_id == employee_id,
+                EmployeeLeaveEnrollment.policy_id == vacation_policy.id,
+                EmployeeLeaveEnrollment.leave_year == tax_year,
+                col(EmployeeLeaveEnrollment.is_active).is_(True),
+                col(EmployeeLeaveEnrollment.is_deleted).is_(False),
+            )
+            .with_for_update()
+        ).first()
+        if vacation_enrollment is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Employee has no active enrollment in this vacation policy for the tax year.",
+            )
+        available_days = session.exec(
+            select(func.coalesce(func.sum(LeaveLedgerEntry.amount), 0)).where(
+                LeaveLedgerEntry.employee_id == employee_id,
+                LeaveLedgerEntry.policy_id == vacation_policy.id,
+                LeaveLedgerEntry.leave_year == tax_year,
+                col(LeaveLedgerEntry.is_deleted).is_(False),
+            )
+        ).one()
+        available_days = Decimal(str(available_days))
+        if obj_in.qualifying_days is None or available_days < Decimal(obj_in.qualifying_days):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Insufficient unused vacation leave balance: {available_days} day(s) are available.",
+            )
+        vacation_eligibility_snapshot = {
+            "policy_id": str(vacation_policy.id),
+            "policy_code": vacation_policy.code,
+            "policy_name": vacation_policy.name,
+            "policy_is_paid": vacation_policy.is_paid,
+            "policy_tax_exempt_unused_vacation_leave": vacation_policy.tax_exempt_unused_vacation_leave,
+            "enrollment_id": str(vacation_enrollment.id),
+            "leave_year": tax_year,
+            "available_days_before": str(available_days),
+            "qualifying_days": obj_in.qualifying_days,
+            "available_days_after": str(available_days - Decimal(obj_in.qualifying_days)),
+        }
+    if (
+        obj_in.de_minimis_category == "daily_meal_ot_night"
+        and obj_in.correction_of_id is None
+    ):
+        _verify_daily_meal_allowance_attendance(
+            session=session,
+            employee_id=employee_id,
+            work_dates=obj_in.qualifying_work_dates or [],
+        )
+        existing_benefits = session.exec(
+            select(EmployeeTaxBenefit).where(
+                EmployeeTaxBenefit.employee_id == employee_id,
+                EmployeeTaxBenefit.tax_year == tax_year,
+                EmployeeTaxBenefit.de_minimis_category == "daily_meal_ot_night",
+            )
+        ).all()
+        reversed_benefit_ids = {
+            row.correction_of_id
+            for row in existing_benefits
+            if row.correction_of_id is not None
+        }
+        already_claimed_dates = {
+            date.fromisoformat(day)
+            for row in existing_benefits
+            if row.correction_of_id is None and row.id not in reversed_benefit_ids
+            for day in row.qualifying_work_dates or []
+        }
+        duplicate_dates = already_claimed_dates.intersection(
+            obj_in.qualifying_work_dates or []
+        )
+        if duplicate_dates:
+            duplicate_list = ", ".join(sorted(day.isoformat() for day in duplicate_dates))
+            raise HTTPException(
+                status_code=409,
+                detail=f"Meal allowance attendance dates were already claimed: {duplicate_list}. Reverse the prior record before replacing it.",
+            )
+    if obj_in.correction_of_id is None:
         if obj_in.gross_amount <= 0 or obj_in.correction_reason is not None:
             raise HTTPException(
                 status_code=422,
@@ -7833,6 +8176,15 @@ def record_employee_tax_year_benefit(
             or original.benefit_type != obj_in.benefit_type
             or original.de_minimis_category != obj_in.de_minimis_category
             or original.eligibility_evidence != obj_in.eligibility_evidence
+            or original.qualifying_days != obj_in.qualifying_days
+            or (original.qualifying_work_dates or [])
+            != [day.isoformat() for day in (obj_in.qualifying_work_dates or [])]
+            or original.regional_daily_minimum_wage != obj_in.regional_daily_minimum_wage
+            or original.region_code != obj_in.region_code
+            or original.wage_order_reference != obj_in.wage_order_reference
+            or original.wage_order_effective_from != obj_in.wage_order_effective_from
+            or original.wage_order_effective_to != obj_in.wage_order_effective_to
+            or original.vacation_leave_policy_id != obj_in.vacation_leave_policy_id
             or obj_in.gross_amount != -original.gross_amount
         ):
             raise HTTPException(
@@ -7846,6 +8198,8 @@ def record_employee_tax_year_benefit(
         ).first()
         if correction_exists:
             raise HTTPException(status_code=409, detail="This benefit record was already reversed.")
+        if original.de_minimis_category == "monetized_unused_vacation_leave":
+            vacation_eligibility_snapshot = original.eligibility_snapshot
     finalized_snapshots = session.exec(
         select(PayrollEntry.input_snapshot)
         .join(PayrollRun, col(PayrollEntry.payroll_run_id) == col(PayrollRun.id))
@@ -7874,6 +8228,21 @@ def record_employee_tax_year_benefit(
         benefit_type=obj_in.benefit_type,
         de_minimis_category=obj_in.de_minimis_category,
         eligibility_evidence=obj_in.eligibility_evidence,
+        qualifying_days=obj_in.qualifying_days,
+        qualifying_work_dates=(
+            [day.isoformat() for day in obj_in.qualifying_work_dates]
+            if obj_in.qualifying_work_dates is not None
+            else None
+        ),
+        regional_daily_minimum_wage=obj_in.regional_daily_minimum_wage,
+        region_code=obj_in.region_code.strip() if obj_in.region_code else None,
+        wage_order_reference=(
+            obj_in.wage_order_reference.strip() if obj_in.wage_order_reference else None
+        ),
+        wage_order_effective_from=obj_in.wage_order_effective_from,
+        wage_order_effective_to=obj_in.wage_order_effective_to,
+        vacation_leave_policy_id=obj_in.vacation_leave_policy_id,
+        eligibility_snapshot=vacation_eligibility_snapshot,
         gross_amount=obj_in.gross_amount,
         source_reference=obj_in.source_reference.strip(),
         correction_of_id=obj_in.correction_of_id,
@@ -7881,13 +8250,57 @@ def record_employee_tax_year_benefit(
         created_by=current_user.id,
     )
     session.add(row)
+    if obj_in.de_minimis_category == "monetized_unused_vacation_leave":
+        if obj_in.correction_of_id is None:
+            assert vacation_enrollment is not None
+            assert obj_in.qualifying_days is not None
+            ledger_reference = f"PayrollTaxBenefit:{row.id}"
+            if vacation_eligibility_snapshot is not None:
+                vacation_eligibility_snapshot["ledger_reference"] = ledger_reference
+                row.eligibility_snapshot = vacation_eligibility_snapshot
+            session.add(
+                LeaveLedgerEntry(
+                    employee_id=employee_id,
+                    policy_id=obj_in.vacation_leave_policy_id,
+                    enrollment_id=vacation_enrollment.id,
+                    leave_year=tax_year,
+                    source=LeaveLedgerSource.CONSUMED,
+                    amount=-Decimal(obj_in.qualifying_days),
+                    reference=ledger_reference,
+                    note="Unused vacation leave monetized as a paid de minimis benefit",
+                    actor_user_id=current_user.id,
+                )
+            )
+        else:
+            assert original is not None
+            original_snapshot = original.eligibility_snapshot or {}
+            enrollment_id = original_snapshot.get("enrollment_id")
+            if not enrollment_id or obj_in.qualifying_days is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The original vacation-leave benefit has no reversible ledger evidence.",
+                )
+            session.add(
+                LeaveLedgerEntry(
+                    employee_id=employee_id,
+                    policy_id=original.vacation_leave_policy_id,
+                    enrollment_id=uuid.UUID(enrollment_id),
+                    leave_year=tax_year,
+                    source=LeaveLedgerSource.REVERSAL,
+                    amount=Decimal(obj_in.qualifying_days),
+                    reference=f"PayrollTaxBenefitReversal:{original.id}",
+                    original_year=tax_year,
+                    note=f"Reversal of monetized vacation leave: {obj_in.correction_reason}",
+                    actor_user_id=current_user.id,
+                )
+            )
     try:
         session.commit()
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(
             status_code=409,
-            detail="A benefit record with this employee, year, type and source reference already exists.",
+            detail="This benefit payment or its linked leave-ledger entry already exists; reconcile the saved record before retrying.",
         ) from exc
     session.refresh(row)
     return EmployeeTaxBenefitPublic.model_validate(row)
@@ -8024,22 +8437,13 @@ def upsert_employee_tax_year_declaration(
             status_code=409,
             detail="Tax-year opening inputs are locked after payroll finalization; use the reasoned tax correction workflow.",
         )
-    for key, value in obj_in.model_dump(
-        exclude={"is_verified", "certificate_identity_verified"}
-    ).items():
+    for key, value in obj_in.model_dump(exclude={"is_verified"}).items():
         if isinstance(value, str):
             value = value.strip() or None
         setattr(row, key, value)
     row.is_verified = obj_in.is_verified
     row.verified_by = current_user.id if obj_in.is_verified else None
     row.verified_at = now if obj_in.is_verified else None
-    row.certificate_identity_verified = obj_in.certificate_identity_verified
-    row.certificate_identity_verified_by = (
-        current_user.id if obj_in.certificate_identity_verified else None
-    )
-    row.certificate_identity_verified_at = (
-        now if obj_in.certificate_identity_verified else None
-    )
     row.updated_at = now
     session.add(row)
     session.commit()
@@ -8081,6 +8485,7 @@ def list_salary_roster(
     session: SessionDep,
     as_of: date | None = Query(default=None),
     missing_salary: bool = False,
+    search: str | None = Query(default=None, min_length=1, max_length=120),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> PayrollSalaryRosterList:
@@ -8100,12 +8505,25 @@ def list_salary_roster(
         col(EmployeeRecords.is_deleted).is_(False),
         EmployeeRecords.employee_status == "Active",
     )
+    if search and search.strip():
+        term = search.strip()
+        search_filter = or_(
+            col(EmployeeRecords.employee_code).contains(term, autoescape=True),
+            col(EmployeeRecords.first_name).contains(term, autoescape=True),
+            col(EmployeeRecords.last_name).contains(term, autoescape=True),
+            func.concat(EmployeeRecords.first_name, " ", EmployeeRecords.last_name).contains(
+                term, autoescape=True
+            ),
+        )
+        base = base.where(search_filter)
     if missing_salary:
         base = base.where(~has_salary)
     statement = select(EmployeeRecords, has_salary.label("has_effective_salary")).where(
         col(EmployeeRecords.is_deleted).is_(False),
         EmployeeRecords.employee_status == "Active",
     )
+    if search and search.strip():
+        statement = statement.where(search_filter)
     if missing_salary:
         statement = statement.where(~has_salary)
     rows = session.exec(
@@ -8125,6 +8543,240 @@ def list_salary_roster(
             for employee, has_salary_result in rows
         ],
         count=count,
+    )
+
+
+def _salary_increment_preview(
+    *, session: Session, request: EmployeeSalaryIncrementRequest, actor_id: uuid.UUID
+) -> EmployeeSalaryIncrementResult:
+    issues: list[EmployeeSalaryBulkIssue] = []
+    changes = []
+    employees = session.exec(
+        select(EmployeeRecords)
+        .where(
+            col(EmployeeRecords.id).in_(request.employee_ids),
+            col(EmployeeRecords.is_deleted).is_(False),
+            EmployeeRecords.employee_status == "Active",
+        )
+        .order_by(col(EmployeeRecords.id))
+    ).all()
+    employee_ids = {employee.id for employee in employees}
+    employee_by_id = {employee.id: employee for employee in employees}
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            request.model_dump(mode="json", exclude={"batch_id"}),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    batch = session.get(EmployeeSalaryBulkBatch, request.batch_id)
+    if batch is not None and (
+        batch.created_by != actor_id or batch.payload_fingerprint != fingerprint
+    ):
+        issues.append(
+            EmployeeSalaryBulkIssue(
+                row_index=0,
+                employee_id=request.employee_ids[0],
+                code="batch_identity_conflict",
+                message="This batch ID belongs to another request; create a new batch for different employees or values.",
+            )
+        )
+    for index, employee_id in enumerate(request.employee_ids):
+        if employee_id not in employee_ids:
+            issues.append(
+                EmployeeSalaryBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="employee_unavailable",
+                    message="Employee is missing, inactive, or unavailable.",
+                )
+            )
+            continue
+        if session.exec(
+            select(EmployeeSalary.id).where(
+                EmployeeSalary.employee_id == employee_id,
+                EmployeeSalary.effective_date == request.effective_date,
+            )
+        ).first():
+            issues.append(
+                EmployeeSalaryBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="effective_date_conflict",
+                    message="A salary already starts on the selected date; choose another effective date or resolve that record.",
+                )
+            )
+            continue
+        finalized_run = session.exec(
+            select(PayrollRun.id)
+            .join(PayrollEntry, col(PayrollEntry.payroll_run_id) == col(PayrollRun.id))
+            .where(
+                PayrollEntry.employee_id == employee_id,
+                col(PayrollEntry.is_deleted).is_(False),
+                PayrollRun.workflow_status == "finalized",
+                col(PayrollRun.is_deleted).is_(False),
+                PayrollRun.date_to >= request.effective_date,
+            )
+            .limit(1)
+        ).first()
+        if finalized_run is not None:
+            issues.append(
+                EmployeeSalaryBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="finalized_payroll_coverage",
+                    message="A finalized payroll covers or follows this date; use the reasoned payroll correction workflow instead.",
+                )
+            )
+            continue
+        current = session.exec(
+            select(EmployeeSalary)
+            .where(
+                EmployeeSalary.employee_id == employee_id,
+                EmployeeSalary.effective_date <= request.effective_date,
+                col(EmployeeSalary.is_active).is_(True),
+                col(EmployeeSalary.is_deleted).is_(False),
+            )
+            .order_by(col(EmployeeSalary.effective_date).desc(), col(EmployeeSalary.id))
+            .limit(1)
+        ).first()
+        if current is None:
+            issues.append(
+                EmployeeSalaryBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="salary_missing",
+                    message="No active salary exists on the effective date; set up the employee's salary first.",
+                )
+            )
+            continue
+        proposed = (current.basic_rate + request.increment).quantize(Decimal("0.01"))
+        if proposed > Decimal("9999999999.99"):
+            issues.append(
+                EmployeeSalaryBulkIssue(
+                    row_index=index,
+                    employee_id=employee_id,
+                    code="rate_out_of_range",
+                    message="The proposed salary exceeds the supported PHP rate range.",
+                )
+            )
+            continue
+        changes.append(
+            {
+                "employee_id": employee_id,
+                "employee_code": employee_by_id[employee_id].employee_code,
+                "employee_name": " ".join(
+                    part
+                    for part in (
+                        employee_by_id[employee_id].first_name,
+                        employee_by_id[employee_id].last_name,
+                    )
+                    if part
+                ),
+                "current_salary_id": current.id,
+                "current_rate": current.basic_rate,
+                "proposed_rate": proposed,
+                "pay_type": current.pay_type,
+            }
+        )
+    return EmployeeSalaryIncrementResult(
+        batch_id=request.batch_id,
+        valid=not issues,
+        issues=issues,
+        changes=changes,
+    )
+
+
+@router.post(
+    "/salaries/bulk/increment/preview",
+    response_model=EmployeeSalaryIncrementResult,
+    dependencies=[Depends(require_permission("payroll", "view"))],
+)
+def preview_salary_increment(
+    *, session: SessionDep, current_user: CurrentUser, request: EmployeeSalaryIncrementRequest
+) -> EmployeeSalaryIncrementResult:
+    return _salary_increment_preview(session=session, request=request, actor_id=current_user.id)
+
+
+@router.post(
+    "/salaries/bulk/increment/commit",
+    response_model=EmployeeSalaryIncrementResult,
+    dependencies=[Depends(require_permission("payroll", "edit"))],
+)
+def commit_salary_increment(
+    *, session: SessionDep, current_user: CurrentUser, request: EmployeeSalaryIncrementRequest
+) -> EmployeeSalaryIncrementResult:
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            request.model_dump(mode="json", exclude={"batch_id"}),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    lock_key = int.from_bytes(request.batch_id.bytes[:8], "big", signed=True)
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+    lock_payroll_roster(session)
+    existing = session.get(EmployeeSalaryBulkBatch, request.batch_id)
+    if existing is not None:
+        if existing.created_by != current_user.id or existing.payload_fingerprint != fingerprint:
+            raise HTTPException(status_code=409, detail="Salary increment batch ID was used with different data.")
+        ids = [uuid.UUID(value) for value in existing.result_salary_ids]
+        rows = session.exec(select(EmployeeSalary).where(col(EmployeeSalary.id).in_(ids))).all()
+        if len(rows) != len(ids):
+            raise HTTPException(status_code=409, detail="Saved salary increment result is incomplete; contact payroll support.")
+        return EmployeeSalaryIncrementResult(
+            batch_id=request.batch_id,
+            valid=True,
+            replayed=True,
+            salaries=[EmployeeSalaryRead.model_validate(row) for row in rows],
+        )
+    preview = _salary_increment_preview(session=session, request=request, actor_id=current_user.id)
+    if not preview.valid:
+        raise HTTPException(status_code=422, detail={"message": "Salary increment has conflicts; no rows were saved.", "issues": [issue.model_dump(mode="json") for issue in preview.issues]})
+    current_by_id = {
+        row.id: row
+        for row in session.exec(
+            select(EmployeeSalary)
+            .where(col(EmployeeSalary.id).in_([change.current_salary_id for change in preview.changes]))
+            .with_for_update()
+        ).all()
+    }
+    new_rows: list[EmployeeSalary] = []
+    for change in preview.changes:
+        current = current_by_id.get(change.current_salary_id)
+        if current is None or current.basic_rate != change.current_rate:
+            session.rollback()
+            raise HTTPException(status_code=409, detail="A selected salary changed after preview; reload and preview the increment again.")
+        new_rows.append(EmployeeSalary(
+            employee_id=change.employee_id,
+            basic_rate=change.proposed_rate,
+            currency=current.currency,
+            effective_date=request.effective_date,
+            pay_type=current.pay_type,
+            overtime_rate=current.overtime_rate,
+            absent_penalty_rate=current.absent_penalty_rate,
+            non_taxable_allowance=current.non_taxable_allowance,
+            de_minimis_monthly=current.de_minimis_monthly,
+            thirteenth_month_exempt_portion=current.thirteenth_month_exempt_portion,
+            is_active=True,
+        ))
+    session.add_all(new_rows)
+    session.flush()
+    session.add(EmployeeSalaryBulkBatch(
+        id=request.batch_id,
+        payload_fingerprint=fingerprint,
+        created_by=current_user.id,
+        result_salary_ids=[str(row.id) for row in new_rows],
+    ))
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Salary changed while saving; preview again. No partial increments were saved.") from exc
+    return EmployeeSalaryIncrementResult(
+        batch_id=request.batch_id,
+        valid=True,
+        salaries=[EmployeeSalaryRead.model_validate(row) for row in new_rows],
     )
 
 
@@ -8241,6 +8893,7 @@ def commit_salary_bulk(
     fingerprint = _salary_bulk_fingerprint(request)
     lock_key = int.from_bytes(request.batch_id.bytes[:8], "big", signed=True)
     session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+    lock_payroll_roster(session)
     existing_batch = session.get(EmployeeSalaryBulkBatch, request.batch_id)
     if existing_batch is not None:
         if (
@@ -8339,6 +8992,7 @@ async def create_employee_salary(
     salary: EmployeeSalaryCreate,
 ) -> EmployeeSalaryRead:
     """Create salary record for employee."""
+    lock_payroll_roster(session)
     db_salary = EmployeeSalary.model_validate(salary)
     db_salary.employee_id = employee_id
     session.add(db_salary)
@@ -8359,6 +9013,7 @@ async def update_employee_salary(
     salary: EmployeeSalaryUpdate,
 ) -> EmployeeSalaryRead:
     """Update employee salary record (sparse delta; untouched fields preserved)."""
+    lock_payroll_roster(session)
     db_salary = session.get(EmployeeSalary, salary_id)
     if not db_salary:
         raise HTTPException(status_code=404, detail="Employee salary not found")
@@ -8385,6 +9040,7 @@ async def delete_employee_salary(
 ) -> Message:
     """Soft-delete an employee salary record. The employee remains intact;
     history is preserved via ``is_deleted`` / ``deleted_at``."""
+    lock_payroll_roster(session)
     db_salary = session.get(EmployeeSalary, salary_id)
     if db_salary is None or db_salary.is_deleted:
         raise HTTPException(status_code=404, detail="Employee salary not found")

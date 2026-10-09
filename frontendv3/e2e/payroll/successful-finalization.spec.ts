@@ -102,7 +102,7 @@ test('fictional attendance payroll is independently reviewed, finalized, and sch
   // Recover this employee from the missing-salary roster through the bulk UI.
   await page.goto('/payroll/salary')
   await page.getByLabel('Only employees without an effective salary').check()
-  await expect(page.getByLabel(`Select ${employee.employee_code}`)).toBeVisible()
+  await expect(page.getByLabel(`Select ${employee.employee_code}`, { exact: true })).toBeVisible()
   await page.getByLabel(`Select ${employee.employee_code}`, { exact: true }).check()
   await page.getByLabel(`${employee.employee_code} basic rate`).fill('26000.00')
   await page.getByLabel(`${employee.employee_code} salary basis`).selectOption('monthly')
